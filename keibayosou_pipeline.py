@@ -277,7 +277,6 @@ def _exclude_races_with_missing_history(
 # 追加で作るシート名（過去の出力と互換）
 # ================================================================
 BET_SHEET = "買い目_レース別1行"
-B35_SHEET = "B35_レース別1行"
 
 
 # ================================================================
@@ -305,18 +304,16 @@ def _to_float_safe(x: object) -> Optional[float]:
         return None
 
 
-def _build_bet_and_b35_sheets(
+def _build_bet_sheet(
     feat_export: pd.DataFrame,
     now_export: pd.DataFrame,
     odds_df: Optional[pd.DataFrame] = None,
     gap_min: float = 3.5,
     extra_th: float = 0.8,
     rest_th: float = 0.4,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> pd.DataFrame:
     """TARGET（feat_export）と今走（now_export）から
-    - 買い目_レース別1行
-    - B35_レース別1行
-    を作る。
+    買い目_レース別1行 を作る。
 
     ここでのポイント（過去出力の互換）：
     - score1/score2/gap12 は「上位2頭（同点含む）」で計算
@@ -389,7 +386,6 @@ def _build_bet_and_b35_sheets(
         rest_col = "休養×距離差リスク"
 
     bet_rows: list[dict] = []
-    b35_rows: list[dict] = []
 
     for rid, sub in ft.groupby("rid_str", sort=True):
         # 上位馬番（同点は馬番昇順）を取る
@@ -492,30 +488,6 @@ def _build_bet_and_b35_sheets(
             }
         )
 
-        # B35 は「gap12>=3.5 のレースだけ」 1レース1行
-        if gap12 >= gap_min:
-            b35_rows.append(
-                {
-                    "レースID": info_row.get("レースID", rid),
-                    "レース名": info_row.get("レース名", pd.NA),
-                    "発走時刻": info_row.get("発走時刻", pd.NA),
-                    "場所": info_row.get("場所", pd.NA),
-                    "コース": info_row.get("コース", pd.NA),
-                    "馬場": info_row.get("馬場", pd.NA),
-                    "頭数": info_row.get("頭数", pd.NA),
-                    "レース種別": info_row.get("レース種別", pd.NA),
-                    "クラス": info_row.get("クラス", pd.NA),
-                    "馬番1": horses7[0],
-                    "馬番2": horses7[1],
-                    "馬番3": horses7[2],
-                    "馬番4": horses7[3],
-                    "馬番5": horses7[4],
-                    "馬番6": horses7[5],
-                    "馬番7": horses7[6],
-                    "_score_gap_12": gap12,
-                }
-            )
-
     bet_df = pd.DataFrame(bet_rows)
     bet_cols = [
         "レースID",
@@ -550,32 +522,7 @@ def _build_bet_and_b35_sheets(
             bet_df[c] = pd.NA
     bet_df = bet_df[bet_cols]
 
-    b35_df = pd.DataFrame(b35_rows)
-    b35_cols = [
-        "レースID",
-        "レース名",
-        "発走時刻",
-        "場所",
-        "コース",
-        "馬場",
-        "頭数",
-        "レース種別",
-        "クラス",
-        "馬番1",
-        "馬番2",
-        "馬番3",
-        "馬番4",
-        "馬番5",
-        "馬番6",
-        "馬番7",
-        "_score_gap_12",
-    ]
-    for c in b35_cols:
-        if c not in b35_df.columns:
-            b35_df[c] = pd.NA
-    b35_df = b35_df[b35_cols]
-
-    return bet_df, b35_df
+    return bet_df
 
 
 # ================================================================
@@ -620,11 +567,10 @@ def write_features_to_excel(
 
     # ★追加：買い目シートを生成
     try:
-        bet_df, b35_df = _build_bet_and_b35_sheets(feat_export=feat_export, now_export=now_export, odds_df=odds_df)
+        bet_df = _build_bet_sheet(feat_export=feat_export, now_export=now_export, odds_df=odds_df)
     except Exception as e:
-        print(f"[WARN] '{BET_SHEET}' / '{B35_SHEET}' の作成に失敗したためスキップします: {e}")
+        print(f"[WARN] '{BET_SHEET}' の作成に失敗したためスキップします: {e}")
         bet_df = pd.DataFrame()
-        b35_df = pd.DataFrame()
 
     with pd.ExcelWriter(out_excel, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
         feat_export.to_excel(writer, sheet_name=TARGET_SHEET, index=False)
