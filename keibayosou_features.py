@@ -317,6 +317,12 @@ def _safe_series_mean(s: pd.Series) -> float:
     return float(s_num.mean()) if not s_num.dropna().empty else np.nan
 
 
+def _safe_recent_mean(s: pd.Series, n: int = 3) -> float:
+    """日付降順に並んだ Series から、直近 n 件の平均を返す。"""
+    s_num = pd.to_numeric(s, errors="coerce").dropna()
+    return float(s_num.head(n).mean()) if not s_num.empty else np.nan
+
+
 def _calc_contextual_last3f_features(
     one: pd.DataFrame,
     now_place: str,
@@ -565,6 +571,13 @@ def _compute_horse_features_from_race_sheets(
                 one["__date__"] = one[c_date].map(_parse_yyyymmdd)
                 one = one.sort_values("__date__", ascending=False, kind="mergesort")
 
+            finish_s = _to_float_series(one[c_finish]) if c_finish else pd.Series(dtype=float)
+            pop_s = _to_float_series(one[c_pop]) if c_pop else pd.Series(dtype=float)
+            dist_s = one[c_dist].map(_parse_distance_m) if c_dist else pd.Series(dtype=float)
+            last3_s = _to_float_series(one[c_last3f]) if c_last3f else pd.Series(dtype=float)
+            margin_s = _to_float_series(one[c_margin]) if c_margin else pd.Series(dtype=float)
+            time_idx_s = _to_float_series(one[c_time_idx]) if c_time_idx else pd.Series(dtype=float)
+
             ta_n = float(len(one)) if not one.empty else 0.0
             avg_finish = float(finish_s.mean()) if not finish_s.dropna().empty else np.nan
             avg_pop = float(pop_s.mean()) if not pop_s.dropna().empty else np.nan
@@ -572,6 +585,25 @@ def _compute_horse_features_from_race_sheets(
             avg_last3f = float(last3_s.mean()) if not last3_s.dropna().empty else np.nan
             avg_margin = float(margin_s.mean()) if not margin_s.dropna().empty else np.nan
             avg_time_idx = float(time_idx_s.mean()) if not time_idx_s.dropna().empty else np.nan
+            recent3_finish = _safe_recent_mean(finish_s, n=3)
+            recent3_pop = _safe_recent_mean(pop_s, n=3)
+            recent3_last3f = _safe_recent_mean(last3_s, n=3)
+            recent3_time_idx = _safe_recent_mean(time_idx_s, n=3)
+            recent_finish_trend = (
+                avg_finish - recent3_finish
+                if not np.isnan(avg_finish) and not np.isnan(recent3_finish)
+                else np.nan
+            )
+            recent_pop_trend = (
+                avg_pop - recent3_pop
+                if not np.isnan(avg_pop) and not np.isnan(recent3_pop)
+                else np.nan
+            )
+            recent_time_idx_trend = (
+                recent3_time_idx - avg_time_idx
+                if not np.isnan(recent3_time_idx) and not np.isnan(avg_time_idx)
+                else np.nan
+            )
 
             now_dist = _parse_distance_m(r_now.get("コース")) if "コース" in now.columns else None
             if now_dist is None or (isinstance(now_dist, float) and np.isnan(now_dist)):
@@ -671,6 +703,13 @@ def _compute_horse_features_from_race_sheets(
                     "avg_last3f": avg_last3f,
                     "avg_margin": avg_margin,
                     "avg_time_idx": avg_time_idx,
+                    "recent3_finish": recent3_finish,
+                    "recent3_pop": recent3_pop,
+                    "recent3_last3f": recent3_last3f,
+                    "recent3_time_idx": recent3_time_idx,
+                    "recent_finish_trend": recent_finish_trend,
+                    "recent_pop_trend": recent_pop_trend,
+                    "recent_time_idx_trend": recent_time_idx_trend,
                     "win_rate": win_rate,
                     "fast_score": fast_score,
                     "avg_score": avg_score,
