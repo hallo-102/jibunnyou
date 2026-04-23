@@ -471,7 +471,7 @@ def _build_training_dataframe(path: Path = TRAIN_XLSX) -> pd.DataFrame:
 
         name = df[c_name]
         finish = pd.to_numeric(df[c_finish], errors="coerce")
-        race_id = df[c_race_id].astype(str).str.replace(r"\D", "", regex=True)
+        race_id = _normalize_rid_series(df[c_race_id])
         race_id_ok = race_id.str.len() == 12
 
         mask = name.notna() & finish.notna() & race_id_ok
