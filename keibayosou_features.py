@@ -493,7 +493,11 @@ def _compute_horse_features_from_race_sheets(
         now["now_surface"] = ""
         now["now_dist"] = pd.NA
 
-    field_size_map = now.groupby("rid_str")["頭数"].first().map(lambda x: int(_to_float(x) or 0) if pd.notna(x) else None).to_dict() if "頭数" in now.columns else {}
+    def _to_field_size(x: Any) -> int:
+        v = _to_float(x)
+        return 0 if pd.isna(v) else int(v)
+
+    field_size_map = now.groupby("rid_str")["頭数"].first().map(_to_field_size).to_dict() if "頭数" in now.columns else {}
 
     now_date = None
     if raceday and re.fullmatch(r"\d{8}", raceday):
