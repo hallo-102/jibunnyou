@@ -76,12 +76,26 @@ def _normalize_rid_series(s: pd.Series) -> pd.Series:
     - Excel 由来で float64（末尾 .0）になるケースを Int64 → 文字列に寄せる
     - 文字列の場合も数字以外を除去して寄せる
     """
-    s_digits = s.astype(str).str.strip().str.replace(r"\D", "", regex=True)
-    num = pd.to_numeric(s, errors="coerce")
-    num_str = num.astype("Int64").astype(str).replace("<NA>", pd.NA)
-    out = s_digits.where(s_digits.notna() & (s_digits != ""), num_str).fillna("").astype(str)
-    out = out.map(lambda x: x[-12:] if isinstance(x, str) and len(x) > 12 else x)
-    return out
+    def _normalize_one(v: Any) -> str:
+        if pd.isna(v):
+            return ""
+        text = str(v).strip()
+        if text == "" or text.lower() == "nan" or text == "<NA>":
+            return ""
+
+        m = re.fullmatch(r"(\d+)(?:\.0+)?", text)
+        if m:
+            digits = m.group(1)
+        else:
+            num = pd.to_numeric(text, errors="coerce")
+            if pd.notna(num) and float(num).is_integer():
+                digits = str(int(num))
+            else:
+                digits = re.sub(r"\D", "", text)
+
+        return digits[-12:] if len(digits) > 12 else digits
+
+    return s.map(_normalize_one).astype(str)
 
 
 def _normalize_umaban_series(s: pd.Series) -> pd.Series:
