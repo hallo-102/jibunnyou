@@ -21,7 +21,7 @@ races_review/
 scripts/
 src/
 tests/
-tokutyouryou_keisann/
+tokutyouryou_keisann/*/
 yosou_py/
 yosou_py_backup_20260412/
 yosou_py_backup_20260419/
