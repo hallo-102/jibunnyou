@@ -78,10 +78,12 @@ try:
         PEN_CLOSE_LOSS_MARGIN_TH,
         PEN_CLOSE_LOSS_K,
         PEN_CLOSE_LOSS_APPLY_WINRATE_MAX,
+        EMPIRICAL_WEIGHT_SIGN_GUARD,
     )
 except Exception:
     BASE_TIME_XLSX = PROJECT_ROOT / "data" / "master" / "base_time.xlsx"
     ODDS_CSV = PROJECT_ROOT / "csv"
+    EMPIRICAL_WEIGHT_SIGN_GUARD = {}
     PIPE_ALPHA = 20.0
     PIPE_EXTRA_ALPHA = 10.0
     PEN_FAV_POP_TH, PEN_FAV_POP_K, PEN_FAV_POP_APPLY_WINRATE_MAX = 3.0, 0.6, 0.14
@@ -205,7 +207,7 @@ FEAT_COLS: List[str] = [
 # 値は本番の初期重みをベースに、そのまま最適化開始点として使う
 FEATURE_WEIGHTS_SEED: Dict[str, float] = {
     "avg_finish": -0.5,
-    "avg_pop": 0.3,
+    "avg_pop": -0.3,
     "dist_diff": -0.2,
     "days_off": -0.1,
     "avg_last3f": 0.4,
@@ -223,7 +225,7 @@ FEATURE_WEIGHTS_SEED: Dict[str, float] = {
     "avg_score": 0.8,
     "leg_type_suitability": 0.6,
     "lap_match_bonus": 0.7,
-    "ta_spkm_best": -0.5,
+    "ta_spkm_best": 0.5,
     "ta_spkm_avg3": -0.3,
     "ta_n": 0.2,
     "rating_now": 1.2,
@@ -241,7 +243,7 @@ FEATURE_WEIGHTS_SEED: Dict[str, float] = {
     "last3f_class_diff": 0.5,
     "last3f_context_value": 0.8,
     "time_idx_context_value": 0.6,
-    "dl_rank_score": 1.0,
+    "dl_rank_score": -1.0,
 }
 
 PLACE_MAP = {

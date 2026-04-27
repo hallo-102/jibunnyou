@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Tuple, TypeAlias
 import numpy as np
 import pandas as pd
 
-from .config import CONFIG, FEAT_COLS, PLACE_MAP, RACELEVEL_COLS
+from .config import CONFIG, EMPIRICAL_WEIGHT_SIGN_GUARD, FEAT_COLS, PLACE_MAP, RACELEVEL_COLS
 
 
 WeightKey: TypeAlias = str | tuple[str, str]
@@ -65,7 +65,13 @@ def _clip_weight_by_name(name: str, value: float) -> float:
     else:
         lo = float(CONFIG["WEIGHT_MIN"])
         hi = float(CONFIG["WEIGHT_MAX"])
-    return max(lo, min(hi, float(value)))
+    clipped = max(lo, min(hi, float(value)))
+    expected_sign = EMPIRICAL_WEIGHT_SIGN_GUARD.get(name)
+    if expected_sign is None or clipped == 0.0:
+        return clipped
+    if (clipped > 0.0 and expected_sign < 0) or (clipped < 0.0 and expected_sign > 0):
+        return abs(clipped) * float(expected_sign)
+    return clipped
 
 
 def _blend_weights(base_w: Dict[str, float], place_w: Dict[str, float], alpha: float) -> Dict[str, float]:

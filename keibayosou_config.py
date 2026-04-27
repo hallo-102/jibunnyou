@@ -114,7 +114,7 @@ USE_DL_RANK = True
 
 FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "avg_finish": -0.5,
-    "avg_pop": 0.3,
+    "avg_pop": -0.3,
     "dist_diff": -0.2,
     "days_off": -0.1,
     "avg_last3f": 0.4,
@@ -132,7 +132,7 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "avg_score": 0.8,
     "leg_type_suitability": 0.6,
     "lap_match_bonus": 0.7,
-    "ta_spkm_best": -0.5,
+    "ta_spkm_best": 0.5,
     "ta_spkm_avg3": -0.3,
     "ta_n": 0.2,
     "rating_now": 1.2,
@@ -152,7 +152,7 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "last3f_context_value": 0.8,
     "time_idx_context_value": 0.6,
     # 既存
-    "dl_rank_score": 1.0,
+    "dl_rank_score": -1.0,
 }
 
 FEATURE_WEIGHTS_SAPPORO = FEATURE_WEIGHTS_BASE
