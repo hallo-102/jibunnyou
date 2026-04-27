@@ -182,6 +182,23 @@ FEATURE_WEIGHTS: Dict[str, Dict[str, float]] = {
 
 FEATURE_WEIGHTS_BY_PLACE_SURFACE: Dict[Tuple[str, str], Dict[str, float]] = {}
 
+# 実績相関と重みの符号が逆になりやすい特徴量の符号ガード。
+# data/output/current_weight_backtest/feature_diagnostics_current_weight_backtest.xlsx
+# の weight_corr_mismatch シートで確認した corr_top3 の向きを採用する。
+EMPIRICAL_WEIGHT_SIGN_GUARD: Dict[str, int] = {
+    "avg_pop": -1,
+    "avg_score": 1,
+    "rating_field_percentile": 1,
+    "avg_margin": -1,
+    "recent_pop_trend": 1,
+    "rating_now": 1,
+    "leg_type_suitability": 1,
+    "ta_spkm_best": 1,
+    "recent_time_idx_trend": 1,
+    "dl_rank_score": -1,
+    "fast_score": 1,
+}
+
 # 使う特徴量（列名）
 FEAT_COLS = [
     "avg_finish",
@@ -421,6 +438,31 @@ def _merge_feature_weights_by_place_surface(
     return merged
 
 
+def _enforce_empirical_weight_signs(
+    weights_map: Dict[Any, Dict[str, float]],
+) -> Dict[Any, Dict[str, float]]:
+    """
+    実績相関の向きと逆符号になっている重みを読み込み時点で補正する。
+    値の絶対値は最適化結果を尊重し、符号だけを corr_top3 の向きへ揃える。
+    """
+    fixed: Dict[Any, Dict[str, float]] = {}
+    for key, weights in weights_map.items():
+        new_weights = dict(weights)
+        for feat, expected_sign in EMPIRICAL_WEIGHT_SIGN_GUARD.items():
+            if feat not in new_weights:
+                continue
+            try:
+                val = float(new_weights[feat])
+            except Exception:
+                continue
+            if val == 0:
+                continue
+            if (val > 0 and expected_sign < 0) or (val < 0 and expected_sign > 0):
+                new_weights[feat] = abs(val) * expected_sign
+        fixed[key] = new_weights
+    return fixed
+
+
 def _load_external_feature_weights(base_dir: str):
     """
     best_feature_weights_YYYYMMDD.py を動的 import して FEATURE_WEIGHTS を取得する。
@@ -472,11 +514,13 @@ try:
     _ext_fw, _ext_fw_by_ps = _load_external_feature_weights(str(PY_DIR))
     if _ext_fw is not None:
         FEATURE_WEIGHTS = _merge_feature_weights(FEATURE_WEIGHTS, _ext_fw)
+    FEATURE_WEIGHTS = _enforce_empirical_weight_signs(FEATURE_WEIGHTS)
     if _ext_fw_by_ps is not None:
         FEATURE_WEIGHTS_BY_PLACE_SURFACE = _merge_feature_weights_by_place_surface(
             FEATURE_WEIGHTS_BY_PLACE_SURFACE,
             _ext_fw_by_ps,
             FEATURE_WEIGHTS.get("__default__", {}),
         )
+    FEATURE_WEIGHTS_BY_PLACE_SURFACE = _enforce_empirical_weight_signs(FEATURE_WEIGHTS_BY_PLACE_SURFACE)
 except Exception as e:
     print(f"[WARN] 外部重み読込時にエラーが発生しました: {e}")
