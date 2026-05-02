@@ -514,7 +514,7 @@ def get_race_results(horse_url: str, sess: requests.Session) -> pd.DataFrame:
 
     df = pd.read_html(io.StringIO(str(table)))[0]
 
-    race_ids, laps = [], []
+    race_ids = []
     for tr in table.find_all("tr")[1:]:
         a = tr.find("a", href=re.compile(r"/race/\d{12}"))
         rid = None
@@ -523,12 +523,40 @@ def get_race_results(horse_url: str, sess: requests.Session) -> pd.DataFrame:
             if m2:
                 rid = m2.group(1)
         race_ids.append(rid)
-        laps.append(get_race_lap_times(rid, sess) if rid else None)
-        time.sleep(0.15)
 
     df["race_id"] = race_ids
-    df["ラップタイム"] = laps
+    # ラップは馬ごとの成績取得中には取らず、全馬分の race_id を集めた後でまとめて取得する
+    df["ラップタイム"] = None
     return df
+
+
+def fill_lap_times_after_collecting(race_id_dfs: dict[str, pd.DataFrame], sess: requests.Session) -> None:
+    """
+    全馬の過去 race_id を集めてから、未取得のラップだけまとめて取得して DataFrame に反映する
+    """
+    past_rids: set[str] = set()
+
+    for df in race_id_dfs.values():
+        if "race_id" not in df.columns:
+            continue
+        for rid in df["race_id"].dropna().astype(str):
+            if re.fullmatch(r"\d{12}", rid):
+                past_rids.add(rid)
+
+    if not past_rids:
+        return
+
+    missing_rids = [rid for rid in sorted(past_rids) if rid not in RACE_LAP_CACHE]
+    print(f"▶ ラップ取得対象: {len(past_rids)}件（未取得 {len(missing_rids)}件）")
+
+    for rid in missing_rids:
+        get_race_lap_times(rid, sess)
+        time.sleep(0.15)
+
+    for df in race_id_dfs.values():
+        if "race_id" not in df.columns:
+            continue
+        df["ラップタイム"] = df["race_id"].astype(str).map(RACE_LAP_CACHE)
 
 
 # ============================================================
@@ -607,6 +635,9 @@ def main() -> None:
 
         race_id_dfs[rid] = combined
         time.sleep(2.0)
+
+    # 競走成績を全馬分集めた後、過去 race_id をユニーク化してラップをまとめて取得する
+    fill_lap_times_after_collecting(race_id_dfs, sess)
 
     # 4) 出力
     out_xlsx = os.path.join(BASE_XLSX_DIR, f"馬の競走成績_{raceday}.xlsx")
