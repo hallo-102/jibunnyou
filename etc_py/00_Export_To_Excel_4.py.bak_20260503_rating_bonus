@@ -384,71 +384,6 @@ def parse_baba(s: Optional[str]) -> Optional[str]:
     return raw
 
 
-GRADE_RACE_NAME_MAP = {
-    # JRA平地G1。race_infoに格付け表記が無い場合でも、主要重賞名からクラスを補完する。
-    "フェブラリーS": "Ｇ１",
-    "高松宮記念": "Ｇ１",
-    "大阪杯": "Ｇ１",
-    "桜花賞": "Ｇ１",
-    "皐月賞": "Ｇ１",
-    "天皇賞(春)": "Ｇ１",
-    "NHKマイルC": "Ｇ１",
-    "ヴィクトリアマイル": "Ｇ１",
-    "オークス": "Ｇ１",
-    "日本ダービー": "Ｇ１",
-    "安田記念": "Ｇ１",
-    "宝塚記念": "Ｇ１",
-    "スプリンターズS": "Ｇ１",
-    "秋華賞": "Ｇ１",
-    "菊花賞": "Ｇ１",
-    "天皇賞(秋)": "Ｇ１",
-    "エリザベス女王杯": "Ｇ１",
-    "マイルCS": "Ｇ１",
-    "ジャパンC": "Ｇ１",
-    "チャンピオンズC": "Ｇ１",
-    "阪神JF": "Ｇ１",
-    "朝日杯FS": "Ｇ１",
-    "有馬記念": "Ｇ１",
-    "ホープフルS": "Ｇ１",
-}
-
-
-CLASSIC_GENERATION_G1_NAMES = {
-    "皐月賞",
-    "日本ダービー",
-    "菊花賞",
-    "桜花賞",
-    "オークス",
-    "秋華賞",
-    "NHKマイルC",
-}
-
-
-def normalize_race_name_text(race_name: Optional[str]) -> str:
-    if not isinstance(race_name, str):
-        return ""
-    text = str(race_name).strip()
-    text = text.replace("　", " ").replace("Ｇ", "G")
-    return re.sub(r"\s+", "", text)
-
-
-def infer_class_from_race_name(race_name: Optional[str]) -> Optional[str]:
-    text = normalize_race_name_text(race_name)
-    if not text:
-        return None
-    for key, race_class in GRADE_RACE_NAME_MAP.items():
-        if normalize_race_name_text(key) in text:
-            return race_class
-    return None
-
-
-def is_classic_generation_g1(race_name: Optional[str]) -> bool:
-    text = normalize_race_name_text(race_name)
-    if not text:
-        return False
-    return any(normalize_race_name_text(name) in text for name in CLASSIC_GENERATION_G1_NAMES)
-
-
 def parse_race_class(race_info: Optional[str], race_name: Optional[str]) -> Optional[str]:
     """
     レース情報/レース名からクラスを抽出して正規化する。
@@ -458,10 +393,6 @@ def parse_race_class(race_info: Optional[str], race_name: Optional[str]) -> Opti
     s_all = s_info + " " + s_name
 
     is_jump = ("障害" in s_all)
-
-    inferred_by_name = infer_class_from_race_name(race_name)
-    if inferred_by_name is not None:
-        return inferred_by_name
 
     if "未勝利" in s_all:
         return "未勝利(障害)" if is_jump else "未勝利"
@@ -604,101 +535,6 @@ def mean_or_default(values: List[float], default: float) -> float:
     if not values:
         return float(default)
     return float(sum(values) / len(values))
-
-
-def to_float_or_none(value) -> Optional[float]:
-    if value is None or pd.isna(value):
-        return None
-    try:
-        return float(str(value).replace(",", "").strip())
-    except Exception:
-        return None
-
-
-def to_int_or_none(value) -> Optional[int]:
-    if value is None or pd.isna(value):
-        return None
-    try:
-        return int(float(str(value).replace(",", "").strip()))
-    except Exception:
-        return None
-
-
-def market_prior_rating_adjustment(
-    race_class: Optional[str],
-    race_name: Optional[str],
-    odds,
-    pop,
-) -> float:
-    """
-    初観測馬の事前評価に、市場が織り込んでいる過去実績を少し反映する。
-    入力Excelに過去走が無い馬でも、G1で上位人気なら初期値だけに固定されないようにする。
-    """
-    rc = normalize_race_class_key(race_class)
-    odds_v = to_float_or_none(odds)
-    pop_v = to_int_or_none(pop)
-    bonus = 0.0
-
-    if rc == "Ｇ１":
-        bonus += 25.0
-    elif rc == "Ｇ２":
-        bonus += 18.0
-    elif rc == "Ｇ３":
-        bonus += 12.0
-
-    if pop_v is not None:
-        if pop_v == 1:
-            bonus += 32.0
-        elif pop_v == 2:
-            bonus += 24.0
-        elif pop_v == 3:
-            bonus += 18.0
-        elif pop_v <= 5:
-            bonus += 10.0
-        elif pop_v >= 12:
-            bonus -= 8.0
-
-    if odds_v is not None:
-        if odds_v <= 2.5:
-            bonus += 18.0
-        elif odds_v <= 4.0:
-            bonus += 12.0
-        elif odds_v <= 7.0:
-            bonus += 7.0
-        elif odds_v >= 80.0:
-            bonus -= 12.0
-        elif odds_v >= 40.0:
-            bonus -= 6.0
-
-    if rc == "Ｇ１" and is_classic_generation_g1(race_name) and pop_v is not None and pop_v <= 3:
-        bonus += 18.0
-
-    return clamp(bonus, -20.0, 95.0)
-
-
-def apply_debut_market_prior(
-    store: "MemoryStore",
-    horse_id: int,
-    ground: Optional[str],
-    race_class: Optional[str],
-    race_name: Optional[str],
-    odds,
-    pop,
-) -> float:
-    """
-    初観測時だけ、人気・オッズ・格から初期ratingを補正する。
-    既に出走履歴がある馬には二重加算しない。
-    """
-    if store.start_counts.get(horse_id, 0) != 0:
-        return 0.0
-    adj = market_prior_rating_adjustment(race_class, race_name, odds, pop)
-    if adj == 0.0:
-        return 0.0
-    store.set_rating(horse_id, store.get_rating(horse_id) + adj)
-    surface_key = get_surface_key(ground)
-    if surface_key:
-        store.set_surface_rating(horse_id, ground, store.get_surface_rating(horse_id, ground) + adj)
-    return adj
 
 
 def median_or_none(values: List[float]) -> Optional[float]:
@@ -908,10 +744,6 @@ def compute_performance_score(
     rank_score: float,
     rank: Optional[int],
     field: int,
-    race_class: Optional[str],
-    race_name: Optional[str],
-    odds,
-    pop,
     margin_sec: Optional[float],
     gap_from_winner_sec: Optional[float],
     winner_margin_sec: Optional[float],
@@ -926,9 +758,6 @@ def compute_performance_score(
     passing_positions: List[int],
 ) -> float:
     score = rank_score
-    rc = normalize_race_class_key(race_class)
-    pop_v = to_int_or_none(pop)
-    odds_v = to_float_or_none(odds)
 
     if rank == 1:
         win_margin = winner_margin_sec if winner_margin_sec is not None else margin_sec
@@ -940,24 +769,6 @@ def compute_performance_score(
         score += clamp(-0.10 * gap_from_winner_sec, -0.28, 0.0)
         if rank is not None and rank <= 5 and gap_from_winner_sec <= 0.40:
             score += clamp(0.06 - (0.12 * gap_from_winner_sec), 0.0, 0.06)
-
-    if rc == "Ｇ１" and rank == 1:
-        score += 0.10
-        if is_classic_generation_g1(race_name):
-            score += 0.04
-        if pop_v is not None and pop_v <= 3:
-            score += 0.03
-        if odds_v is not None and odds_v <= 4.0:
-            score += 0.02
-    elif rc in ("Ｇ２", "Ｇ３") and rank == 1:
-        score += 0.04
-
-    if rank is not None and pop_v is not None:
-        pop_gap = pop_v - rank
-        if pop_gap >= 4:
-            score += clamp(0.01 * pop_gap, 0.0, 0.05)
-        elif pop_gap <= -5:
-            score -= clamp(0.008 * abs(pop_gap), 0.0, 0.04)
 
     ref_best = cond_best_time_sec if cond_best_time_sec is not None else best_time_sec
     ref_median = cond_median_time_sec if cond_median_time_sec is not None else median_time_sec
@@ -1201,16 +1012,6 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     passing_raw = safe_get_scalar(row, "passing")
                     passing_positions = parse_passing_positions(passing_raw)
 
-                    market_prior_adjustment = apply_debut_market_prior(
-                        store=store,
-                        horse_id=hid,
-                        ground=ground,
-                        race_class=race_class,
-                        race_name=race_name,
-                        odds=odds,
-                        pop=pop,
-                    )
-
                     pre_overall = store.get_rating(hid)
                     pre_surface = store.get_surface_rating(hid, ground)
                     pre_effective = store.get_combined_rating(hid, ground)
@@ -1236,7 +1037,6 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                         "pre_overall": pre_overall,
                         "pre_surface": pre_surface,
                         "pre_effective": pre_effective,
-                        "market_prior_adjustment": market_prior_adjustment,
                     })
 
                 if not starters:
@@ -1369,10 +1169,6 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                         rank_score=rank_score,
                         rank=starter["rank"],
                         field=field_size,
-                        race_class=race_class,
-                        race_name=race_name,
-                        odds=starter["odds"],
-                        pop=starter["pop"],
                         margin_sec=starter["margin_sec"],
                         gap_from_winner_sec=gap_map.get(hid),
                         winner_margin_sec=winner_margin_sec,
@@ -1431,7 +1227,6 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                         "time_vs_master_sec": starter["time_vs_master_sec"],
                         "time_master_score": starter["time_master_score"],
                         "faster_than_master": starter["faster_than_master"],
-                        "market_prior_adjustment": starter["market_prior_adjustment"],
                         "ts": datetime.datetime.now().isoformat(timespec="seconds"),
                     })
 
@@ -1458,7 +1253,6 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                         "time_vs_master_sec": starter["time_vs_master_sec"],
                         "time_master_score": starter["time_master_score"],
                         "faster_than_master": starter["faster_than_master"],
-                        "market_prior_adjustment": starter["market_prior_adjustment"],
                         "surface": surface_key,
                     })
 
@@ -1550,7 +1344,6 @@ def build_readme_dataframe(source_xlsx: Path) -> pd.DataFrame:
         "time_vs_master_sec: 走破タイム - 条件別最速基準タイム（小さいほど良い、マイナスは基準より速い）\n"
         "time_master_score: 条件別最速基準への近さスコア\n"
         "faster_than_master: 条件別最速基準タイム以内で走ったか\n"
-        "market_prior_adjustment: 初観測時に人気・オッズ・格から加えた初期rating補正\n"
         "surface: 適用した芝/ダ/障rating",
         "着差は「ハナ/アタマ/短頭/クビ/○馬身/分数（1 1/2, 1.1/2, 1/2など）」を 1馬身=0.20秒で秒換算します。"
     )
@@ -1582,7 +1375,6 @@ def build_readme_dataframe(source_xlsx: Path) -> pd.DataFrame:
         "margin_sec/gap_from_winner_sec/winner_margin_sec: 着差情報\n"
         "condition_best_time/condition_median_time: 条件別標準タイム参照値\n"
         "time_sec/time_vs_master_sec/time_master_score/faster_than_master: 条件別最速基準に対する馬ごとの時計評価\n"
-        "market_prior_adjustment: 初観測時に人気・オッズ・格から加えた初期rating補正\n"
         "ts: 記録タイムスタンプ",
         "条件別標準タイムは `data/master/場所_馬場_タイム.xlsx` を参照し、同日同場の補正のみ内部で加えます。"
     )
