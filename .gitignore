@@ -13,7 +13,7 @@ env/
 data/
 config/
 codex/
-etc_py/
+etc_py/*/
 nas_tokutyouryou_keisann/
 oid_py/
 py_explanation_md/
