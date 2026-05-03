@@ -18,15 +18,15 @@ def load_race_levels(path: str) -> pd.DataFrame:
     race_levels.xlsx 読み込み（現行フォーマットに合わせて拡張）
 
     期待シート:
-      - race_levels: race_id, pre_mean, pre_p50, pre_top5_mean
+      - race_levels: race_id, race_level_score, pre_mean, pre_p50, pre_top5_mean
       - entries: race_id, horse_id
       - horses: id, name
       - ratings: horse_id, rating
 
     仕様:
       - horses と ratings を JOIN して horse_id→name→name_norm→rating を解決
-      - top5 は race_levels.pre_top5_mean を優先し、無ければ ratings 上位5頭平均を使用
-      - 戻り値は rid_str, race_level（pre_top5_mean優先→pre_mean→ratingsベース）を含む DataFrame
+      - race_level は race_levels.race_level_score を優先し、無ければ pre_top5_mean や ratings 上位5頭平均を使用
+      - 戻り値は rid_str, race_level（race_level_score優先→pre_top5_mean→pre_mean→ratingsベース）を含む DataFrame
     """
     if not os.path.exists(path):
         print("[INFO] race_levels.xlsx が見つからないため、全て NaN 扱いにします")
@@ -113,16 +113,18 @@ def load_race_levels(path: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["rid_str", "race_level"])
 
     rl["rid_str"] = rl["race_id"].astype(str)
+    rl["race_level_score"] = pd.to_numeric(rl.get("race_level_score"), errors="coerce")
     rl["pre_mean"] = pd.to_numeric(rl.get("pre_mean"), errors="coerce")
     rl["pre_top5_mean"] = pd.to_numeric(rl.get("pre_top5_mean"), errors="coerce")
 
-    # race_level 優先順位: pre_top5_mean -> pre_mean -> ratings上位5平均 -> ratings平均
-    rl["race_level"] = rl["pre_top5_mean"]
+    # race_level 優先順位: race_level_score -> pre_top5_mean -> pre_mean -> ratings上位5平均 -> ratings平均
+    rl["race_level"] = rl["race_level_score"]
+    rl.loc[rl["race_level"].isna(), "race_level"] = rl.loc[rl["race_level"].isna(), "pre_top5_mean"]
     rl.loc[rl["race_level"].isna(), "race_level"] = rl.loc[rl["race_level"].isna(), "pre_mean"]
     rl.loc[rl["race_level"].isna(), "race_level"] = rl.loc[rl["race_level"].isna(), "rid_str"].map(rating_top5_map)
     rl.loc[rl["race_level"].isna(), "race_level"] = rl.loc[rl["race_level"].isna(), "rid_str"].map(rating_mean_map)
 
-    return rl[["rid_str", "race_level", "pre_mean", "pre_top5_mean"]]
+    return rl[["rid_str", "race_level", "race_level_score", "pre_mean", "pre_top5_mean"]]
 
 
 def load_base_time(path: str) -> pd.DataFrame:

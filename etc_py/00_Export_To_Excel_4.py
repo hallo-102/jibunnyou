@@ -1020,6 +1020,87 @@ def mean_or_none(values: List[float]) -> Optional[float]:
     return float(sum(values) / len(values))
 
 
+def calc_race_level_score(
+    pre_top3_mean: Optional[float],
+    pre_top5_mean: Optional[float],
+    pre_mean: Optional[float],
+    pre_p50: Optional[float],
+) -> Optional[float]:
+    """
+    上位層だけでなく出走馬全体の厚みも見るレースレベル総合スコア。
+    pre_top3_mean 単独だと1〜3頭の高ratingに引っ張られるため、平均・中央値も混ぜる。
+    """
+    values = [pre_top3_mean, pre_top5_mean, pre_mean, pre_p50]
+    if any(v is None or pd.isna(v) for v in values):
+        return None
+    return float(
+        (float(pre_top3_mean) * 0.35)
+        + (float(pre_top5_mean) * 0.25)
+        + (float(pre_mean) * 0.25)
+        + (float(pre_p50) * 0.15)
+    )
+
+
+def parse_yyyymmdd(value) -> Optional[datetime.date]:
+    text = str(value).strip()
+    if not re.match(r"^\d{8}$", text):
+        return None
+    try:
+        return datetime.datetime.strptime(text, "%Y%m%d").date()
+    except Exception:
+        return None
+
+
+def weighted_recent_rating(history_rows: List[Dict], limit: int = 3) -> Optional[float]:
+    """
+    直近レースほど重くした近走rating。
+    直近3走を 0.50 / 0.30 / 0.20 で見る。履歴が少ない場合は重みを再正規化する。
+    """
+    rows = history_rows[-limit:]
+    if not rows:
+        return None
+    weights = [0.50, 0.30, 0.20][:len(rows)]
+    rows_recent_first = list(reversed(rows))
+    total_w = sum(weights)
+    total = 0.0
+    used_w = 0.0
+    for row, w in zip(rows_recent_first, weights):
+        val = row.get("post_rating")
+        if val is None or pd.isna(val):
+            continue
+        total += float(val) * w
+        used_w += w
+    if used_w == 0.0:
+        return None
+    return float(total / used_w if used_w != total_w else total)
+
+
+def calc_rating_confidence(start_count: int, recent_start_count: int) -> float:
+    """
+    出走数が少ない馬のratingを過信しないための信頼度。
+    出走数で土台を作り、直近180日内の出走があれば少し上乗せする。
+    """
+    n = max(int(start_count or 0), 0)
+    recent_n = max(int(recent_start_count or 0), 0)
+    base = n / (n + 3.0) if n > 0 else 0.0
+    recent_bonus = min(recent_n / 5.0, 1.0) * 0.15
+    return clamp(base + recent_bonus, 0.0, 1.0)
+
+
+def calc_rating_volatility(history_rows: List[Dict], limit: int = 5) -> Optional[float]:
+    rows = history_rows[-limit:]
+    deltas = []
+    for row in rows:
+        pre = row.get("pre_rating")
+        post = row.get("post_rating")
+        if pre is None or post is None or pd.isna(pre) or pd.isna(post):
+            continue
+        deltas.append(float(post) - float(pre))
+    if not deltas:
+        return None
+    return float(pd.Series(deltas, dtype="float").std(ddof=0))
+
+
 def compute_performance_score(
     rank_score: float,
     rank: Optional[int],
@@ -1437,6 +1518,7 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                 fast_runner_rate = (
                     float(fast_runner_count / timed_runner_count) if timed_runner_count > 0 else None
                 )
+                race_level_score = calc_race_level_score(pre_top3, pre_top5, pre_mean, pre_p50)
                 store.race_levels.append({
                     "race_id": str(rid),
                     "date": date_str,
@@ -1462,6 +1544,7 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     "gap_top1_p50": gap_top1_p50,
                     "gap_top3_p50": gap_top3_p50,
                     "gap_top5_p50": gap_top5_p50,
+                    "race_level_score": race_level_score,
                     "cond_best_time_baseline": cond_best_time,
                     "cond_median_time_baseline": cond_median_time,
                     "day_bias_sec": day_bias_sec,
@@ -1681,8 +1764,13 @@ def build_readme_dataframe(source_xlsx: Path) -> pd.DataFrame:
         "1行=1頭（horse_idで一意）",
         "horse_id: 馬ID（horses.id）\n"
         "rating: 総合rating\n"
-        "turf_rating/dirt_rating/jump_rating: 芝/ダ/障の条件別rating",
-        "全レース処理後の最終値です。実際の事前評価は総合ratingと条件別ratingを合成して使います。"
+        "turf_rating/dirt_rating/jump_rating: 芝/ダ/障の条件別rating\n"
+        "start_count: 集計対象内の出走数\n"
+        "recent_start_count_180d: 最新開催日から180日以内の出走数\n"
+        "recent_rating: 直近3走のpost_rating加重平均（直近ほど重い）\n"
+        "rating_confidence: 出走数と近走数から見たrating信頼度(0~1)\n"
+        "rating_volatility: 直近最大5走のrating変動幅",
+        "全レース処理後の最終値です。予想時は rating だけでなく recent_rating と rating_confidence も併用する想定。"
     )
 
     add(
@@ -1719,6 +1807,8 @@ def build_readme_dataframe(source_xlsx: Path) -> pd.DataFrame:
         "pre_bottom1/pre_bottom5_mean: 下位層の弱さ\n"
         "pre_std/pre_iqr: ばらつき（団子/格差）\n"
         "gap_top1_p50/gap_top3_p50/gap_top5_p50: 1強・上位層の厚み指標\n"
+        "race_level_score: 上位層と全体の厚みを混ぜた複合レースレベル\n"
+        "race_level_score_rank/pre_top3_mean_rank: 複合スコア/上位3頭平均の順位\n"
         "cond_best_time_baseline/cond_median_time_baseline/day_bias_sec: 条件別標準タイムと当日馬場差\n"
         "race_best_time/race_median_time/winner_margin_sec: 当該レース実績\n"
         "race_best_vs_master_sec/race_median_vs_master_sec: レース時計 - 条件別最速基準タイム\n"
@@ -1749,6 +1839,17 @@ def write_store_to_excel(store: MemoryStore, out_path: Path, source_xlsx: Path) 
     df_horses = pd.DataFrame(list(store.horse_rows.values())).sort_values("id")
     df_races = pd.DataFrame(list(store.races.values())).sort_values("race_id")
     df_entries = pd.DataFrame(store.entries)
+    hist_by_horse: Dict[int, List[Dict]] = {}
+    for row in store.ratings_history:
+        hist_by_horse.setdefault(int(row["horse_id"]), []).append(row)
+
+    race_date_by_id = {
+        str(race_id): parse_yyyymmdd(row.get("date"))
+        for race_id, row in store.races.items()
+    }
+    known_dates = [d for d in race_date_by_id.values() if d is not None]
+    latest_date = max(known_dates) if known_dates else None
+
     df_ratings = pd.DataFrame([
         {
             "horse_id": hid,
@@ -1756,12 +1857,43 @@ def write_store_to_excel(store: MemoryStore, out_path: Path, source_xlsx: Path) 
             "turf_rating": store.surface_ratings.get("芝", {}).get(hid),
             "dirt_rating": store.surface_ratings.get("ダ", {}).get(hid),
             "jump_rating": store.surface_ratings.get("障", {}).get(hid),
+            "start_count": store.start_counts.get(hid, 0),
+            "recent_start_count_180d": sum(
+                1
+                for h in hist_by_horse.get(hid, [])
+                if latest_date is not None
+                and race_date_by_id.get(str(h.get("race_id"))) is not None
+                and (latest_date - race_date_by_id[str(h.get("race_id"))]).days <= 180
+            ),
+            "recent_rating": weighted_recent_rating(hist_by_horse.get(hid, [])),
+            "rating_confidence": calc_rating_confidence(
+                store.start_counts.get(hid, 0),
+                sum(
+                    1
+                    for h in hist_by_horse.get(hid, [])
+                    if latest_date is not None
+                    and race_date_by_id.get(str(h.get("race_id"))) is not None
+                    and (latest_date - race_date_by_id[str(h.get("race_id"))]).days <= 180
+                ),
+            ),
+            "rating_volatility": calc_rating_volatility(hist_by_horse.get(hid, [])),
         }
         for hid in sorted(store.ratings.keys())
     ])
     df_hist = pd.DataFrame(store.ratings_history)
 
     df_levels = pd.DataFrame(store.race_levels)
+    if not df_levels.empty:
+        if "race_level_score" in df_levels.columns:
+            df_levels["race_level_score_rank"] = df_levels["race_level_score"].rank(
+                ascending=False,
+                method="min",
+            )
+        if "pre_top3_mean" in df_levels.columns:
+            df_levels["pre_top3_mean_rank"] = df_levels["pre_top3_mean"].rank(
+                ascending=False,
+                method="min",
+            )
     if not df_levels.empty and "date" in df_levels.columns:
         df_levels = df_levels.sort_values(["date", "race_id"])
     else:
