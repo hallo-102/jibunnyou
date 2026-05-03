@@ -79,11 +79,15 @@ try:
         PEN_CLOSE_LOSS_K,
         PEN_CLOSE_LOSS_APPLY_WINRATE_MAX,
         EMPIRICAL_WEIGHT_SIGN_GUARD,
+        FEAT_COLS as PIPE_FEAT_COLS,
+        FEATURE_WEIGHTS_BASE as PIPE_FEATURE_WEIGHTS_BASE,
     )
 except Exception:
     BASE_TIME_XLSX = PROJECT_ROOT / "data" / "master" / "base_time.xlsx"
     ODDS_CSV = PROJECT_ROOT / "csv"
     EMPIRICAL_WEIGHT_SIGN_GUARD = {}
+    PIPE_FEAT_COLS = None
+    PIPE_FEATURE_WEIGHTS_BASE = {}
     PIPE_ALPHA = 20.0
     PIPE_EXTRA_ALPHA = 10.0
     PEN_FAV_POP_TH, PEN_FAV_POP_K, PEN_FAV_POP_APPLY_WINRATE_MAX = 3.0, 0.6, 0.14
@@ -245,6 +249,14 @@ FEATURE_WEIGHTS_SEED: Dict[str, float] = {
     "time_idx_context_value": 0.6,
     "dl_rank_score": -1.0,
 }
+
+# 本番側の特徴量定義を最優先する。
+# ここを同期しておくことで、予想側に追加した特徴量が最適化対象から漏れるのを防ぐ。
+if PIPE_FEAT_COLS:
+    FEAT_COLS = list(PIPE_FEAT_COLS)
+    for _col in FEAT_COLS:
+        if _col not in FEATURE_WEIGHTS_SEED:
+            FEATURE_WEIGHTS_SEED[_col] = float(PIPE_FEATURE_WEIGHTS_BASE.get(_col, 0.0))
 
 PLACE_MAP = {
     "01": "札幌",
