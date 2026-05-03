@@ -157,9 +157,96 @@ def _print_eval_debug_summary(
     print(f"top3_complete_rate={summary['top3_complete_rate']:.3f}")
     print(f"win_in_top5_rate={summary['win_in_top5_rate']:.3f}")
     print(f"place_in_top5_rate={summary['place_in_top5_rate']:.3f}")
-    print(f"ROI={summary['roi']:.3f} invest={summary['invest_yen']} return={summary['return_yen']}")
 
     return summary
+
+
+def _build_clean_eval_rids(
+    df_target: pd.DataFrame,
+    df_res_entries: pd.DataFrame,
+    min_rows_per_rid: int = 6,
+) -> tuple[set[str], dict]:
+    if df_target is None or df_target.empty or "rid_str" not in df_target.columns:
+        return set(), {
+            "source_rids": 0,
+            "clean_rids": 0,
+            "excluded_few_rows_rids": 0,
+            "excluded_missing_top3_rids": 0,
+            "excluded_empty_rid_rows": 0,
+            "min_rows_per_rid": int(min_rows_per_rid),
+        }
+
+    rid_series = df_target["rid_str"].fillna("").astype(str).str.strip()
+    source_rids = set(rid_series[rid_series != ""].unique().tolist())
+    empty_rid_count = int((rid_series == "").sum())
+
+    row_counts = df_target.assign(_rid_str_clean=rid_series).groupby("_rid_str_clean").size()
+    rids_with_enough_rows = set(
+        str(rid) for rid, cnt in row_counts.items()
+        if str(rid) and int(cnt) >= int(min_rows_per_rid)
+    )
+
+    rids_with_top3 = set()
+    if df_res_entries is not None and not df_res_entries.empty:
+        df_top3 = df_res_entries[df_res_entries["着順_num"].isin([1, 2, 3])].copy()
+        if not df_top3.empty:
+            name_cnt = (
+                df_top3.groupby("rid_str")["name_norm"]
+                .apply(lambda s: int(s.notna().sum()))
+                .to_dict()
+            )
+            num_cnt = (
+                df_top3.groupby("rid_str")["馬番_int"]
+                .apply(lambda s: int(s.notna().sum()))
+                .to_dict()
+            )
+            rids_with_top3 = {
+                str(rid)
+                for rid in set(name_cnt.keys()) | set(num_cnt.keys())
+                if int(name_cnt.get(rid, 0)) >= 3 and int(num_cnt.get(rid, 0)) >= 3
+            }
+
+    clean_rids = source_rids & rids_with_enough_rows & rids_with_top3
+    summary = {
+        "source_rids": int(len(source_rids)),
+        "clean_rids": int(len(clean_rids)),
+        "excluded_few_rows_rids": int(len(source_rids - rids_with_enough_rows)),
+        "excluded_missing_top3_rids": int(len(source_rids - rids_with_top3)),
+        "excluded_empty_rid_rows": int(empty_rid_count),
+        "min_rows_per_rid": int(min_rows_per_rid),
+    }
+    return clean_rids, summary
+
+
+def _filter_clean_eval_df(
+    df_target: pd.DataFrame,
+    df_res_entries: pd.DataFrame,
+    min_rows_per_rid: int = 6,
+) -> tuple[pd.DataFrame, dict]:
+    clean_rids, summary = _build_clean_eval_rids(
+        df_target=df_target,
+        df_res_entries=df_res_entries,
+        min_rows_per_rid=min_rows_per_rid,
+    )
+    if df_target is None or df_target.empty:
+        return pd.DataFrame(columns=[]), summary
+
+    out = df_target[df_target["rid_str"].fillna("").astype(str).isin(clean_rids)].copy()
+    summary["clean_rows"] = int(len(out))
+    return out, summary
+
+
+def _print_clean_eval_summary(summary: dict, label: str) -> dict:
+    row = {"label": label, **summary}
+    print(f"\n=== [{label}] clean eval target ===")
+    print(f"source_rids={row['source_rids']}")
+    print(f"clean_rids={row['clean_rids']}")
+    print(f"clean_rows={row.get('clean_rows', 0)}")
+    print(f"min_rows_per_rid={row['min_rows_per_rid']}")
+    print(f"excluded_few_rows_rids={row['excluded_few_rows_rids']}")
+    print(f"excluded_missing_top3_rids={row['excluded_missing_top3_rids']}")
+    print(f"excluded_empty_rid_rows={row['excluded_empty_rid_rows']}")
+    return row
 
 
 def _build_rid_rows_summary(df: pd.DataFrame, label: str) -> dict:
@@ -579,6 +666,7 @@ def main() -> None:
 
     print(f"[INFO] PAYOUT_CAP_YEN={int(CONFIG.get('PAYOUT_CAP_YEN', 0) or 0)}")
     print(f"[INFO] SKIP_IF_PAYOUT_MISSING={CONFIG['SKIP_IF_PAYOUT_MISSING']}")
+    print("[INFO] ROI指標はTOP5評価から除外します")
     print(f"[INFO] SCORE_GAP_MIN={float(CONFIG.get('SCORE_GAP_MIN', 0.0) or 0.0)}")
     print(f"[INFO] WEIGHT_RANGE=({CONFIG['WEIGHT_MIN']}, {CONFIG['WEIGHT_MAX']})")
     print(f"[INFO] RACELEVEL_WEIGHT_RANGE=({CONFIG['RACELEVEL_WEIGHT_MIN']}, {CONFIG['RACELEVEL_WEIGHT_MAX']})")
@@ -607,6 +695,25 @@ def main() -> None:
     train_rid_summary = _print_rid_rows_summary(df_train, "TRAIN FEATURES")
     test_rid_summary = _print_rid_rows_summary(df_test, "TEST FEATURES")
 
+    min_eval_rows = int(CONFIG.get("MIN_EVAL_ROWS_PER_RID", 6) or 6)
+    df_clean_all, clean_all_target_summary = _filter_clean_eval_df(
+        df_feat_all, df_res_entries, min_rows_per_rid=min_eval_rows
+    )
+    df_clean_train, clean_train_target_summary = _filter_clean_eval_df(
+        df_train, df_res_entries, min_rows_per_rid=min_eval_rows
+    )
+    df_clean_test, clean_test_target_summary = _filter_clean_eval_df(
+        df_test, df_res_entries, min_rows_per_rid=min_eval_rows
+    )
+
+    clean_all_target_summary = _print_clean_eval_summary(clean_all_target_summary, "CLEAN ALL")
+    clean_train_target_summary = _print_clean_eval_summary(clean_train_target_summary, "CLEAN TRAIN")
+    clean_test_target_summary = _print_clean_eval_summary(clean_test_target_summary, "CLEAN TEST")
+
+    clean_all_rid_summary = _print_rid_rows_summary(df_clean_all, "CLEAN ALL FEATURES")
+    clean_train_rid_summary = _print_rid_rows_summary(df_clean_train, "CLEAN TRAIN FEATURES")
+    clean_test_rid_summary = _print_rid_rows_summary(df_clean_test, "CLEAN TEST FEATURES")
+
     weights_map, place_summary_df = optimize_placewise_weights(
         df_train=df_train,
         df_res_entries=df_res_entries,
@@ -621,6 +728,15 @@ def main() -> None:
     )
     all_s, all_t, all_i, all_r, all_det, all_stab = eval_success_and_roi(
         weights_map, df_feat_all, df_res_entries, df_res_payout
+    )
+    clean_train_s, clean_train_t, clean_train_i, clean_train_r, clean_train_det, clean_train_stab = eval_success_and_roi(
+        weights_map, df_clean_train, df_res_entries, df_res_payout
+    )
+    clean_test_s, clean_test_t, clean_test_i, clean_test_r, clean_test_det, clean_test_stab = eval_success_and_roi(
+        weights_map, df_clean_test, df_res_entries, df_res_payout
+    )
+    clean_all_s, clean_all_t, clean_all_i, clean_all_r, clean_all_det, clean_all_stab = eval_success_and_roi(
+        weights_map, df_clean_all, df_res_entries, df_res_payout
     )
 
     train_debug = _print_eval_debug_summary(
@@ -644,10 +760,30 @@ def main() -> None:
         df_res_payout=df_res_payout,
         weights_map=weights_map,
     )
+    clean_train_debug = _print_eval_debug_summary(
+        label="CLEAN TRAIN",
+        df_target=df_clean_train,
+        df_res_entries=df_res_entries,
+        df_res_payout=df_res_payout,
+        weights_map=weights_map,
+    )
+    clean_test_debug = _print_eval_debug_summary(
+        label="CLEAN TEST",
+        df_target=df_clean_test,
+        df_res_entries=df_res_entries,
+        df_res_payout=df_res_payout,
+        weights_map=weights_map,
+    )
+    clean_all_debug = _print_eval_debug_summary(
+        label="CLEAN ALL",
+        df_target=df_clean_all,
+        df_res_entries=df_res_entries,
+        df_res_payout=df_res_payout,
+        weights_map=weights_map,
+    )
 
     print("\n=== [TRAIN] place/surface weights applied ===")
     print(f"point_sum={train_s:.3f} / races={train_t}")
-    print(f"ROI={train_stab['roi']:.3f} invest={train_i} return={train_r}")
     print(f"top5_point_rate={train_stab['top5_point_rate']:.3f}")
     print(f"top3_complete_rate={train_stab['top3_complete_rate']:.3f}")
     print(f"win_in_top5_rate={train_stab['win_in_top5_rate']:.3f}")
@@ -655,7 +791,6 @@ def main() -> None:
 
     print("\n=== [TEST] place/surface weights applied ===")
     print(f"point_sum={test_s:.3f} / races={test_t}")
-    print(f"ROI={test_stab['roi']:.3f} invest={test_i} return={test_r}")
     print(f"top5_point_rate={test_stab['top5_point_rate']:.3f}")
     print(f"top3_complete_rate={test_stab['top3_complete_rate']:.3f}")
     print(f"win_in_top5_rate={test_stab['win_in_top5_rate']:.3f}")
@@ -663,11 +798,31 @@ def main() -> None:
 
     print("\n=== [ALL] place/surface weights applied ===")
     print(f"point_sum={all_s:.3f} / races={all_t}")
-    print(f"ROI={all_stab['roi']:.3f} invest={all_i} return={all_r}")
     print(f"top5_point_rate={all_stab['top5_point_rate']:.3f}")
     print(f"top3_complete_rate={all_stab['top3_complete_rate']:.3f}")
     print(f"win_in_top5_rate={all_stab['win_in_top5_rate']:.3f}")
     print(f"place_in_top5_rate={all_stab['place_in_top5_rate']:.3f}")
+
+    print("\n=== [CLEAN TRAIN] place/surface weights applied ===")
+    print(f"point_sum={clean_train_s:.3f} / races={clean_train_t}")
+    print(f"top5_point_rate={clean_train_stab['top5_point_rate']:.3f}")
+    print(f"top3_complete_rate={clean_train_stab['top3_complete_rate']:.3f}")
+    print(f"win_in_top5_rate={clean_train_stab['win_in_top5_rate']:.3f}")
+    print(f"place_in_top5_rate={clean_train_stab['place_in_top5_rate']:.3f}")
+
+    print("\n=== [CLEAN TEST] place/surface weights applied ===")
+    print(f"point_sum={clean_test_s:.3f} / races={clean_test_t}")
+    print(f"top5_point_rate={clean_test_stab['top5_point_rate']:.3f}")
+    print(f"top3_complete_rate={clean_test_stab['top3_complete_rate']:.3f}")
+    print(f"win_in_top5_rate={clean_test_stab['win_in_top5_rate']:.3f}")
+    print(f"place_in_top5_rate={clean_test_stab['place_in_top5_rate']:.3f}")
+
+    print("\n=== [CLEAN ALL] place/surface weights applied ===")
+    print(f"point_sum={clean_all_s:.3f} / races={clean_all_t}")
+    print(f"top5_point_rate={clean_all_stab['top5_point_rate']:.3f}")
+    print(f"top3_complete_rate={clean_all_stab['top3_complete_rate']:.3f}")
+    print(f"win_in_top5_rate={clean_all_stab['win_in_top5_rate']:.3f}")
+    print(f"place_in_top5_rate={clean_all_stab['place_in_top5_rate']:.3f}")
 
     place_eval_rows = []
     all_places = sorted([p for p in df_feat_all["place_name"].dropna().astype(str).unique().tolist() if p])
@@ -676,7 +831,7 @@ def main() -> None:
         if place_df_all.empty:
             continue
 
-        s, t, i, r, _, stab = eval_success_and_roi(
+        s, t, _, _, _, stab = eval_success_and_roi(
             weights_map, place_df_all, df_res_entries, df_res_payout
         )
         place_eval_rows.append(
@@ -685,9 +840,6 @@ def main() -> None:
                 "rid_count_all": int(place_df_all["rid_str"].astype(str).nunique()),
                 "point_sum": s,
                 "total_races": t,
-                "invest": i,
-                "return": r,
-                "roi": stab["roi"],
                 "top5_point_rate": stab["top5_point_rate"],
                 "top3_complete_rate": stab["top3_complete_rate"],
                 "win_in_top5_rate": stab["win_in_top5_rate"],
@@ -718,7 +870,7 @@ def main() -> None:
         if place_surface_df_all.empty:
             continue
 
-        s, t, i, r, _, stab = eval_success_and_roi(
+        s, t, _, _, _, stab = eval_success_and_roi(
             weights_map, place_surface_df_all, df_res_entries, df_res_payout
         )
         place_surface_eval_rows.append(
@@ -728,9 +880,6 @@ def main() -> None:
                 "rid_count_all": int(place_surface_df_all["rid_str"].astype(str).nunique()),
                 "point_sum": s,
                 "total_races": t,
-                "invest": i,
-                "return": r,
-                "roi": stab["roi"],
                 "top5_point_rate": stab["top5_point_rate"],
                 "top3_complete_rate": stab["top3_complete_rate"],
                 "win_in_top5_rate": stab["win_in_top5_rate"],
@@ -808,6 +957,9 @@ def main() -> None:
             {"mode": "TRAIN", **train_debug},
             {"mode": "TEST", **test_debug},
             {"mode": "ALL", **all_debug},
+            {"mode": "CLEAN_TRAIN", **clean_train_debug},
+            {"mode": "CLEAN_TEST", **clean_test_debug},
+            {"mode": "CLEAN_ALL", **clean_all_debug},
         ]
     )
 
@@ -816,8 +968,56 @@ def main() -> None:
             all_rid_summary,
             train_rid_summary,
             test_rid_summary,
+            clean_all_rid_summary,
+            clean_train_rid_summary,
+            clean_test_rid_summary,
         ]
     )
+
+    clean_target_summary_df = pd.DataFrame(
+        [
+            {"mode": "CLEAN_ALL", **clean_all_target_summary},
+            {"mode": "CLEAN_TRAIN", **clean_train_target_summary},
+            {"mode": "CLEAN_TEST", **clean_test_target_summary},
+        ]
+    )
+
+    eval_summary_rows = [
+        ("TRAIN", train_s, train_t, train_stab),
+        ("TEST", test_s, test_t, test_stab),
+        ("ALL", all_s, all_t, all_stab),
+        ("CLEAN_TRAIN", clean_train_s, clean_train_t, clean_train_stab),
+        ("CLEAN_TEST", clean_test_s, clean_test_t, clean_test_stab),
+        ("CLEAN_ALL", clean_all_s, clean_all_t, clean_all_stab),
+    ]
+    eval_summary_df = pd.DataFrame(
+        [
+            {
+                "mode": mode,
+                "point_sum": point_sum,
+                "total_races": total_races,
+                "top5_point_rate": stab["top5_point_rate"],
+                "top3_complete_rate": stab["top3_complete_rate"],
+                "win_in_top5_rate": stab["win_in_top5_rate"],
+                "place_in_top5_rate": stab["place_in_top5_rate"],
+                "rank1_win_rate": stab.get("rank1_win_rate", 0.0),
+                "rank1_place_rate": stab.get("rank1_place_rate", 0.0),
+            }
+            for mode, point_sum, total_races, stab in eval_summary_rows
+        ]
+    )
+    roi_related_cols = [
+        "roi",
+        "invest",
+        "return",
+        "invest_yen",
+        "return_yen",
+        "best_roi",
+        "best_invest",
+        "best_return",
+    ]
+    debug_summary_df = debug_summary_df.drop(columns=roi_related_cols, errors="ignore")
+    place_summary_export_df = place_summary_df.drop(columns=roi_related_cols, errors="ignore")
 
     with pd.ExcelWriter(out_xlsx, engine="openpyxl") as writer:
         pd.DataFrame(rows).to_excel(writer, sheet_name="report", index=False)
@@ -828,9 +1028,6 @@ def main() -> None:
                     "mode": "TRAIN",
                     "point_sum": train_s,
                     "total_races": train_t,
-                    "invest": train_i,
-                    "return": train_r,
-                    "roi": train_stab["roi"],
                     "top5_point_rate": train_stab["top5_point_rate"],
                     "top3_complete_rate": train_stab["top3_complete_rate"],
                     "win_in_top5_rate": train_stab["win_in_top5_rate"],
@@ -845,9 +1042,6 @@ def main() -> None:
                     "mode": "TEST",
                     "point_sum": test_s,
                     "total_races": test_t,
-                    "invest": test_i,
-                    "return": test_r,
-                    "roi": test_stab["roi"],
                     "top5_point_rate": test_stab["top5_point_rate"],
                     "top3_complete_rate": test_stab["top3_complete_rate"],
                     "win_in_top5_rate": test_stab["win_in_top5_rate"],
@@ -862,9 +1056,6 @@ def main() -> None:
                     "mode": "ALL",
                     "point_sum": all_s,
                     "total_races": all_t,
-                    "invest": all_i,
-                    "return": all_r,
-                    "roi": all_stab["roi"],
                     "top5_point_rate": all_stab["top5_point_rate"],
                     "top3_complete_rate": all_stab["top3_complete_rate"],
                     "win_in_top5_rate": all_stab["win_in_top5_rate"],
@@ -873,6 +1064,8 @@ def main() -> None:
             ]
         ).to_excel(writer, sheet_name="all_summary", index=False)
 
+        eval_summary_df.to_excel(writer, sheet_name="eval_summary", index=False)
+        clean_target_summary_df.to_excel(writer, sheet_name="clean_target_summary", index=False)
         debug_summary_df.to_excel(writer, sheet_name="debug_summary", index=False)
         rid_row_summary_df.to_excel(writer, sheet_name="rid_row_summary", index=False)
         df_file_debug.to_excel(writer, sheet_name="file_debug", index=False)
@@ -893,7 +1086,7 @@ def main() -> None:
                 ]
             ).to_excel(writer, sheet_name="file_exclusion_summary", index=False)
 
-        place_summary_df.to_excel(writer, sheet_name="place_opt_summary", index=False)
+        place_summary_export_df.to_excel(writer, sheet_name="place_opt_summary", index=False)
         place_eval_df.to_excel(writer, sheet_name="place_eval_all", index=False)
         place_surface_eval_df.to_excel(writer, sheet_name="place_surface_eval_all", index=False)
 
