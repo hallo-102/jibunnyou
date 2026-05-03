@@ -30,6 +30,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import random
 from typing import Any, Dict
@@ -39,6 +41,22 @@ import pandas as pd
 from .common import WeightsMap, _blend_weights, _clip_weight_by_name, _normalize_surface_name
 from .config import CONFIG, FEAT_COLS, FEATURE_WEIGHTS_SEED
 from .scoring import build_eval_context, better_by_objective, calc_objective_score, eval_success_and_roi
+
+
+def _stable_label_offset(label: str) -> int:
+    digest = hashlib.md5(str(label or "").encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % 10000
+
+
+def _optimizer_seeds() -> list[int]:
+    raw = CONFIG.get("OPTIMIZER_SEEDS", None)
+    if raw is None:
+        return [int(CONFIG["RANDOM_SEED"])]
+    if isinstance(raw, str):
+        seeds = [int(x.strip()) for x in raw.split(",") if x.strip()]
+    else:
+        seeds = [int(x) for x in raw]
+    return seeds or [int(CONFIG["RANDOM_SEED"])]
 
 
 def random_neighbor(
@@ -69,8 +87,116 @@ def optimize_single_weight_set(
     df_res_payout: pd.DataFrame,
     n_iter: int,
     label: str = "",
+    optimizer_seed: int | None = None,
 ) -> tuple[Dict[str, float], Dict[str, Any], Dict[str, Dict[str, Any]]]:
-    random.seed(CONFIG["RANDOM_SEED"] + (abs(hash(label)) % 10000))
+    seeds = [int(optimizer_seed)] if optimizer_seed is not None else _optimizer_seeds()
+    if len(seeds) > 1:
+        best_result = None
+        seed_rows = []
+        seed_weight_rows = []
+        print(f"[INFO] {label} は複数seedで最適化します: {seeds}")
+        for seed in seeds:
+            w, summary, det = optimize_single_weight_set(
+                seed_w=seed_w,
+                df_feat=df_feat,
+                df_res_entries=df_res_entries,
+                df_res_payout=df_res_payout,
+                n_iter=n_iter,
+                label=f"{label}#seed{seed}",
+                optimizer_seed=seed,
+            )
+            seed_rows.append({
+                "optimizer_seed": seed,
+                "best_objective": float(summary.get("best_objective", 0.0)),
+                "best_top5_point_rate": float(summary.get("best_top5_point_rate", 0.0)),
+                "best_top3_complete_rate": float(summary.get("best_top3_complete_rate", 0.0)),
+                "best_win_in_top5_rate": float(summary.get("best_win_in_top5_rate", 0.0)),
+                "best_place_in_top5_rate": float(summary.get("best_place_in_top5_rate", 0.0)),
+            })
+            seed_weight_rows.append(w)
+            if best_result is None:
+                best_result = (w, summary, det)
+                continue
+            _, best_summary, _ = best_result
+            if better_by_objective(
+                float(summary.get("best_objective", 0.0)),
+                {
+                    "top5_point_rate": float(summary.get("best_top5_point_rate", 0.0)),
+                    "top3_complete_rate": float(summary.get("best_top3_complete_rate", 0.0)),
+                    "win_in_top5_rate": float(summary.get("best_win_in_top5_rate", 0.0)),
+                    "place_in_top5_rate": float(summary.get("best_place_in_top5_rate", 0.0)),
+                    "rank1_place_rate": float(summary.get("best_rank1_place_rate", 0.0)),
+                    "rank1_win_rate": float(summary.get("best_rank1_win_rate", 0.0)),
+                },
+                float(best_summary.get("best_objective", 0.0)),
+                {
+                    "top5_point_rate": float(best_summary.get("best_top5_point_rate", 0.0)),
+                    "top3_complete_rate": float(best_summary.get("best_top3_complete_rate", 0.0)),
+                    "win_in_top5_rate": float(best_summary.get("best_win_in_top5_rate", 0.0)),
+                    "place_in_top5_rate": float(best_summary.get("best_place_in_top5_rate", 0.0)),
+                    "rank1_place_rate": float(best_summary.get("best_rank1_place_rate", 0.0)),
+                    "rank1_win_rate": float(best_summary.get("best_rank1_win_rate", 0.0)),
+                },
+            ):
+                best_result = (w, summary, det)
+
+        assert best_result is not None
+        best_w, best_summary, best_det = best_result
+        best_obj = float(best_summary.get("best_objective", 0.0))
+
+        median_w = {
+            col: _clip_weight_by_name(
+                col,
+                float(pd.Series([float(w.get(col, 0.0)) for w in seed_weight_rows]).median()),
+            )
+            for col in FEAT_COLS
+        }
+        median_map = {"__default__": median_w}
+        median_s, median_t, median_i, median_r, median_det, median_stab = eval_success_and_roi(
+            median_map, df_feat, df_res_entries, df_res_payout
+        )
+        median_obj = calc_objective_score(median_stab)
+        seed_rows.append({
+            "optimizer_seed": "median",
+            "best_objective": float(median_obj),
+            "best_top5_point_rate": float(median_stab.get("top5_point_rate", 0.0)),
+            "best_top3_complete_rate": float(median_stab.get("top3_complete_rate", 0.0)),
+            "best_win_in_top5_rate": float(median_stab.get("win_in_top5_rate", 0.0)),
+            "best_place_in_top5_rate": float(median_stab.get("place_in_top5_rate", 0.0)),
+        })
+
+        accept_ratio = float(CONFIG.get("MULTISEED_MEDIAN_ACCEPT_RATIO", 0.98) or 0.98)
+        if best_obj > 0.0 and median_obj >= best_obj * accept_ratio:
+            best_w = median_w
+            best_det = median_det
+            best_summary = {
+                "best_success": median_s,
+                "best_total": median_t,
+                "best_invest": median_i,
+                "best_return": median_r,
+                "best_roi": (median_r / median_i) if median_i else 0.0,
+                "best_success_rate": median_stab["success_rate"],
+                "best_objective": median_obj,
+                "best_top5_point_rate": median_stab["top5_point_rate"],
+                "best_top3_complete_rate": median_stab["top3_complete_rate"],
+                "best_win_in_top5_rate": median_stab["win_in_top5_rate"],
+                "best_place_in_top5_rate": median_stab["place_in_top5_rate"],
+                "best_rank1_place_rate": median_stab.get("rank1_place_rate", 0.0),
+                "best_rank1_win_rate": median_stab.get("rank1_win_rate", 0.0),
+                "optimizer_seed": "median",
+            }
+
+        best_summary = dict(best_summary)
+        best_summary["seed_results_json"] = json.dumps(seed_rows, ensure_ascii=False)
+        print(
+            f"[INFO] {label} 採用seed={best_summary.get('optimizer_seed')} "
+            f"best_obj={best_summary.get('best_objective', 0.0):.4f} "
+            f"best_complete={best_summary.get('best_top3_complete_rate', 0.0):.3f}"
+        )
+        return best_w, best_summary, best_det
+
+    actual_seed = int(seeds[0])
+    random.seed(actual_seed + _stable_label_offset(label))
     eval_context = build_eval_context(df_feat, df_res_entries, df_res_payout)
 
     cur_w = {k: _clip_weight_by_name(k, seed_w.get(k, 0.0)) for k in FEAT_COLS}
@@ -146,6 +272,9 @@ def optimize_single_weight_set(
         "best_top3_complete_rate": best_stab["top3_complete_rate"],
         "best_win_in_top5_rate": best_stab["win_in_top5_rate"],
         "best_place_in_top5_rate": best_stab["place_in_top5_rate"],
+        "best_rank1_place_rate": best_stab.get("rank1_place_rate", 0.0),
+        "best_rank1_win_rate": best_stab.get("rank1_win_rate", 0.0),
+        "optimizer_seed": actual_seed,
     }
     return best_w, summary, best_det
 
@@ -272,6 +401,9 @@ def optimize_placewise_weights(
             "best_win_in_top5_rate": p_stab["win_in_top5_rate"],
             "best_place_in_top5_rate": p_stab["place_in_top5_rate"],
             "blend_alpha": blend_alpha,
+            "optimizer_seed": place_summary.get("optimizer_seed"),
+            "raw_best_objective": place_summary.get("best_objective"),
+            "seed_results_json": place_summary.get("seed_results_json", ""),
         })
 
     train_place_surface_counts = (
@@ -317,7 +449,7 @@ def optimize_placewise_weights(
             continue
 
         place_surface_seed = dict(parent_w)
-        place_surface_w_raw, _, _ = optimize_single_weight_set(
+        place_surface_w_raw, place_surface_summary, _ = optimize_single_weight_set(
             seed_w=place_surface_seed,
             df_feat=place_surface_df,
             df_res_entries=df_res_entries,
@@ -375,6 +507,9 @@ def optimize_placewise_weights(
             "best_win_in_top5_rate": ps_stab["win_in_top5_rate"],
             "best_place_in_top5_rate": ps_stab["place_in_top5_rate"],
             "blend_alpha": blend_alpha,
+            "optimizer_seed": place_surface_summary.get("optimizer_seed"),
+            "raw_best_objective": place_surface_summary.get("best_objective"),
+            "seed_results_json": place_surface_summary.get("seed_results_json", ""),
         })
 
     place_summary_df = pd.DataFrame(summary_rows)

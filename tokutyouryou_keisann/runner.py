@@ -249,6 +249,170 @@ def _print_clean_eval_summary(summary: dict, label: str) -> dict:
     return row
 
 
+def _distance_bucket(distance_m: object) -> str:
+    v = pd.to_numeric(pd.Series([distance_m]), errors="coerce").iloc[0]
+    if pd.isna(v):
+        return "unknown"
+    v = int(v)
+    if v < 1400:
+        return "short_lt1400"
+    if v < 1800:
+        return "mile_1400_1799"
+    if v < 2200:
+        return "middle_1800_2199"
+    if v < 2600:
+        return "long_2200_2599"
+    return "stayer_ge2600"
+
+
+def _field_size_bucket(field_size: object) -> str:
+    v = pd.to_numeric(pd.Series([field_size]), errors="coerce").iloc[0]
+    if pd.isna(v):
+        return "unknown"
+    v = int(v)
+    if v <= 8:
+        return "small_le8"
+    if v <= 12:
+        return "medium_9_12"
+    if v <= 16:
+        return "large_13_16"
+    return "full_ge17"
+
+
+def _race_class_bucket(text: object) -> str:
+    s = str(text or "").upper()
+    if any(x in s for x in ["Ｇ３", "G3", "GIII", "ＪＰＮ３", "JPN3"]):
+        return "g3"
+    if any(x in s for x in ["Ｇ２", "G2", "GII", "ＪＰＮ２", "JPN2"]):
+        return "g2"
+    if any(x in s for x in ["Ｇ１", "G1", "GI", "ＪＰＮ１", "JPN1"]):
+        return "g1"
+    if any(x in s for x in ["オープン", "ｵｰﾌﾟﾝ", "OPEN", "L", "リステッド"]):
+        return "open_l"
+    if any(x in s for x in ["3勝", "３勝", "1600"]):
+        return "3win"
+    if any(x in s for x in ["2勝", "２勝", "1000"]):
+        return "2win"
+    if any(x in s for x in ["1勝", "１勝", "500"]):
+        return "1win"
+    if any(x in s for x in ["未勝利", "新馬"]):
+        return "maiden_new"
+    return "other"
+
+
+def _build_clean_condition_analysis(
+    df_target: pd.DataFrame,
+    details: dict,
+    label: str,
+    min_races: int,
+) -> pd.DataFrame:
+    if df_target is None or df_target.empty or not details:
+        return pd.DataFrame()
+
+    meta = (
+        df_target.copy()
+        .assign(rid_str=lambda x: x["rid_str"].fillna("").astype(str))
+        .groupby("rid_str")
+        .agg(
+            place_name=("place_name", "first") if "place_name" in df_target.columns else ("rid_str", "first"),
+            surface_name=("surface_name", "first") if "surface_name" in df_target.columns else ("rid_str", "first"),
+            distance_m=("distance_m", "first") if "distance_m" in df_target.columns else ("rid_str", "size"),
+            field_size=("field_size", "first") if "field_size" in df_target.columns else ("rid_str", "size"),
+            race_class=("race_class", "first") if "race_class" in df_target.columns else ("rid_str", "first"),
+        )
+        .reset_index()
+    )
+    meta["surface_name"] = meta["surface_name"].map(_normalize_surface_name)
+    meta["place_surface"] = meta["place_name"].fillna("").astype(str) + "_" + meta["surface_name"].fillna("").astype(str)
+    meta["distance_bucket"] = meta["distance_m"].map(_distance_bucket)
+    meta["field_size_bucket"] = meta["field_size"].map(_field_size_bucket)
+    meta["race_class_bucket"] = meta["race_class"].map(_race_class_bucket)
+
+    detail_rows = []
+    for rid, d in details.items():
+        if int(d.get("evaluated", 0)) != 1:
+            continue
+        detail_rows.append(
+            {
+                "rid_str": str(rid),
+                "top5_hit_points": float(d.get("top5_hit_points", 0.0)),
+                "top3_complete": float(d.get("top3_complete", 0.0)),
+                "win_in_top5": float(d.get("win_in_top5", 0.0)),
+                "place_capture_rate": float(d.get("place_capture_rate", 0.0)),
+                "rank1_place": float(d.get("rank1_place", 0.0)),
+                "rank1_win": float(d.get("rank1_win", 0.0)),
+            }
+        )
+    if not detail_rows:
+        return pd.DataFrame()
+
+    detail_df = pd.DataFrame(detail_rows)
+    joined = detail_df.merge(meta, on="rid_str", how="left")
+    max_points = (
+        float(CONFIG["TOP5_HIT_W_FIRST"])
+        + float(CONFIG["TOP5_HIT_W_SECOND"])
+        + float(CONFIG["TOP5_HIT_W_THIRD"])
+    )
+
+    condition_cols = [
+        ("place", "place_name"),
+        ("surface", "surface_name"),
+        ("place_surface", "place_surface"),
+        ("distance_bucket", "distance_bucket"),
+        ("field_size_bucket", "field_size_bucket"),
+        ("race_class_bucket", "race_class_bucket"),
+    ]
+    rows = []
+    for condition_type, col in condition_cols:
+        if col not in joined.columns:
+            continue
+        grouped = joined.groupby(col, dropna=False)
+        for condition_value, g in grouped:
+            race_count = int(len(g))
+            if race_count < int(min_races):
+                continue
+            rows.append(
+                {
+                    "mode": label,
+                    "condition_type": condition_type,
+                    "condition_value": str(condition_value or "unknown"),
+                    "race_count": race_count,
+                    "point_sum": float(g["top5_hit_points"].sum()),
+                    "top5_point_rate": float(g["top5_hit_points"].mean() / max_points) if max_points > 0 else 0.0,
+                    "top3_complete_rate": float(g["top3_complete"].mean()),
+                    "win_in_top5_rate": float(g["win_in_top5"].mean()),
+                    "place_in_top5_rate": float(g["place_capture_rate"].mean()),
+                    "rank1_place_rate": float(g["rank1_place"].mean()),
+                    "rank1_win_rate": float(g["rank1_win"].mean()),
+                }
+            )
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    return out.sort_values(
+        ["mode", "top3_complete_rate", "top5_point_rate", "race_count"],
+        ascending=[True, True, True, False],
+    ).reset_index(drop=True)
+
+
+def _print_weakness_preview(df_analysis: pd.DataFrame, label: str, limit: int = 10) -> None:
+    if df_analysis is None or df_analysis.empty:
+        print(f"\n=== [{label}] clean condition weakness ===")
+        print("no rows")
+        return
+    print(f"\n=== [{label}] clean condition weakness worst {limit} ===")
+    view = df_analysis[df_analysis["mode"].astype(str) == label].head(int(limit))
+    for _, row in view.iterrows():
+        print(
+            f"{row['condition_type']}={row['condition_value']} "
+            f"races={int(row['race_count'])} "
+            f"top5={float(row['top5_point_rate']):.3f} "
+            f"complete={float(row['top3_complete_rate']):.3f} "
+            f"win_in5={float(row['win_in_top5_rate']):.3f}"
+        )
+
+
 def _build_rid_rows_summary(df: pd.DataFrame, label: str) -> dict:
     if df is None or df.empty or "rid_str" not in df.columns:
         return {
@@ -670,6 +834,13 @@ def main() -> None:
     print(f"[INFO] SCORE_GAP_MIN={float(CONFIG.get('SCORE_GAP_MIN', 0.0) or 0.0)}")
     print(f"[INFO] WEIGHT_RANGE=({CONFIG['WEIGHT_MIN']}, {CONFIG['WEIGHT_MAX']})")
     print(f"[INFO] RACELEVEL_WEIGHT_RANGE=({CONFIG['RACELEVEL_WEIGHT_MIN']}, {CONFIG['RACELEVEL_WEIGHT_MAX']})")
+    print(f"[INFO] OPTIMIZER_SEEDS={CONFIG.get('OPTIMIZER_SEEDS', [CONFIG.get('RANDOM_SEED')])}")
+    print(
+        "[INFO] OBJECTIVE_WEIGHTS="
+        f"top5={CONFIG['OBJ_W_TOP5_POINT_RATE']} "
+        f"top3_complete={CONFIG['OBJ_W_TOP3_COMPLETE_RATE']} "
+        f"rank1_place={CONFIG['OBJ_W_RANK1_PLACE_RATE']}"
+    )
     print(f"[INFO] 特徴量: {len(df_feat_all)} 行 / rid数={df_feat_all['rid_str'].nunique()}")
     print(
         f"[INFO] df_train: {len(df_train)} 行 / rid数={df_train['rid_str'].nunique()} "
@@ -686,6 +857,7 @@ def main() -> None:
     )
     print(f"[INFO] PLACE_BLEND_WITH_DEFAULT={CONFIG['PLACE_BLEND_WITH_DEFAULT']}")
     print(f"[INFO] PLACE_SURFACE_BLEND_WITH_PLACE={CONFIG['PLACE_SURFACE_BLEND_WITH_PLACE']}")
+    print(f"[INFO] MIN_WEAKNESS_GROUP_RACES={CONFIG.get('MIN_WEAKNESS_GROUP_RACES', 20)}")
 
     if df_file_exclusion_summary is not None and not df_file_exclusion_summary.empty:
         excluded_count = int(df_file_exclusion_summary["exclude_from_train"].sum())
@@ -737,6 +909,25 @@ def main() -> None:
     )
     clean_all_s, clean_all_t, clean_all_i, clean_all_r, clean_all_det, clean_all_stab = eval_success_and_roi(
         weights_map, df_clean_all, df_res_entries, df_res_payout
+    )
+
+    weakness_min_races = int(CONFIG.get("MIN_WEAKNESS_GROUP_RACES", 20) or 20)
+    clean_train_condition_analysis = _build_clean_condition_analysis(
+        df_clean_train, clean_train_det, "CLEAN_TRAIN", weakness_min_races
+    )
+    clean_test_condition_analysis = _build_clean_condition_analysis(
+        df_clean_test, clean_test_det, "CLEAN_TEST", weakness_min_races
+    )
+    clean_all_condition_analysis = _build_clean_condition_analysis(
+        df_clean_all, clean_all_det, "CLEAN_ALL", weakness_min_races
+    )
+    clean_condition_analysis_df = pd.concat(
+        [
+            clean_train_condition_analysis,
+            clean_test_condition_analysis,
+            clean_all_condition_analysis,
+        ],
+        ignore_index=True,
     )
 
     train_debug = _print_eval_debug_summary(
@@ -823,6 +1014,8 @@ def main() -> None:
     print(f"top3_complete_rate={clean_all_stab['top3_complete_rate']:.3f}")
     print(f"win_in_top5_rate={clean_all_stab['win_in_top5_rate']:.3f}")
     print(f"place_in_top5_rate={clean_all_stab['place_in_top5_rate']:.3f}")
+
+    _print_weakness_preview(clean_condition_analysis_df, "CLEAN_TEST", limit=10)
 
     place_eval_rows = []
     all_places = sorted([p for p in df_feat_all["place_name"].dropna().astype(str).unique().tolist() if p])
@@ -1066,6 +1259,7 @@ def main() -> None:
 
         eval_summary_df.to_excel(writer, sheet_name="eval_summary", index=False)
         clean_target_summary_df.to_excel(writer, sheet_name="clean_target_summary", index=False)
+        clean_condition_analysis_df.to_excel(writer, sheet_name="clean_condition_analysis", index=False)
         debug_summary_df.to_excel(writer, sheet_name="debug_summary", index=False)
         rid_row_summary_df.to_excel(writer, sheet_name="rid_row_summary", index=False)
         df_file_debug.to_excel(writer, sheet_name="file_debug", index=False)

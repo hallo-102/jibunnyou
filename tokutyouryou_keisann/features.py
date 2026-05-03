@@ -234,9 +234,29 @@ def build_features_from_one_file(xlsx_path: str) -> pd.DataFrame:
         meta_cols["surface_name"] = merged_local["芝ダ"].map(_normalize_surface_name)
     else:
         meta_cols["surface_name"] = ""
+    if "距離" in merged_local.columns:
+        meta_cols["distance_m"] = merged_local["距離"].apply(
+            lambda v: _to_int(re.search(r"(\d+)", str(v)).group(1))
+            if pd.notna(v) and re.search(r"(\d+)", str(v))
+            else None
+        )
+    else:
+        meta_cols["distance_m"] = None
+    meta_cols["field_size"] = merged_local["頭数"] if "頭数" in merged_local.columns else pd.NA
+    meta_cols["popularity"] = merged_local["人気"] if "人気" in merged_local.columns else pd.NA
+    if "クラス" in merged_local.columns:
+        meta_cols["race_class"] = merged_local["クラス"]
+    elif "レース名" in merged_local.columns:
+        meta_cols["race_class"] = merged_local["レース名"]
+    else:
+        meta_cols["race_class"] = ""
     feat_df = pd.merge(feat_df, meta_cols.drop_duplicates(subset=["rid_str", "馬番"]), on=["rid_str", "馬番"], how="left")
     feat_df["place_name"] = feat_df.get("place_name", "").fillna("").astype(str)
     feat_df["surface_name"] = feat_df.get("surface_name", "").fillna("").map(_normalize_surface_name)
+    feat_df["distance_m"] = pd.to_numeric(feat_df.get("distance_m"), errors="coerce")
+    feat_df["field_size"] = pd.to_numeric(feat_df.get("field_size"), errors="coerce")
+    feat_df["popularity"] = pd.to_numeric(feat_df.get("popularity"), errors="coerce")
+    feat_df["race_class"] = feat_df.get("race_class", "").fillna("").astype(str)
     feat_df = _attach_dl_features(merged_local, feat_df)
 
     place_map, surface_map, dist_map, field_size_map, baba_map, pop_map = _build_pipeline_context_maps(merged_local)
