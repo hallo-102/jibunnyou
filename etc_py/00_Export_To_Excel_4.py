@@ -26,6 +26,7 @@ pd.set_option("future.no_silent_downcasting", True)
 
 BASE_DIR = Path("C:/Users/okino/OneDrive/ドキュメント/my_python_cursor/keiba_yosou_2026/data/master")
 PLACE_BABA_TIME_PATH = BASE_DIR / "場所_馬場_タイム.xlsx"
+GRADE_RACE_MASTER_PATH = BASE_DIR / "grade_race_master.csv"
 
 # ========= 0) Excelを安全に開く（PermissionError対策） =======================
 
@@ -384,8 +385,8 @@ def parse_baba(s: Optional[str]) -> Optional[str]:
     return raw
 
 
-GRADE_RACE_NAME_MAP = {
-    # JRA平地G1。race_infoに格付け表記が無い場合でも、主要重賞名からクラスを補完する。
+DEFAULT_GRADE_RACE_NAME_MAP = {
+    # CSVが無い場合の最低限フォールバック。通常は grade_race_master.csv を使う。
     "フェブラリーS": "Ｇ１",
     "高松宮記念": "Ｇ１",
     "大阪杯": "Ｇ１",
@@ -429,16 +430,130 @@ def normalize_race_name_text(race_name: Optional[str]) -> str:
         return ""
     text = str(race_name).strip()
     text = text.replace("　", " ").replace("Ｇ", "G")
+    text = text.replace("ステークス", "S").replace("カップ", "C")
     return re.sub(r"\s+", "", text)
 
 
-def infer_class_from_race_name(race_name: Optional[str]) -> Optional[str]:
+_GRADE_RACE_MASTER_CACHE: Optional[List[Dict[str, object]]] = None
+
+
+def normalize_grade_class(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    text = str(value).strip().upper()
+    text = text.translate(str.maketrans({
+        "１": "1", "２": "2", "３": "3",
+        "Ⅰ": "I", "Ⅱ": "II", "Ⅲ": "III",
+        "Ｉ": "I", "Ｖ": "V", "Ｇ": "G",
+    }))
+    text = text.replace(" ", "")
+    if text in ("G1", "GI"):
+        return "Ｇ１"
+    if text in ("G2", "GII"):
+        return "Ｇ２"
+    if text in ("G3", "GIII"):
+        return "Ｇ３"
+    return None
+
+
+def parse_grade_from_text(text: str) -> Optional[str]:
+    """
+    GIII の中に GI が含まれる誤判定を避けるため、G3 -> G2 -> G1 の順で見る。
+    """
+    if not isinstance(text, str):
+        return None
+    t = text.upper()
+    t = t.translate(str.maketrans({
+        "１": "1", "２": "2", "３": "3",
+        "Ⅰ": "I", "Ⅱ": "II", "Ⅲ": "III",
+        "Ｉ": "I", "Ｖ": "V", "Ｇ": "G",
+    }))
+    t = re.sub(r"\s+", "", t)
+    if any(k in t for k in ("GIII", "G3")):
+        return "Ｇ３"
+    if any(k in t for k in ("GII", "G2")):
+        return "Ｇ２"
+    if any(k in t for k in ("GI", "G1")):
+        return "Ｇ１"
+    return None
+
+
+def _year_in_range(year: Optional[int], from_year, to_year) -> bool:
+    if year is None:
+        return True
+    try:
+        start = int(from_year) if pd.notna(from_year) and str(from_year).strip() else None
+    except Exception:
+        start = None
+    try:
+        end = int(to_year) if pd.notna(to_year) and str(to_year).strip() else None
+    except Exception:
+        end = None
+    if start is not None and year < start:
+        return False
+    if end is not None and year > end:
+        return False
+    return True
+
+
+def load_grade_race_master() -> List[Dict[str, object]]:
+    """
+    重賞レース名マスタを読み込む。
+    CSVを編集すれば、コード変更なしでG2/G3補完対象を増減できる。
+    """
+    global _GRADE_RACE_MASTER_CACHE
+    if _GRADE_RACE_MASTER_CACHE is not None:
+        return _GRADE_RACE_MASTER_CACHE
+
+    records: List[Dict[str, object]] = []
+    if GRADE_RACE_MASTER_PATH.exists():
+        try:
+            df = pd.read_csv(GRADE_RACE_MASTER_PATH, encoding="utf-8-sig")
+            for _, row in df.iterrows():
+                race_class = normalize_grade_class(row.get("class"))
+                race_name = str(row.get("race_name", "")).strip()
+                if not race_name or not race_class:
+                    continue
+                aliases = str(row.get("aliases", "")).strip()
+                names = [race_name] + [a.strip() for a in aliases.split("|") if a.strip()]
+                records.append({
+                    "names": names,
+                    "class": race_class,
+                    "from_year": row.get("from_year"),
+                    "to_year": row.get("to_year"),
+                })
+        except Exception as e:
+            print(f"[warn] 重賞レース名マスタを読み込めません: {GRADE_RACE_MASTER_PATH} / {e}")
+
+    if not records:
+        for race_name, race_class in DEFAULT_GRADE_RACE_NAME_MAP.items():
+            records.append({
+                "names": [race_name],
+                "class": race_class,
+                "from_year": None,
+                "to_year": None,
+            })
+
+    # 長い名前を先に見て、部分一致の短い別名が先に当たる事故を減らす。
+    records.sort(
+        key=lambda r: max(len(normalize_race_name_text(str(n))) for n in r["names"]),
+        reverse=True,
+    )
+    _GRADE_RACE_MASTER_CACHE = records
+    return records
+
+
+def infer_class_from_race_name(race_name: Optional[str], race_year: Optional[int] = None) -> Optional[str]:
     text = normalize_race_name_text(race_name)
     if not text:
         return None
-    for key, race_class in GRADE_RACE_NAME_MAP.items():
-        if normalize_race_name_text(key) in text:
-            return race_class
+    for record in load_grade_race_master():
+        if not _year_in_range(race_year, record.get("from_year"), record.get("to_year")):
+            continue
+        for key in record["names"]:
+            norm_key = normalize_race_name_text(str(key))
+            if norm_key and norm_key in text:
+                return str(record["class"])
     return None
 
 
@@ -449,7 +564,11 @@ def is_classic_generation_g1(race_name: Optional[str]) -> bool:
     return any(normalize_race_name_text(name) in text for name in CLASSIC_GENERATION_G1_NAMES)
 
 
-def parse_race_class(race_info: Optional[str], race_name: Optional[str]) -> Optional[str]:
+def parse_race_class(
+    race_info: Optional[str],
+    race_name: Optional[str],
+    race_year: Optional[int] = None,
+) -> Optional[str]:
     """
     レース情報/レース名からクラスを抽出して正規化する。
     """
@@ -458,10 +577,6 @@ def parse_race_class(race_info: Optional[str], race_name: Optional[str]) -> Opti
     s_all = s_info + " " + s_name
 
     is_jump = ("障害" in s_all)
-
-    inferred_by_name = infer_class_from_race_name(race_name)
-    if inferred_by_name is not None:
-        return inferred_by_name
 
     if "未勝利" in s_all:
         return "未勝利(障害)" if is_jump else "未勝利"
@@ -476,12 +591,13 @@ def parse_race_class(race_info: Optional[str], race_name: Optional[str]) -> Opti
         num = ch.translate(trans)
         return f"{num}勝クラス"
 
-    if any(k in s_all for k in ("Ｇ１", "G1", "GI", "ＧＩ")):
-        return "Ｇ１"
-    if any(k in s_all for k in ("Ｇ２", "G2", "GII", "ＧＩＩ")):
-        return "Ｇ２"
-    if any(k in s_all for k in ("Ｇ３", "G3", "GIII", "ＧＩＩＩ")):
-        return "Ｇ３"
+    explicit_grade = parse_grade_from_text(s_all)
+    if explicit_grade is not None:
+        return explicit_grade
+
+    inferred_by_name = infer_class_from_race_name(race_name, race_year)
+    if inferred_by_name is not None:
+        return inferred_by_name
 
     if "リステッド" in s_all or re.search(r"\bL\b", s_all, flags=re.I):
         return "ｵｰﾌﾟﾝ"
@@ -1141,7 +1257,11 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                 race_info = str(g["race_info"].iloc[0]) if "race_info" in g.columns else None
 
                 start_time, place, ground, distance = parse_race_info(race_info)
-                race_class = parse_race_class(race_info, race_name)
+                try:
+                    race_year = int(str(date_str)[:4])
+                except Exception:
+                    race_year = None
+                race_class = parse_race_class(race_info, race_name, race_year)
                 baba = parse_baba(race_info)
                 surface_key = get_surface_key(ground)
                 condition_key = get_condition_key(place, ground, distance, baba)
