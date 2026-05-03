@@ -6,7 +6,7 @@ from __future__ import annotations
 # ───────────────────────────────
 # ▼ ここにパラメータをまとめて設定
 # ───────────────────────────────
-RACE_DATE = "20260502"    # 取得したい開催日 (YYYYMMDD) ← 必要に応じてここだけ変える
+RACE_DATE = "20260503"    # 取得したい開催日 (YYYYMMDD) ← 必要に応じてここだけ変える
 HEADLESS = True           # デバッグ時は False にするとブラウザが見える
 SCROLL_PAUSE = 0.8
 SCROLL_MAX = 20

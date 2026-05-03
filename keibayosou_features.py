@@ -189,6 +189,16 @@ def _normalize_place_text(x: Any) -> str:
     return s
 
 
+def _normalize_horse_name(x: Any) -> str:
+    """馬名結合用に全角半角・空白ゆらぎを吸収する。"""
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return ""
+    s = str(x)
+    s = s.replace("\u3000", "")
+    s = re.sub(r"\s+", "", s)
+    return s.strip()
+
+
 def _bucket_distance(dist: Optional[int]) -> str:
     if dist is None or (isinstance(dist, float) and np.isnan(dist)):
         return ""
@@ -321,6 +331,85 @@ def _safe_recent_mean(s: pd.Series, n: int = 3) -> float:
     """日付降順に並んだ Series から、直近 n 件の平均を返す。"""
     s_num = pd.to_numeric(s, errors="coerce").dropna()
     return float(s_num.head(n).mean()) if not s_num.empty else np.nan
+
+
+def _attach_master_rating_features(
+    feat_df: pd.DataFrame,
+    levels_df: Optional[pd.DataFrame],
+) -> pd.DataFrame:
+    """
+    race_levels.xlsx の ratings シート由来の馬ratingを予想対象馬へ結合する。
+    絶対値だけでなくレース内相対値を作り、スコアがratingの尺度に支配されにくくする。
+    """
+    out = feat_df.copy()
+    add_cols = [
+        "master_rating",
+        "master_start_count",
+        "master_recent_rating",
+        "master_rating_confidence",
+        "master_recent_start_count_180d",
+        "master_rating_volatility",
+        "master_rating_vs_field_mean",
+        "master_recent_rating_vs_field_mean",
+        "master_rating_field_percentile",
+        "master_recent_rating_field_percentile",
+        "master_rating_confidence_adjusted",
+    ]
+
+    horse_ratings = None
+    if levels_df is not None and isinstance(levels_df, pd.DataFrame):
+        horse_ratings = levels_df.attrs.get("horse_ratings")
+
+    if horse_ratings is None or not isinstance(horse_ratings, pd.DataFrame) or horse_ratings.empty:
+        for col in add_cols:
+            out[col] = np.nan
+        return out
+
+    hr = horse_ratings.copy()
+    if "name_norm" not in hr.columns:
+        name_col = "horse_name" if "horse_name" in hr.columns else "name"
+        if name_col in hr.columns:
+            hr["name_norm"] = hr[name_col].map(_normalize_horse_name)
+        else:
+            for col in add_cols:
+                out[col] = np.nan
+            return out
+
+    rename_map = {
+        "rating": "master_rating",
+        "start_count": "master_start_count",
+        "recent_rating": "master_recent_rating",
+        "rating_confidence": "master_rating_confidence",
+        "recent_start_count_180d": "master_recent_start_count_180d",
+        "rating_volatility": "master_rating_volatility",
+    }
+    keep_cols = ["name_norm"] + [c for c in rename_map if c in hr.columns]
+    hr = hr[keep_cols].rename(columns=rename_map)
+    hr = hr.dropna(subset=["name_norm"]).drop_duplicates("name_norm", keep="last")
+
+    out["name_norm"] = out["馬名"].map(_normalize_horse_name)
+    out = out.merge(hr, on="name_norm", how="left")
+    out = out.drop(columns=["name_norm"])
+
+    for col in [
+        "master_rating",
+        "master_start_count",
+        "master_recent_rating",
+        "master_rating_confidence",
+        "master_recent_start_count_180d",
+        "master_rating_volatility",
+    ]:
+        if col not in out.columns:
+            out[col] = np.nan
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+
+    out["master_rating_vs_field_mean"] = out["master_rating"] - out.groupby("rid_str")["master_rating"].transform("mean")
+    out["master_recent_rating_vs_field_mean"] = out["master_recent_rating"] - out.groupby("rid_str")["master_recent_rating"].transform("mean")
+    out["master_rating_field_percentile"] = out.groupby("rid_str")["master_rating"].rank(pct=True, method="average")
+    out["master_recent_rating_field_percentile"] = out.groupby("rid_str")["master_recent_rating"].rank(pct=True, method="average")
+    out["master_rating_confidence_adjusted"] = out["master_rating_vs_field_mean"] * out["master_rating_confidence"].fillna(0.0)
+
+    return out
 
 
 def _calc_contextual_last3f_features(
@@ -749,6 +838,8 @@ def _compute_horse_features_from_race_sheets(
     else:
         feat_df["rating_vs_field_mean"] = np.nan
         feat_df["rating_field_percentile"] = np.nan
+
+    feat_df = _attach_master_rating_features(feat_df, levels_df)
 
     for c in FEAT_COLS:
         if c not in feat_df.columns:

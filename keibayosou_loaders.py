@@ -64,9 +64,23 @@ def load_race_levels(path: str) -> pd.DataFrame:
 
     rating_master = None
     if ratings_df is not None:
-        tmp = ratings_df.rename(columns={"horse_id": "horse_id", "rating": "rating"})
-        tmp["rating"] = pd.to_numeric(tmp.get("rating"), errors="coerce")
-        rating_master = tmp[["horse_id", "rating"]]
+        tmp = ratings_df.rename(columns={"horse_id": "horse_id", "rating": "rating"}).copy()
+        rating_cols = [
+            "horse_id",
+            "rating",
+            "start_count",
+            "recent_rating",
+            "rating_confidence",
+            "recent_start_count_180d",
+            "rating_volatility",
+        ]
+        for col in rating_cols:
+            if col not in tmp.columns:
+                tmp[col] = pd.NA
+        for col in rating_cols:
+            if col != "horse_id":
+                tmp[col] = pd.to_numeric(tmp[col], errors="coerce")
+        rating_master = tmp[rating_cols].copy()
 
     entries_with_rating = None
     if entries_df is not None and rating_master is not None:
@@ -105,6 +119,8 @@ def load_race_levels(path: str) -> pd.DataFrame:
                 ],
             }
         )
+        if horse_master is not None and rating_master is not None:
+            df.attrs["horse_ratings"] = horse_master.merge(rating_master, on="horse_id", how="left")
         return df
 
     rl = race_levels_df.copy()
@@ -124,7 +140,10 @@ def load_race_levels(path: str) -> pd.DataFrame:
     rl.loc[rl["race_level"].isna(), "race_level"] = rl.loc[rl["race_level"].isna(), "rid_str"].map(rating_top5_map)
     rl.loc[rl["race_level"].isna(), "race_level"] = rl.loc[rl["race_level"].isna(), "rid_str"].map(rating_mean_map)
 
-    return rl[["rid_str", "race_level", "race_level_score", "pre_mean", "pre_top5_mean"]]
+    out = rl[["rid_str", "race_level", "race_level_score", "pre_mean", "pre_top5_mean"]].copy()
+    if horse_master is not None and rating_master is not None:
+        out.attrs["horse_ratings"] = horse_master.merge(rating_master, on="horse_id", how="left")
+    return out
 
 
 def load_base_time(path: str) -> pd.DataFrame:
