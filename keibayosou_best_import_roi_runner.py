@@ -38,6 +38,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from keibayosou_config import BASE_DIR, HORSE_RESULTS_DIR, RACE_LEVEL_XLSX, BASE_TIME_XLSX, ODDS_CSV
+from keibayosou_loaders import load_odds_csv
 from keibayosou_pipeline import run_pipeline
 from keibayosou_utils import _normalize_place
 
@@ -48,6 +49,65 @@ from keibayosou_utils import _normalize_place
 OUTPUT_DIR = BASE_DIR / "data" / "output"
 TRAIN_XLSX = BASE_DIR / "data" / "master" / "racedata_results.xlsx"
 NOW_SHEET = "今走レース情報"
+TARGET_SHEET = "TARGET"
+EST_IN3_SHEET = "推定馬券内率"
+VALUE_HORSE_SHEET = "妙味あり馬"
+RANK_RATE_TABLE_SHEET = "rank_rate_table"
+SCORE_RATE_TABLE_SHEET = "score_rate_table"
+
+
+# ============================================================
+# 推定馬券内率用のデフォルト値
+# ============================================================
+DEFAULT_RANK_IN3_RATE: Dict[int, float] = {
+    1: 45.0,
+    2: 36.0,
+    3: 30.0,
+    4: 24.0,
+    5: 19.0,
+    6: 15.0,
+    7: 12.0,
+    8: 9.0,
+    9: 7.0,
+    10: 5.0,
+}
+
+DEFAULT_SCORE_IN3_RATE: Dict[str, float] = {
+    "90以上": 55.0,
+    "80〜90未満": 43.0,
+    "70〜80未満": 31.0,
+    "60〜70未満": 20.0,
+    "50〜60未満": 12.0,
+    "50未満": 6.0,
+}
+
+SCORE_BAND_ORDER = ["90以上", "80〜90未満", "70〜80未満", "60〜70未満", "50〜60未満", "50未満"]
+EST_IN3_RESULT_COLS = [
+    "レースID",
+    "馬番",
+    "馬名",
+    "予想順位",
+    "score",
+    "頭数",
+    "単勝オッズ",
+    "人気",
+    "順位別馬券内率",
+    "score帯馬券内率",
+    "基本馬券内率",
+    "score差補正",
+    "頭数補正係数",
+    "条件適性補正",
+    "オッズ補正",
+    "穴馬救済補正",
+    "危険馬補正",
+    "補正後馬券内率",
+    "レース内調整係数",
+    "推定馬券内率",
+    "市場評価オッズ種別",
+    "市場馬券内率",
+    "期待値",
+    "妙味判定",
+]
 
 
 # ============================================================
@@ -146,6 +206,710 @@ def _pick_actual_out_excel(expected_out_excel: str) -> str:
         return expected_out_excel
 
     return max(cands, key=lambda p: os.path.getmtime(p))
+
+
+# ============================================================
+# 推定馬券内率
+# ============================================================
+def _coerce_float_series(s: pd.Series) -> pd.Series:
+    """
+    数値列または「1.2-1.5」のような文字列から、先頭の数値を取り出す。
+    複勝オッズの範囲表記にも最低限対応するための補助関数。
+    """
+    direct = pd.to_numeric(s, errors="coerce")
+    text = s.astype(str).str.replace(",", "", regex=False)
+    picked = pd.to_numeric(text.str.extract(r"([-+]?\d+(?:\.\d+)?)", expand=False), errors="coerce")
+    return direct.combine_first(picked)
+
+
+def _rank_bucket_value(rank_val: object) -> int:
+    """予想順位を 1〜9 / 10位以下 の集計キーへ寄せる。"""
+    rank_num = pd.to_numeric(pd.Series([rank_val]), errors="coerce").iloc[0]
+    if pd.isna(rank_num):
+        return 10
+    rank_int = int(rank_num)
+    if rank_int <= 0:
+        return 10
+    return rank_int if rank_int <= 9 else 10
+
+
+def _rank_bucket_label(bucket: int) -> object:
+    """順位別集計表に出す表示値を返す。"""
+    return "10位以下" if int(bucket) >= 10 else int(bucket)
+
+
+def _score_band_label(score_val: object) -> str:
+    """scoreを、過去集計と現在予想で共通利用するscore帯へ変換する。"""
+    score_num = pd.to_numeric(pd.Series([score_val]), errors="coerce").iloc[0]
+    if pd.isna(score_num):
+        return "50未満"
+    score_float = float(score_num)
+    if score_float >= 90.0:
+        return "90以上"
+    if score_float >= 80.0:
+        return "80〜90未満"
+    if score_float >= 70.0:
+        return "70〜80未満"
+    if score_float >= 60.0:
+        return "60〜70未満"
+    if score_float >= 50.0:
+        return "50〜60未満"
+    return "50未満"
+
+
+def _canonical_prediction_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    予想DataFrameの列名ゆらぎを吸収し、推定馬券内率計算に必要な基本列を作る。
+    必須に近い列が無い場合も、後続で可能な範囲で補完する。
+    """
+    out = df.copy()
+
+    c_rid = _pick_col(out, ["rid_str", "レースID", "race_id"])
+    if c_rid is None:
+        raise RuntimeError("推定馬券内率計算に必要な rid_str/レースID 列が見つかりません")
+    out["rid_str"] = _normalize_rid_series(out[c_rid])
+
+    c_umaban = _pick_col(out, ["馬番", "馬 番", "umaban"])
+    if c_umaban is None:
+        raise RuntimeError("推定馬券内率計算に必要な 馬番 列が見つかりません")
+    out["馬番"] = _normalize_umaban_series(out[c_umaban])
+
+    c_name = _pick_col(out, ["馬名", "horse_name", "name"])
+    if c_name is not None and c_name != "馬名":
+        out["馬名"] = out[c_name]
+    elif "馬名" not in out.columns:
+        out["馬名"] = pd.NA
+
+    c_score = _pick_col(out, ["score", "スコア"])
+    if c_score is not None and c_score != "score":
+        out["score"] = _coerce_float_series(out[c_score])
+    elif "score" in out.columns:
+        out["score"] = _coerce_float_series(out["score"])
+    else:
+        out["score"] = np.nan
+
+    c_rank = _pick_col(out, ["予想順位", "rank", "順位"])
+    if c_rank is not None:
+        out["予想順位"] = pd.to_numeric(out[c_rank], errors="coerce")
+    elif out["score"].notna().any():
+        out["予想順位"] = out.groupby("rid_str")["score"].rank(ascending=False, method="dense")
+    else:
+        out["予想順位"] = np.nan
+
+    c_field = _pick_col(out, ["頭数", "頭 数", "field_size"])
+    if c_field is not None:
+        out["頭数"] = pd.to_numeric(out[c_field], errors="coerce")
+    else:
+        out["頭数"] = out.groupby("rid_str")["馬番"].transform("count")
+
+    c_pop = _pick_col(out, ["人気", "人 気", "popularity"])
+    if c_pop is not None:
+        out["人気"] = pd.to_numeric(out[c_pop], errors="coerce")
+    elif "人気" not in out.columns:
+        out["人気"] = np.nan
+
+    c_tansho = _pick_col(out, ["単勝オッズ", "単勝 オッズ", "単勝", "tansho", "オッズ"])
+    if c_tansho is not None:
+        out["単勝オッズ"] = _coerce_float_series(out[c_tansho])
+    elif "単勝オッズ" not in out.columns:
+        out["単勝オッズ"] = np.nan
+
+    c_fukusho = _pick_col(out, ["複勝オッズ", "複勝", "fukusho"])
+    if c_fukusho is not None:
+        out["複勝オッズ"] = _coerce_float_series(out[c_fukusho])
+
+    if "レースID" not in out.columns:
+        out["レースID"] = out["rid_str"]
+
+    return out
+
+
+def _load_actual_in3_df(results_path: Path = TRAIN_XLSX) -> pd.DataFrame:
+    """
+    実結果Excelから、(rid_str, 馬番) ごとの3着内フラグを作る。
+    過去予想Excel側に実着順列が無い場合でも、このマスタと照合して集計できる。
+    """
+    if not results_path.exists():
+        print(f"[WARN] 実結果Excelが見つかりません: {results_path}")
+        return pd.DataFrame(columns=["rid_str", "馬番", "馬名", "着順", "馬券内"])
+
+    book = pd.read_excel(results_path, sheet_name=None, engine="openpyxl")
+    rows: List[pd.DataFrame] = []
+
+    for _, df in book.items():
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+
+        c_race_id = _pick_col(df, COLS_CANDIDATES["race_id"])
+        c_umaban = _pick_col(df, COLS_CANDIDATES["umaban"])
+        c_name = _pick_col(df, COLS_CANDIDATES["horse_name"])
+        c_finish = _pick_col(df, COLS_CANDIDATES["finish"])
+
+        if c_race_id is None or c_umaban is None or c_finish is None:
+            continue
+
+        rid_str = _normalize_rid_series(df[c_race_id])
+        umaban = _normalize_umaban_series(df[c_umaban])
+        finish = pd.to_numeric(df[c_finish], errors="coerce")
+
+        use = pd.DataFrame(
+            {
+                "rid_str": rid_str,
+                "馬番": umaban,
+                "馬名": df[c_name].astype(str) if c_name is not None else pd.NA,
+                "着順": finish,
+            }
+        )
+        use = use[(use["rid_str"].str.len() == 12) & use["馬番"].notna() & use["着順"].notna()].copy()
+        if use.empty:
+            continue
+
+        use["馬番"] = use["馬番"].astype("Int64")
+        use["馬券内"] = use["着順"].between(1, 3).astype(int)
+        rows.append(use)
+
+    if not rows:
+        return pd.DataFrame(columns=["rid_str", "馬番", "馬名", "着順", "馬券内"])
+
+    actual = pd.concat(rows, ignore_index=True)
+    actual = actual.drop_duplicates(subset=["rid_str", "馬番"], keep="first")
+    return actual
+
+
+def _load_historical_prediction_df(exclude_paths: Optional[List[Path]] = None) -> pd.DataFrame:
+    """
+    data/output の過去予想Excelから、順位・scoreを持つ行を集める。
+    _with_dl は中間ファイルなので除外し、最終 with_feat だけを使う。
+    """
+    exclude_resolved = {p.resolve() for p in (exclude_paths or []) if p is not None and p.exists()}
+    files = sorted(OUTPUT_DIR.glob("馬の競走成績_with_feat_*.xlsx"))
+    rows: List[pd.DataFrame] = []
+
+    for path in files:
+        if "_with_dl" in path.stem:
+            continue
+        if path.exists() and path.resolve() in exclude_resolved:
+            continue
+
+        try:
+            xls = pd.ExcelFile(path, engine="openpyxl")
+            sheet_name = TARGET_SHEET if TARGET_SHEET in xls.sheet_names else None
+            if sheet_name is None and NOW_SHEET in xls.sheet_names:
+                sheet_name = NOW_SHEET
+            if sheet_name is None:
+                continue
+
+            pred_raw = pd.read_excel(path, sheet_name=sheet_name, engine="openpyxl")
+            pred = _canonical_prediction_frame(pred_raw)
+            pred = pred[["rid_str", "馬番", "馬名", "score", "予想順位"]].copy()
+            pred = pred.dropna(subset=["rid_str", "馬番", "score", "予想順位"])
+            pred["馬番"] = pred["馬番"].astype("Int64")
+            pred["source_file"] = path.name
+            if not pred.empty:
+                rows.append(pred)
+        except Exception as e:
+            print(f"[WARN] 過去予想Excelの読み込みをスキップします: {path.name} / {e}")
+
+    if not rows:
+        return pd.DataFrame(columns=["rid_str", "馬番", "馬名", "score", "予想順位", "source_file"])
+
+    return pd.concat(rows, ignore_index=True)
+
+
+def _load_historical_prediction_result_df(exclude_paths: Optional[List[Path]] = None) -> pd.DataFrame:
+    """
+    過去予想と実結果を照合して、順位別・score帯別の馬券内率集計に使う明細を作る。
+    """
+    pred = _load_historical_prediction_df(exclude_paths=exclude_paths)
+    if pred.empty:
+        return pd.DataFrame(columns=["rid_str", "馬番", "馬名", "score", "予想順位", "馬券内"])
+
+    actual = _load_actual_in3_df(TRAIN_XLSX)
+    if actual.empty:
+        return pd.DataFrame(columns=["rid_str", "馬番", "馬名", "score", "予想順位", "馬券内"])
+
+    merged = pd.merge(
+        pred,
+        actual[["rid_str", "馬番", "馬券内"]],
+        on=["rid_str", "馬番"],
+        how="inner",
+    )
+
+    if merged.empty and "馬名" in pred.columns and "馬名" in actual.columns:
+        pred_name = pred.dropna(subset=["馬名"]).copy()
+        actual_name = actual.dropna(subset=["馬名"]).copy()
+        pred_name["馬名"] = pred_name["馬名"].astype(str).str.strip()
+        actual_name["馬名"] = actual_name["馬名"].astype(str).str.strip()
+        merged = pd.merge(
+            pred_name,
+            actual_name[["rid_str", "馬名", "馬券内"]],
+            on=["rid_str", "馬名"],
+            how="inner",
+        )
+
+    return merged
+
+
+def build_rank_rate_table(history_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ステップ1:
+    過去の予想結果から「予想順位ごとの3着内率」を集計する。
+    """
+    rows: List[Dict[str, object]] = []
+
+    work = history_df.copy()
+    if not work.empty:
+        work["rank_bucket"] = work["予想順位"].map(_rank_bucket_value)
+        grouped = work.groupby("rank_bucket")["馬券内"].agg(["count", "sum"])
+    else:
+        grouped = pd.DataFrame(columns=["count", "sum"])
+
+    for bucket in range(1, 11):
+        if bucket in grouped.index:
+            count = int(grouped.loc[bucket, "count"])
+            in3_count = int(grouped.loc[bucket, "sum"])
+            rate = round((in3_count / count) * 100.0, 2) if count > 0 else DEFAULT_RANK_IN3_RATE[bucket]
+        else:
+            count = 0
+            in3_count = 0
+            rate = DEFAULT_RANK_IN3_RATE[bucket]
+
+        rows.append(
+            {
+                "予想順位": _rank_bucket_label(bucket),
+                "件数": count,
+                "馬券内数": in3_count,
+                "馬券内率": rate,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def build_score_rate_table(history_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ステップ2:
+    過去の予想結果から「score帯ごとの3着内率」を集計する。
+    """
+    rows: List[Dict[str, object]] = []
+
+    work = history_df.copy()
+    if not work.empty:
+        work["score帯"] = work["score"].map(_score_band_label)
+        grouped = work.groupby("score帯")["馬券内"].agg(["count", "sum"])
+    else:
+        grouped = pd.DataFrame(columns=["count", "sum"])
+
+    for band in SCORE_BAND_ORDER:
+        if band in grouped.index:
+            count = int(grouped.loc[band, "count"])
+            in3_count = int(grouped.loc[band, "sum"])
+            rate = round((in3_count / count) * 100.0, 2) if count > 0 else DEFAULT_SCORE_IN3_RATE[band]
+        else:
+            count = 0
+            in3_count = 0
+            rate = DEFAULT_SCORE_IN3_RATE[band]
+
+        rows.append(
+            {
+                "score帯": band,
+                "件数": count,
+                "馬券内数": in3_count,
+                "馬券内率": rate,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _rank_rate_map(rank_rate_table: pd.DataFrame) -> Dict[int, float]:
+    out = DEFAULT_RANK_IN3_RATE.copy()
+    if rank_rate_table is None or rank_rate_table.empty:
+        return out
+
+    for _, row in rank_rate_table.iterrows():
+        raw_rank = row.get("予想順位")
+        if str(raw_rank) == "10位以下":
+            bucket = 10
+        else:
+            bucket = _rank_bucket_value(raw_rank)
+        rate = pd.to_numeric(pd.Series([row.get("馬券内率")]), errors="coerce").iloc[0]
+        if pd.notna(rate):
+            out[bucket] = float(rate)
+    return out
+
+
+def _score_rate_map(score_rate_table: pd.DataFrame) -> Dict[str, float]:
+    out = DEFAULT_SCORE_IN3_RATE.copy()
+    if score_rate_table is None or score_rate_table.empty:
+        return out
+
+    for _, row in score_rate_table.iterrows():
+        band = str(row.get("score帯"))
+        rate = pd.to_numeric(pd.Series([row.get("馬券内率")]), errors="coerce").iloc[0]
+        if band in out and pd.notna(rate):
+            out[band] = float(rate)
+    return out
+
+
+def _condition_correction(work: pd.DataFrame) -> pd.Series:
+    """今回条件適性スコアがある場合だけ、軽い上下補正を入れる。"""
+    c_cond = _pick_col(work, ["今回条件適性スコア", "条件適性スコア", "condition_fit_score"])
+    if c_cond is None:
+        return pd.Series(0.0, index=work.index)
+
+    cond = _coerce_float_series(work[c_cond])
+    valid = cond.dropna()
+    if not valid.empty and (valid.between(0.0, 1.0).mean() >= 0.8):
+        cond = cond * 100.0
+
+    corr = pd.Series(0.0, index=work.index)
+    corr = corr.mask(cond >= 70.0, 3.0)
+    corr = corr.mask(cond <= 40.0, -3.0)
+    return corr.astype(float)
+
+
+def _odds_correction(work: pd.DataFrame) -> pd.Series:
+    """人気を優先し、無ければ単勝オッズから軽い市場補正を入れる。"""
+    pop = pd.to_numeric(work.get("人気", pd.Series(np.nan, index=work.index)), errors="coerce")
+    odds = _coerce_float_series(work.get("単勝オッズ", pd.Series(np.nan, index=work.index)))
+
+    corr = pd.Series(0.0, index=work.index)
+    corr = corr.mask(pop.between(1, 3, inclusive="both"), 2.0)
+    corr = corr.mask(pop.between(9, 12, inclusive="both"), -2.0)
+    corr = corr.mask(pop >= 13, -4.0)
+
+    pop_missing = pop.isna()
+    corr = corr.mask(pop_missing & odds.notna() & (odds <= 5.0), 2.0)
+    corr = corr.mask(pop_missing & odds.notna() & (odds > 20.0) & (odds <= 50.0), -2.0)
+    corr = corr.mask(pop_missing & odds.notna() & (odds > 50.0), -4.0)
+    return corr.astype(float)
+
+
+def _hole_rescue_correction(work: pd.DataFrame) -> pd.Series:
+    """
+    穴馬救済スコアがあれば最大+5%で使う。
+    無い場合は、人気薄なのに予想順位・scoreが悪くない馬だけ軽く救済する。
+    """
+    c_rescue = _pick_col(work, ["穴馬救済スコア", "穴馬スコア", "妙味スコア", "value_score"])
+    if c_rescue is not None:
+        rescue = _coerce_float_series(work[c_rescue]).fillna(0.0)
+        valid = rescue.dropna()
+        if not valid.empty and (valid.between(0.0, 1.0).mean() >= 0.8):
+            rescue = rescue * 100.0
+        return (rescue.clip(lower=0.0, upper=100.0) / 100.0 * 5.0).clip(0.0, 5.0)
+
+    rank_num = pd.to_numeric(work.get("予想順位", pd.Series(np.nan, index=work.index)), errors="coerce")
+    score = pd.to_numeric(work.get("score", pd.Series(np.nan, index=work.index)), errors="coerce")
+    pop = pd.to_numeric(work.get("人気", pd.Series(np.nan, index=work.index)), errors="coerce")
+    odds = _coerce_float_series(work.get("単勝オッズ", pd.Series(np.nan, index=work.index)))
+
+    corr = pd.Series(0.0, index=work.index)
+    corr = corr.mask((rank_num <= 5) & (pop >= 9), 2.0)
+    corr = corr.mask((rank_num <= 5) & (odds >= 20.0), 2.0)
+    corr = corr.mask((rank_num <= 8) & (score >= 70.0) & ((pop >= 9) | (odds >= 20.0)), 3.0)
+    return corr.clip(0.0, 5.0).astype(float)
+
+
+def _danger_correction(work: pd.DataFrame) -> pd.Series:
+    """危険馬スコアがあれば使い、無ければ既存リスク列から最大-5%で減点する。"""
+    c_danger = _pick_col(work, ["危険馬スコア", "danger_score"])
+    if c_danger is not None:
+        danger = _coerce_float_series(work[c_danger]).fillna(0.0)
+        valid = danger.dropna()
+        if not valid.empty and (valid.between(0.0, 1.0).mean() >= 0.8):
+            danger = danger * 100.0
+        return -(danger.clip(lower=0.0, upper=100.0) / 100.0 * 5.0).clip(0.0, 5.0)
+
+    risk_cols = [
+        _pick_col(work, ["extra_penalty"]),
+        _pick_col(work, ["rest_dist_risk", "休養×距離差リスク"]),
+        _pick_col(work, ["favorite_risk"]),
+    ]
+    risk_parts = []
+    for col in risk_cols:
+        if col is not None and col in work.columns:
+            risk_parts.append(_coerce_float_series(work[col]).fillna(0.0))
+
+    if not risk_parts:
+        return pd.Series(0.0, index=work.index)
+
+    risk_df = pd.concat(risk_parts, axis=1)
+    risk_max = risk_df.max(axis=1).fillna(0.0)
+    return -(risk_max * 2.0).clip(0.0, 5.0)
+
+
+def _field_size_factor(field_size: pd.Series) -> pd.Series:
+    """頭数による入りやすさを、後段の300%調整前に軽く反映する。"""
+    field = pd.to_numeric(field_size, errors="coerce")
+    factor = pd.Series(1.0, index=field.index)
+    factor = factor.mask(field <= 8, 1.15)
+    factor = factor.mask(field.between(9, 12, inclusive="both"), 1.05)
+    factor = factor.mask(field >= 16, 0.92)
+    return factor.fillna(1.0).astype(float)
+
+
+def _normalize_in3_rates_to_race_total(raw_rates: pd.Series) -> pd.Series:
+    """
+    レース内の合計が通常300%に近づくように調整する。
+    1%〜75%の上下限を守るため、数回だけ再スケールする。
+    """
+    rates = pd.to_numeric(raw_rates, errors="coerce").fillna(0.0).astype(float)
+    if len(rates) == 0:
+        return rates
+
+    target_total = min(300.0, float(len(rates)) * 75.0)
+    if rates.sum() <= 0:
+        even = target_total / max(len(rates), 1)
+        return pd.Series(even, index=rates.index).clip(1.0, 75.0).round(2)
+
+    adjusted = rates.copy()
+    for _ in range(6):
+        total = float(adjusted.sum())
+        if total <= 0:
+            break
+        adjusted = (adjusted * (target_total / total)).clip(1.0, 75.0)
+
+    return adjusted.round(2)
+
+
+def _market_odds_and_kind(work: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
+    """市場馬券内率と期待値計算に使うオッズ列を選ぶ。複勝があれば優先する。"""
+    fukusho = _coerce_float_series(work["複勝オッズ"]) if "複勝オッズ" in work.columns else pd.Series(np.nan, index=work.index)
+    tansho = _coerce_float_series(work["単勝オッズ"]) if "単勝オッズ" in work.columns else pd.Series(np.nan, index=work.index)
+
+    odds = fukusho.combine_first(tansho)
+    kind = pd.Series("未取得", index=work.index, dtype=object)
+    kind = kind.mask(fukusho.notna(), "複勝オッズ")
+    kind = kind.mask(fukusho.isna() & tansho.notna(), "単勝オッズ")
+    return odds, kind
+
+
+def add_estimated_in3_rate(
+    pred_df: pd.DataFrame,
+    rank_rate_table: Optional[pd.DataFrame] = None,
+    score_rate_table: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """
+    今走予想DataFrameに、各馬の推定馬券内率・市場評価・期待値を追加する。
+    """
+    work = _canonical_prediction_frame(pred_df)
+
+    rank_map = _rank_rate_map(rank_rate_table if rank_rate_table is not None else pd.DataFrame())
+    score_map = _score_rate_map(score_rate_table if score_rate_table is not None else pd.DataFrame())
+
+    work["_rank_bucket"] = work["予想順位"].map(_rank_bucket_value)
+    work["score帯"] = work["score"].map(_score_band_label)
+    work["順位別馬券内率"] = work["_rank_bucket"].map(lambda x: rank_map.get(int(x), DEFAULT_RANK_IN3_RATE[10]))
+    work["score帯馬券内率"] = work["score帯"].map(lambda x: score_map.get(str(x), DEFAULT_SCORE_IN3_RATE["50未満"]))
+    work["基本馬券内率"] = (work["順位別馬券内率"] * 0.6 + work["score帯馬券内率"] * 0.4).round(2)
+
+    score_sorted = work.sort_values(["rid_str", "score", "馬番"], ascending=[True, False, True], kind="mergesort")
+    top_score_map: Dict[str, List[float]] = {}
+    for rid, sub in score_sorted.groupby("rid_str", sort=False):
+        vals = pd.to_numeric(sub["score"], errors="coerce").dropna().head(2).astype(float).tolist()
+        top_score_map[str(rid)] = vals
+
+    def _gap12(rid: object) -> float:
+        vals = top_score_map.get(str(rid), [])
+        if len(vals) < 2:
+            return 0.0
+        return round(float(vals[0] - vals[1]), 2)
+
+    work["gap12"] = work["rid_str"].map(_gap12)
+    rank_num = pd.to_numeric(work["予想順位"], errors="coerce")
+    gap = pd.to_numeric(work["gap12"], errors="coerce").fillna(0.0)
+    score_gap_corr = pd.Series(0.0, index=work.index)
+    score_gap_corr = score_gap_corr.mask((rank_num == 1) & (gap >= 8.0), 5.0)
+    score_gap_corr = score_gap_corr.mask((rank_num == 1) & (gap >= 5.0) & (gap < 8.0), 3.0)
+    score_gap_corr = score_gap_corr.mask((rank_num == 1) & (gap < 2.0), -3.0)
+    work["score差補正"] = score_gap_corr.astype(float)
+
+    work["頭数補正係数"] = _field_size_factor(work["頭数"]).round(3)
+    work["条件適性補正"] = _condition_correction(work).round(2)
+    work["オッズ補正"] = _odds_correction(work).round(2)
+    work["穴馬救済補正"] = _hole_rescue_correction(work).round(2)
+    work["危険馬補正"] = _danger_correction(work).round(2)
+
+    additive_rate = (
+        work["基本馬券内率"]
+        + work["score差補正"]
+        + work["条件適性補正"]
+        + work["オッズ補正"]
+        + work["穴馬救済補正"]
+        + work["危険馬補正"]
+    )
+    work["補正後馬券内率"] = (additive_rate.clip(lower=0.1) * work["頭数補正係数"]).round(2)
+
+    race_sum = work.groupby("rid_str")["補正後馬券内率"].transform("sum")
+    work["レース内調整係数"] = np.where(race_sum > 0, 300.0 / race_sum, 1.0)
+    work["レース内調整係数"] = pd.to_numeric(work["レース内調整係数"], errors="coerce").fillna(1.0).round(4)
+
+    work["_raw_estimated_in3"] = work["補正後馬券内率"] * work["レース内調整係数"]
+    work["推定馬券内率"] = work.groupby("rid_str")["_raw_estimated_in3"].transform(_normalize_in3_rates_to_race_total)
+
+    market_odds, market_kind = _market_odds_and_kind(work)
+    work["市場評価オッズ種別"] = market_kind
+    work["市場馬券内率"] = np.where(market_odds > 0, (1.0 / market_odds) * 100.0, np.nan)
+    work["市場馬券内率"] = pd.to_numeric(work["市場馬券内率"], errors="coerce").round(2)
+    work["期待値"] = ((work["推定馬券内率"] / 100.0) * market_odds).round(2)
+
+    ev = pd.to_numeric(work["期待値"], errors="coerce")
+    est = pd.to_numeric(work["推定馬券内率"], errors="coerce")
+    work["妙味判定"] = "オッズ未取得"
+    work["妙味判定"] = work["妙味判定"].mask(ev.notna() & (est >= 45.0) & (ev < 1.0), "来そうだが妙味なし")
+    work["妙味判定"] = work["妙味判定"].mask(ev.notna() & (ev < 0.95), "妙味なし")
+    work["妙味判定"] = work["妙味判定"].mask(ev.notna() & (ev >= 0.95) & (ev < 1.15), "ほぼ妥当")
+    work["妙味判定"] = work["妙味判定"].mask(ev.notna() & (ev >= 1.15) & (ev < 1.30), "穴候補")
+    work["妙味判定"] = work["妙味判定"].mask(ev.notna() & (ev >= 1.30), "妙味あり")
+
+    return work.drop(columns=["_rank_bucket", "_raw_estimated_in3"], errors="ignore")
+
+
+def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataFrame, raceday_str: Optional[str]) -> pd.DataFrame:
+    """
+    TARGETに、今走情報と単勝オッズを結合して推定馬券内率計算用DataFrameを作る。
+    """
+    target = _canonical_prediction_frame(target_df)
+    now = _canonical_prediction_frame(now_df) if now_df is not None and not now_df.empty else pd.DataFrame()
+
+    if not now.empty:
+        info_cols = [
+            "rid_str",
+            "馬番",
+            "レースID",
+            "頭数",
+            "人気",
+            "単勝オッズ",
+            "複勝オッズ",
+            "今回条件適性スコア",
+            "穴馬救済スコア",
+            "危険馬スコア",
+        ]
+        info_cols = [c for c in info_cols if c in now.columns]
+        now_info = now[info_cols].drop_duplicates(subset=["rid_str", "馬番"], keep="first")
+        target = pd.merge(target, now_info, on=["rid_str", "馬番"], how="left", suffixes=("", "_now"))
+
+        for col in ["レースID", "頭数", "人気", "単勝オッズ", "複勝オッズ", "今回条件適性スコア", "穴馬救済スコア", "危険馬スコア"]:
+            now_col = f"{col}_now"
+            if now_col in target.columns:
+                if col in target.columns:
+                    if target[now_col].notna().any():
+                        target[col] = target[col].combine_first(target[now_col])
+                else:
+                    target[col] = target[now_col]
+                target = target.drop(columns=[now_col])
+
+    try:
+        odds_df = load_odds_csv(str(ODDS_CSV), raceday=raceday_str)
+    except Exception as e:
+        print(f"[WARN] オッズCSV読み込みに失敗したため、期待値計算の一部をスキップします: {e}")
+        odds_df = pd.DataFrame(columns=["rid_str", "umaban", "tansho"])
+
+    if odds_df is not None and not odds_df.empty and {"rid_str", "umaban", "tansho"}.issubset(odds_df.columns):
+        odds_use = odds_df[["rid_str", "umaban", "tansho"]].copy()
+        odds_use["rid_str"] = _normalize_rid_series(odds_use["rid_str"])
+        odds_use["馬番"] = _normalize_umaban_series(odds_use["umaban"])
+        odds_use["単勝オッズ_odds_csv"] = pd.to_numeric(odds_use["tansho"], errors="coerce")
+        odds_use = odds_use.dropna(subset=["rid_str", "馬番", "単勝オッズ_odds_csv"])
+        odds_use = odds_use[["rid_str", "馬番", "単勝オッズ_odds_csv"]].drop_duplicates(
+            subset=["rid_str", "馬番"],
+            keep="first",
+        )
+
+        target = pd.merge(target, odds_use, on=["rid_str", "馬番"], how="left")
+        target["単勝オッズ"] = target["単勝オッズ"].combine_first(target["単勝オッズ_odds_csv"])
+        target = target.drop(columns=["単勝オッズ_odds_csv"], errors="ignore")
+
+    return target
+
+
+def _append_estimated_cols(base_df: pd.DataFrame, estimated_df: pd.DataFrame) -> pd.DataFrame:
+    """既存シートへ推定馬券内率の主要列を戻す。"""
+    base = _canonical_prediction_frame(base_df)
+    add_cols = ["rid_str", "馬番"] + [c for c in EST_IN3_RESULT_COLS if c in estimated_df.columns and c != "馬番"]
+    add_cols = list(dict.fromkeys(add_cols))
+
+    base = base.drop(columns=[c for c in add_cols if c not in {"rid_str", "馬番"} and c in base.columns], errors="ignore")
+    return pd.merge(
+        base,
+        estimated_df[add_cols].drop_duplicates(subset=["rid_str", "馬番"], keep="first"),
+        on=["rid_str", "馬番"],
+        how="left",
+    )
+
+
+def _add_estimated_in3_rate_to_excel(out_excel_path: str, raceday_str: Optional[str]) -> int:
+    """
+    最終出力Excelに、推定馬券内率・集計表・妙味あり馬シートを書き戻す。
+    """
+    if not os.path.exists(out_excel_path):
+        print(f"[WARN] 出力Excelが見つからないため、推定馬券内率付与をスキップ: {out_excel_path}")
+        return 0
+
+    try:
+        xls = pd.ExcelFile(out_excel_path, engine="openpyxl")
+        if TARGET_SHEET not in xls.sheet_names:
+            print(f"[WARN] '{TARGET_SHEET}' シートが無いため、推定馬券内率付与をスキップします")
+            return 0
+
+        target_df = pd.read_excel(out_excel_path, sheet_name=TARGET_SHEET, engine="openpyxl")
+        now_df = (
+            pd.read_excel(out_excel_path, sheet_name=NOW_SHEET, engine="openpyxl")
+            if NOW_SHEET in xls.sheet_names
+            else pd.DataFrame()
+        )
+    except Exception as e:
+        print(f"[WARN] 推定馬券内率用のExcel読み込みに失敗しました: {e}")
+        return 0
+
+    history_df = _load_historical_prediction_result_df(exclude_paths=[Path(out_excel_path)])
+    rank_rate_table = build_rank_rate_table(history_df)
+    score_rate_table = build_score_rate_table(history_df)
+
+    if history_df.empty:
+        print("[WARN] 過去予想と実結果の照合が0件だったため、デフォルト馬券内率で推定します")
+    else:
+        print(f"[INFO] 推定馬券内率の過去集計件数: {len(history_df)}頭")
+
+    current_df = _merge_now_and_odds_for_estimation(target_df, now_df, raceday_str)
+    estimated_df = add_estimated_in3_rate(
+        current_df,
+        rank_rate_table=rank_rate_table,
+        score_rate_table=score_rate_table,
+    )
+
+    target_aug = _append_estimated_cols(target_df, estimated_df)
+    now_aug = _append_estimated_cols(now_df, estimated_df) if now_df is not None and not now_df.empty else now_df
+
+    estimated_sheet = estimated_df.copy()
+    for col in EST_IN3_RESULT_COLS:
+        if col not in estimated_sheet.columns:
+            estimated_sheet[col] = pd.NA
+    estimated_sheet = estimated_sheet[EST_IN3_RESULT_COLS]
+
+    value_sheet = estimated_sheet[estimated_sheet["妙味判定"].isin(["妙味あり", "穴候補"])].copy()
+    if not value_sheet.empty:
+        value_sheet = value_sheet.sort_values(["期待値", "推定馬券内率"], ascending=[False, False], kind="mergesort")
+
+    try:
+        with pd.ExcelWriter(out_excel_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+            target_aug.to_excel(writer, sheet_name=TARGET_SHEET, index=False)
+            if now_aug is not None and not now_aug.empty:
+                now_aug.to_excel(writer, sheet_name=NOW_SHEET, index=False)
+            estimated_sheet.to_excel(writer, sheet_name=EST_IN3_SHEET, index=False)
+            rank_rate_table.to_excel(writer, sheet_name=RANK_RATE_TABLE_SHEET, index=False)
+            score_rate_table.to_excel(writer, sheet_name=SCORE_RATE_TABLE_SHEET, index=False)
+            value_sheet.to_excel(writer, sheet_name=VALUE_HORSE_SHEET, index=False)
+    except PermissionError:
+        print(f"[WARN] 出力Excelが開かれている可能性があります。Excelを閉じてから再実行してください: {out_excel_path}")
+        return 0
+    except Exception as e:
+        print(f"[WARN] 推定馬券内率のExcel書き戻しに失敗しました: {e}")
+        return 0
+
+    print(f"[INFO] 推定馬券内率付与完了: {len(estimated_sheet)}頭 -> {out_excel_path}")
+    return int(len(estimated_sheet))
 
 
 # ============================================================
@@ -806,6 +1570,7 @@ def main() -> None:
         raise FileNotFoundError(f"最終出力Excelが見つかりません: {actual_final_out}")
 
     _fill_tansho_odds_to_bet_sheet(actual_final_out, raceday_str)
+    _add_estimated_in3_rate_to_excel(actual_final_out, raceday_str)
 
     print("[INFO] ===== すべて完了しました =====")
     print(f"[INFO] 最終出力: {actual_final_out}")
