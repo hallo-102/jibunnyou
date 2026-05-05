@@ -658,19 +658,55 @@ def _normalize_in3_rates_to_race_total(raw_rates: pd.Series) -> pd.Series:
     if len(rates) == 0:
         return rates
 
-    target_total = min(300.0, float(len(rates)) * 75.0)
+    lower = 1.0
+    upper = 75.0
+    target_total = min(300.0, float(len(rates)) * upper)
+    target_total = max(target_total, float(len(rates)) * lower)
+
     if rates.sum() <= 0:
         even = target_total / max(len(rates), 1)
-        return pd.Series(even, index=rates.index).clip(1.0, 75.0).round(2)
+        return pd.Series(even, index=rates.index).clip(lower, upper).round(2)
 
-    adjusted = rates.copy()
-    for _ in range(6):
-        total = float(adjusted.sum())
-        if total <= 0:
-            break
-        adjusted = (adjusted * (target_total / total)).clip(1.0, 75.0)
+    def _scaled_total(scale: float) -> float:
+        return float((rates * scale).clip(lower, upper).sum())
 
-    return adjusted.round(2)
+    low = 0.0
+    high = 1.0
+    while _scaled_total(high) < target_total and high < 1_000_000.0:
+        high *= 2.0
+
+    for _ in range(80):
+        mid = (low + high) / 2.0
+        if _scaled_total(mid) < target_total:
+            low = mid
+        else:
+            high = mid
+
+    adjusted = (rates * high).clip(lower, upper)
+    rounded = adjusted.round(2)
+
+    diff = round(float(target_total - rounded.sum()), 2)
+    step = 0.01 if diff > 0 else -0.01
+    steps = int(round(abs(diff) / 0.01))
+    if steps > 0:
+        if step > 0:
+            priority = (adjusted - rounded).sort_values(ascending=False)
+            candidates = [idx for idx in priority.index if rounded.loc[idx] < upper]
+        else:
+            priority = (rounded - adjusted).sort_values(ascending=False)
+            candidates = [idx for idx in priority.index if rounded.loc[idx] > lower]
+
+        if candidates:
+            pos = 0
+            for _ in range(steps):
+                idx = candidates[pos % len(candidates)]
+                if step > 0 and rounded.loc[idx] + step <= upper:
+                    rounded.loc[idx] = round(float(rounded.loc[idx] + step), 2)
+                elif step < 0 and rounded.loc[idx] + step >= lower:
+                    rounded.loc[idx] = round(float(rounded.loc[idx] + step), 2)
+                pos += 1
+
+    return rounded.round(2)
 
 
 def _market_odds_and_kind(work: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
@@ -778,6 +814,7 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
             "rid_str",
             "馬番",
             "レースID",
+            "場所",
             "頭数",
             "人気",
             "単勝オッズ",
@@ -820,6 +857,36 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
         target = pd.merge(target, odds_use, on=["rid_str", "馬番"], how="left")
         target["単勝オッズ"] = target["単勝オッズ"].combine_first(target["単勝オッズ_odds_csv"])
         target = target.drop(columns=["単勝オッズ_odds_csv"], errors="ignore")
+
+    ozzu_path = _pick_ozzu_csv(str(ODDS_CSV), raceday_str)
+    if ozzu_path and os.path.exists(ozzu_path) and "場所" in target.columns:
+        try:
+            ozzu_raw = _read_csv_any_encoding(ozzu_path)
+            tansho_map = _build_tansho_map_from_ozzu(ozzu_raw)
+
+            def _race_no_from_rid_for_estimation(rid_val: object) -> str:
+                m = re.search(r"(\d{2})$", str(rid_val))
+                return m.group(1) if m else ""
+
+            def _umaban_for_estimation(umaban_val: object) -> Optional[int]:
+                umaban_num = pd.to_numeric(pd.Series([umaban_val]), errors="coerce").iloc[0]
+                if pd.isna(umaban_num):
+                    return None
+                return int(umaban_num)
+
+            def _lookup_tansho_by_place(row: pd.Series) -> float:
+                place_norm = _normalize_place(row.get("場所"))
+                race_no = _race_no_from_rid_for_estimation(row.get("レースID", row.get("rid_str")))
+                umaban = _umaban_for_estimation(row.get("馬番"))
+                if not place_norm or not race_no or umaban is None:
+                    return np.nan
+                return float(tansho_map.get((place_norm, race_no, int(umaban)), np.nan))
+
+            target["単勝オッズ_ozzu_place"] = target.apply(_lookup_tansho_by_place, axis=1)
+            target["単勝オッズ"] = target["単勝オッズ"].combine_first(target["単勝オッズ_ozzu_place"])
+            target = target.drop(columns=["単勝オッズ_ozzu_place"], errors="ignore")
+        except Exception as e:
+            print(f"[WARN] OZZU場所+R番号照合による単勝オッズ補完に失敗しました: {e}")
 
     return target
 
