@@ -45,7 +45,7 @@ from openpyxl import load_workbook
 # ============================================================
 
 # ★固定指定（ユーザー要望により復活）
-raceday: str = "20260503"  # YYYYMMDD                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                "  # YYYYMMDD
+raceday: str = "20260509"  # YYYYMMDD                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                "  # YYYYMMDD
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -422,6 +422,57 @@ def parse_today_race_info_from_soup(rid: str, soup: BeautifulSoup) -> list[dict[
 RACE_META_CACHE: dict[str, dict[str, str | None]] = {}
 RACE_LAP_CACHE: dict[str, str | None] = {}
 
+RACE_RESULT_EXPECTED_COLUMNS = [
+    "日付", "開催", "天 気", "R", "レース名", "映 像", "頭 数", "枠 番",
+    "馬 番", "オ ッ ズ", "人 気", "着 順", "騎手", "斤 量", "距離",
+    "水分量", "馬 場", "馬場 指数", "タイム", "着差", "ﾀｲﾑ 指数",
+    "通過", "ペース", "上り", "馬体重", "厩舎 ｺﾒﾝﾄ", "備考",
+    "勝ち馬 (2着馬)", "賞金",
+]
+
+
+def _normalize_race_result_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    db.netkeiba の競走成績テーブルを既存Excel互換の列構成に揃える。
+    現在のHTMLでは「ﾀｲﾑ 指数」と「通過」の間に追加列が入るため、その列を除外する。
+    """
+    expected = RACE_RESULT_EXPECTED_COLUMNS
+    cols = list(df.columns)
+
+    if cols == expected:
+        return df
+
+    time_index_col = "ﾀｲﾑ 指数"
+    if time_index_col not in expected:
+        return df
+
+    time_index_pos = expected.index(time_index_col)
+    expected_left = expected[:time_index_pos + 1]
+    expected_tail = expected[time_index_pos + 1:]
+
+    # 旧フォーマットより列数が多く、前半列が一致する場合は、増えた列を飛ばして後半列を戻す。
+    if len(cols) > len(expected) and cols[:time_index_pos + 1] == expected_left:
+        extra_col_count = len(cols) - len(expected)
+        tail_start_pos = time_index_pos + 1 + extra_col_count
+        tail_end_pos = tail_start_pos + len(expected_tail)
+
+        if tail_end_pos <= len(cols):
+            normalized = pd.concat(
+                [
+                    df.iloc[:, :time_index_pos + 1],
+                    df.iloc[:, tail_start_pos:tail_end_pos],
+                ],
+                axis=1,
+            )
+            normalized.columns = expected
+            return normalized
+
+    # 列名として必要列が揃っている場合は、余分な列だけ落として順序を固定する。
+    if all(col in cols for col in expected):
+        return df[expected].copy()
+
+    return df
+
 
 def get_race_lap_times(rid: str | None, sess: requests.Session) -> str | None:
     if not rid:
@@ -513,6 +564,7 @@ def get_race_results(horse_url: str, sess: requests.Session) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.read_html(io.StringIO(str(table)))[0]
+    df = _normalize_race_result_columns(df)
 
     race_ids = []
     for tr in table.find_all("tr")[1:]:

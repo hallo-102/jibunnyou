@@ -90,6 +90,7 @@ EST_IN3_RESULT_COLS = [
     "score",
     "頭数",
     "単勝オッズ",
+    "複勝オッズ",
     "人気",
     "順位別馬券内率",
     "score帯馬券内率",
@@ -317,6 +318,8 @@ def _canonical_prediction_frame(df: pd.DataFrame) -> pd.DataFrame:
     c_fukusho = _pick_col(out, ["複勝オッズ", "複勝", "fukusho"])
     if c_fukusho is not None:
         out["複勝オッズ"] = _coerce_float_series(out[c_fukusho])
+    elif "複勝オッズ" not in out.columns:
+        out["複勝オッズ"] = np.nan
 
     if "レースID" not in out.columns:
         out["レースID"] = out["rid_str"]
@@ -710,15 +713,12 @@ def _normalize_in3_rates_to_race_total(raw_rates: pd.Series) -> pd.Series:
 
 
 def _market_odds_and_kind(work: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
-    """市場馬券内率と期待値計算に使うオッズ列を選ぶ。複勝があれば優先する。"""
+    """市場馬券内率と期待値計算に使う複勝オッズを返す。"""
     fukusho = _coerce_float_series(work["複勝オッズ"]) if "複勝オッズ" in work.columns else pd.Series(np.nan, index=work.index)
-    tansho = _coerce_float_series(work["単勝オッズ"]) if "単勝オッズ" in work.columns else pd.Series(np.nan, index=work.index)
 
-    odds = fukusho.combine_first(tansho)
     kind = pd.Series("未取得", index=work.index, dtype=object)
     kind = kind.mask(fukusho.notna(), "複勝オッズ")
-    kind = kind.mask(fukusho.isna() & tansho.notna(), "単勝オッズ")
-    return odds, kind
+    return fukusho, kind
 
 
 def add_estimated_in3_rate(
@@ -863,6 +863,7 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
         try:
             ozzu_raw = _read_csv_any_encoding(ozzu_path)
             tansho_map = _build_tansho_map_from_ozzu(ozzu_raw)
+            fukusho_map = _build_fukusho_map_from_ozzu(ozzu_raw)
 
             def _race_no_from_rid_for_estimation(rid_val: object) -> str:
                 m = re.search(r"(\d{2})$", str(rid_val))
@@ -882,11 +883,28 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
                     return np.nan
                 return float(tansho_map.get((place_norm, race_no, int(umaban)), np.nan))
 
+            def _lookup_fukusho_by_place(row: pd.Series) -> float:
+                place_norm = _normalize_place(row.get("場所"))
+                race_no = _race_no_from_rid_for_estimation(row.get("レースID", row.get("rid_str")))
+                umaban = _umaban_for_estimation(row.get("馬番"))
+                if not place_norm or not race_no or umaban is None:
+                    return np.nan
+                return float(fukusho_map.get((place_norm, race_no, int(umaban)), np.nan))
+
             target["単勝オッズ_ozzu_place"] = target.apply(_lookup_tansho_by_place, axis=1)
             target["単勝オッズ"] = target["単勝オッズ"].combine_first(target["単勝オッズ_ozzu_place"])
-            target = target.drop(columns=["単勝オッズ_ozzu_place"], errors="ignore")
+            target["複勝オッズ_ozzu_place"] = target.apply(_lookup_fukusho_by_place, axis=1)
+            target["複勝オッズ"] = target["複勝オッズ"].combine_first(target["複勝オッズ_ozzu_place"])
+            target = target.drop(columns=["単勝オッズ_ozzu_place", "複勝オッズ_ozzu_place"], errors="ignore")
         except Exception as e:
-            print(f"[WARN] OZZU場所+R番号照合による単勝オッズ補完に失敗しました: {e}")
+            print(f"[WARN] OZZU場所+R番号照合によるオッズ補完に失敗しました: {e}")
+
+    if "人気" in target.columns and "単勝オッズ" in target.columns:
+        target["人気"] = pd.to_numeric(target["人気"], errors="coerce")
+        target["単勝オッズ"] = _coerce_float_series(target["単勝オッズ"])
+        odds_pop = target.groupby("rid_str")["単勝オッズ"].rank(ascending=True, method="min")
+        target["人気"] = target["人気"].combine_first(odds_pop)
+        target["人気"] = pd.to_numeric(target["人気"], errors="coerce").round().astype("Int64")
 
     return target
 
@@ -1056,6 +1074,49 @@ def _build_tansho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str, 
     ozzu = ozzu.dropna(subset=["place_norm", "race_no", "umaban", "tansho"])
     out: Dict[Tuple[str, str, int], float] = {}
     for p, r, u, o in zip(ozzu["place_norm"], ozzu["race_no"], ozzu["umaban"], ozzu["tansho"]):
+        out[(str(p), str(r), int(u))] = float(o)
+    return out
+
+
+def _build_fukusho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str, int], float]:
+    """
+    OZZU CSV の複勝オッズから (place_norm, race_no, umaban) -> 複勝オッズ下限 の辞書を作る。
+    複勝オッズが「1.3-2.3」のような範囲の場合、期待値は保守的に下限を使う。
+    """
+    need_cols = {"racecourse", "race", "bet_type", "combination", "odds"}
+    if not need_cols.issubset(set(ozzu_raw.columns)):
+        missing = need_cols - set(ozzu_raw.columns)
+        raise ValueError(f"OZZU CSV に必要列が不足しています: {missing}")
+
+    ozzu = ozzu_raw.copy()
+    ozzu = ozzu[ozzu["bet_type"].astype(str).str.contains("複勝", na=False)].copy()
+
+    def _to_race_no(x: object) -> str:
+        m = re.search(r"(\d+)", str(x))
+        return m.group(1).zfill(2) if m else ""
+
+    def _to_umaban(x: object) -> Optional[int]:
+        m = re.search(r"(\d+)", str(x))
+        return int(m.group(1)) if m else None
+
+    def _to_fukusho_lower(x: object) -> Optional[float]:
+        s = str(x).replace(",", "")
+        m = re.search(r"(\d+(?:\.\d+)?)", s)
+        if not m:
+            return None
+        try:
+            return float(m.group(1))
+        except Exception:
+            return None
+
+    ozzu["place_norm"] = ozzu["racecourse"].map(_normalize_place)
+    ozzu["race_no"] = ozzu["race"].map(_to_race_no)
+    ozzu["umaban"] = ozzu["combination"].map(_to_umaban)
+    ozzu["fukusho"] = ozzu["odds"].map(_to_fukusho_lower)
+
+    ozzu = ozzu.dropna(subset=["place_norm", "race_no", "umaban", "fukusho"])
+    out: Dict[Tuple[str, str, int], float] = {}
+    for p, r, u, o in zip(ozzu["place_norm"], ozzu["race_no"], ozzu["umaban"], ozzu["fukusho"]):
         out[(str(p), str(r), int(u))] = float(o)
     return out
 
