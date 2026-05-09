@@ -6,7 +6,7 @@ from __future__ import annotations
 # ───────────────────────────────
 # ▼ ここにパラメータをまとめて設定
 # ───────────────────────────────
-RACE_DATE = "20260503"    # 取得したい開催日 (YYYYMMDD) ← 必要に応じてここだけ変える
+RACE_DATE = "20260509"    # 取得したい開催日 (YYYYMMDD) ← 必要に応じてここだけ変える
 HEADLESS = True           # デバッグ時は False にするとブラウザが見える
 SCROLL_PAUSE = 0.8
 SCROLL_MAX = 20
@@ -89,9 +89,16 @@ def setup_browser() -> webdriver.Edge:
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--lang=ja")
-    # service = Service(edge_path)  # 明示的にServiceを使う場合
-    # return webdriver.Edge(service=service, options=opts)
-    return webdriver.Edge(options=opts)
+    # Edge/Chromium の内部ログが標準エラーに大量出力されるのを抑制する
+    opts.add_argument("--log-level=3")
+    opts.add_argument("--disable-logging")
+    opts.add_argument("--v=0")
+    opts.add_experimental_option("excludeSwitches", ["enable-logging"])
+
+    # EdgeDriver 側のログも不要なので OS の null デバイスへ捨てる
+    service = Service(log_output=os.devnull)
+    # service = Service(edge_path, log_output=os.devnull)  # 明示的にServiceを使う場合
+    return webdriver.Edge(service=service, options=opts)
 
 # ───────────────────────────────
 # ③ netkeiba ログイン（JavaScript 直接操作版）
