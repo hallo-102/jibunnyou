@@ -104,8 +104,13 @@ EST_IN3_RESULT_COLS = [
     "補正後馬券内率",
     "レース内調整係数",
     "推定馬券内率",
+    "推定馬券内率_補正前",
+    "オッズ帯基準馬券内率",
+    "オッズ帯補正係数",
+    "推定馬券内率_オッズ補正後",
     "市場評価オッズ種別",
     "市場馬券内率",
+    "期待値_補正前",
     "期待値",
     "妙味判定",
 ]
@@ -721,6 +726,104 @@ def _market_odds_and_kind(work: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
     return fukusho, kind
 
 
+def get_fukusho_odds_base_in3_rate(fukusho_odds: object) -> Optional[float]:
+    """
+    複勝オッズ帯から、一般的な基準馬券内率を返す。
+    単位は %。最初の仮値なので、将来は過去データ由来の実績率へ置き換える。
+    """
+    if pd.isna(fukusho_odds):
+        return None
+
+    try:
+        odds = float(fukusho_odds)
+    except (TypeError, ValueError):
+        return None
+
+    if not np.isfinite(odds) or odds <= 0:
+        return None
+    if odds < 1.5:
+        return 70.0
+    if odds < 2.0:
+        return 55.0
+    if odds < 3.0:
+        return 42.0
+    if odds < 4.0:
+        return 33.0
+    if odds < 6.0:
+        return 25.0
+    if odds < 8.0:
+        return 20.0
+    if odds < 12.0:
+        return 15.0
+    if odds < 20.0:
+        return 10.0
+    return 6.0
+
+
+def get_odds_blend_weight(fukusho_odds: object) -> float:
+    """
+    複勝オッズが高いほど、市場基準側を強める。
+    戻り値は、モデル推定を何割使うかを表す係数。
+    """
+    if pd.isna(fukusho_odds):
+        return 1.0
+
+    try:
+        odds = float(fukusho_odds)
+    except (TypeError, ValueError):
+        return 1.0
+
+    if not np.isfinite(odds) or odds <= 0:
+        return 1.0
+    if odds < 2.0:
+        return 1.00
+    if odds < 4.0:
+        return 0.85
+    if odds < 8.0:
+        return 0.70
+    if odds < 12.0:
+        return 0.55
+    return 0.40
+
+
+def adjust_in3_rate_by_fukusho_odds(row: pd.Series) -> object:
+    """
+    推定馬券内率を、複勝オッズ帯の基準馬券内率で下方補正する。
+    row["推定馬券内率"] は % 表記、row["複勝オッズ"] は倍率を前提にする。
+    """
+    model_rate_raw = row.get("推定馬券内率")
+    fukusho_odds = row.get("複勝オッズ")
+
+    if pd.isna(model_rate_raw):
+        return model_rate_raw
+
+    try:
+        model_rate = float(model_rate_raw)
+    except (TypeError, ValueError):
+        return model_rate_raw
+
+    if not np.isfinite(model_rate):
+        return model_rate_raw
+
+    base_rate = get_fukusho_odds_base_in3_rate(fukusho_odds)
+    if base_rate is None:
+        return round(model_rate, 2)
+
+    model_weight = get_odds_blend_weight(fukusho_odds)
+    market_weight = 1.0 - model_weight
+
+    # モデル推定とオッズ帯基準をブレンドし、高オッズの過大評価を抑える。
+    adjusted = model_rate * model_weight + base_rate * market_weight
+
+    # 基準馬券内率の1.5倍を上限にし、低オッズ馬だけは最低35%まで許容する。
+    cap = max(base_rate * 1.5, 35.0)
+    adjusted = min(adjusted, cap)
+
+    # 最終的な安全範囲を 1%〜70% に収める。
+    adjusted = max(1.0, min(adjusted, 70.0))
+    return round(adjusted, 2)
+
+
 def add_estimated_in3_rate(
     pred_df: pd.DataFrame,
     rank_rate_table: Optional[pd.DataFrame] = None,
@@ -788,10 +891,15 @@ def add_estimated_in3_rate(
     work["市場評価オッズ種別"] = market_kind
     work["市場馬券内率"] = np.where(market_odds > 0, (1.0 / market_odds) * 100.0, np.nan)
     work["市場馬券内率"] = pd.to_numeric(work["市場馬券内率"], errors="coerce").round(2)
-    work["期待値"] = ((work["推定馬券内率"] / 100.0) * market_odds).round(2)
+    work["推定馬券内率_補正前"] = work["推定馬券内率"]
+    work["オッズ帯基準馬券内率"] = market_odds.apply(get_fukusho_odds_base_in3_rate)
+    work["オッズ帯補正係数"] = market_odds.apply(get_odds_blend_weight).round(2)
+    work["推定馬券内率_オッズ補正後"] = work.apply(adjust_in3_rate_by_fukusho_odds, axis=1)
+    work["期待値_補正前"] = ((work["推定馬券内率_補正前"] / 100.0) * market_odds).round(2)
+    work["期待値"] = ((work["推定馬券内率_オッズ補正後"] / 100.0) * market_odds).round(2)
 
     ev = pd.to_numeric(work["期待値"], errors="coerce")
-    est = pd.to_numeric(work["推定馬券内率"], errors="coerce")
+    est = pd.to_numeric(work["推定馬券内率_オッズ補正後"], errors="coerce")
     work["妙味判定"] = "オッズ未取得"
     work["妙味判定"] = work["妙味判定"].mask(ev.notna() & (est >= 45.0) & (ev < 1.0), "来そうだが妙味なし")
     work["妙味判定"] = work["妙味判定"].mask(ev.notna() & (ev < 0.95), "妙味なし")
