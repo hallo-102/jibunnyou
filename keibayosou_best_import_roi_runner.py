@@ -40,7 +40,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from keibayosou_config import BASE_DIR, HORSE_RESULTS_DIR, RACE_LEVEL_XLSX, BASE_TIME_XLSX, ODDS_CSV
 from keibayosou_loaders import load_odds_csv
-from keibayosou_pipeline import run_pipeline
+from keibayosou_pipeline import append_roi_focus_bet_sheet_to_excel, run_pipeline
 from keibayosou_utils import _normalize_place
 
 
@@ -1712,6 +1712,7 @@ def main() -> None:
 
     _fill_tansho_odds_to_bet_sheet(actual_final_out, raceday_str)
     _add_estimated_in3_rate_to_excel(actual_final_out, raceday_str)
+    append_roi_focus_bet_sheet_to_excel(actual_final_out)
 
     print("[INFO] ===== すべて完了しました =====")
     print(f"[INFO] 最終出力: {actual_final_out}")
