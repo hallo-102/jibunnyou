@@ -4,13 +4,13 @@ keibayosou_best_import_roi_runner.py
 
 やりたいこと
 - 1回目: 元の入力Excelから特徴量計算して with_feat を作る
-- 2回目の前: with_feat を元に dl_rank / dl_prob を自動作成して with_dl を作る
-- 2回目: with_dl を入力にして最終予想Excelを作る
+- 2回目の前: with_feat を元に dl_rank / dl_prob をメモリ上で自動作成する
+- 2回目: dl_rank / dl_prob をメモリ渡しして最終予想Excelを作る
 
 このコードでは、
 1) keibayosou_best_import_roi_runner.py を1回目実行
-2) make_dl_rank_from_racedata_results.py を実行
-3) keibayosou_best_import_roi_runner.py を2回目実行
+2) make_dl_rank_from_racedata_results.py 相当のDL順位作成
+3) keibayosou_best_import_roi_runner.py の2回目予想
 
 という3回実行を、
 
@@ -19,7 +19,8 @@ keibayosou_best_import_roi_runner.py の1回実行
 だけで完了できるようにしています。
 
 今回の修正ポイント
-- dl_rank だけでなく dl_prob も with_dl.xlsx に保存する
+- 馬の競走成績_with_feat_YYYYMMDD_with_dl.xlsx は作成しない
+- dl_rank / dl_prob はDataFrameで2回目の予想処理へ渡す
 - 既存の動きはなるべく崩さない
 """
 
@@ -164,27 +165,6 @@ def _resolve_raw_src_out_paths(raceday_str: Optional[str]) -> Tuple[str, str]:
         src_excel = str(HORSE_RESULTS_DIR / "馬の競走成績.xlsx")
         out_excel = str(OUTPUT_DIR / "馬の競走成績_with_feat.xlsx")
     return src_excel, out_excel
-
-
-def _resolve_second_run_paths(raceday_str: Optional[str]) -> Tuple[str, str]:
-    """
-    2回目実行用
-    - 入力: with_dl
-    - 出力: 最終の with_feat
-    """
-    if raceday_str:
-        src_excel = str(OUTPUT_DIR / f"馬の競走成績_with_feat_{raceday_str}_with_dl.xlsx")
-        out_excel = str(OUTPUT_DIR / f"馬の競走成績_with_feat_{raceday_str}.xlsx")
-    else:
-        src_excel = str(OUTPUT_DIR / "馬の競走成績_with_feat_with_dl.xlsx")
-        out_excel = str(OUTPUT_DIR / "馬の競走成績_with_feat.xlsx")
-    return src_excel, out_excel
-
-
-def _resolve_with_dl_path(raceday_str: Optional[str]) -> Path:
-    if raceday_str:
-        return OUTPUT_DIR / f"馬の競走成績_with_feat_{raceday_str}_with_dl.xlsx"
-    return OUTPUT_DIR / "馬の競走成績_with_feat_with_dl.xlsx"
 
 
 def _pick_actual_out_excel(expected_out_excel: str) -> str:
@@ -1648,78 +1628,10 @@ def _predict_dl_rank(model: SimpleMLP, mean: np.ndarray, std: np.ndarray, now_df
     return out[["rid_str", "馬番", "dl_prob", "dl_rank"]]
 
 
-def _write_back_dl_rank(src_path: Path, out_path: Path, dl_rank_df: pd.DataFrame) -> None:
-    """
-    今回の修正ポイント
-    - dl_rank だけでなく dl_prob も書き戻す
-    - すでに列がある場合は上書き優先
-    """
-    book = pd.read_excel(src_path, sheet_name=None, engine="openpyxl")
-    if NOW_SHEET not in book:
-        raise RuntimeError(f"今走シートが見つかりません: sheet={NOW_SHEET} path={src_path}")
-
-    now_df = book[NOW_SHEET].copy()
-    now_df = _ensure_rid_umaban(now_df)
-
-    now_df = pd.merge(
-        now_df,
-        dl_rank_df,
-        on=["rid_str", "馬番"],
-        how="left",
-        suffixes=("", "_dl"),
-    )
-
-    # dl_rank の整理
-    if "dl_rank_dl" in now_df.columns:
-        dl_rank_pred = now_df["dl_rank_dl"]
-        if isinstance(dl_rank_pred, pd.DataFrame):
-            dl_rank_pred = dl_rank_pred.iloc[:, 0]
-
-        dl_rank_base = now_df.get("dl_rank")
-        if isinstance(dl_rank_base, pd.DataFrame):
-            dl_rank_base = dl_rank_base.iloc[:, 0]
-
-        if dl_rank_base is None:
-            now_df["dl_rank"] = dl_rank_pred
-        else:
-            now_df["dl_rank"] = dl_rank_pred.combine_first(dl_rank_base)
-
-        now_df = now_df.drop(columns=[c for c in now_df.columns if c == "dl_rank_dl"])
-
-    # dl_prob の整理
-    if "dl_prob_dl" in now_df.columns:
-        dl_prob_pred = now_df["dl_prob_dl"]
-        if isinstance(dl_prob_pred, pd.DataFrame):
-            dl_prob_pred = dl_prob_pred.iloc[:, 0]
-
-        dl_prob_base = now_df.get("dl_prob")
-        if isinstance(dl_prob_base, pd.DataFrame):
-            dl_prob_base = dl_prob_base.iloc[:, 0]
-
-        if dl_prob_base is None:
-            now_df["dl_prob"] = dl_prob_pred
-        else:
-            now_df["dl_prob"] = dl_prob_pred.combine_first(dl_prob_base)
-
-        now_df = now_df.drop(columns=[c for c in now_df.columns if c == "dl_prob_dl"])
-
-    if "dl_rank" in now_df.columns:
-        now_df["dl_rank"] = pd.to_numeric(now_df["dl_rank"], errors="coerce").astype("Int64")
-
-    if "dl_prob" in now_df.columns:
-        now_df["dl_prob"] = pd.to_numeric(now_df["dl_prob"], errors="coerce")
-
-    book[NOW_SHEET] = now_df
-
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
-        for sheet_name, df in book.items():
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-
-def _create_with_dl_excel(pred_path: Path, out_path: Path) -> None:
+def _create_dl_rank_df(pred_path: Path) -> pd.DataFrame:
     """
     1回目の with_feat Excel を読み、
-    dl_rank / dl_prob を自動作成して with_dl Excel を出力する。
+    dl_rank / dl_prob を自動作成してDataFrameで返す。
     """
     print("[INFO] DL用の学習データ読み込み中...")
     df_train = _build_training_dataframe(TRAIN_XLSX)
@@ -1736,10 +1648,8 @@ def _create_with_dl_excel(pred_path: Path, out_path: Path) -> None:
     now_df = _load_now_data(pred_path)
     dl_rank_df = _predict_dl_rank(model, mean, std, now_df)
 
-    print("[INFO] with_dl Excel に書き戻し中...")
-    _write_back_dl_rank(pred_path, out_path, dl_rank_df)
-
-    print(f"[INFO] with_dl 作成完了: {out_path}")
+    print(f"[INFO] DL順位データ作成完了: {len(dl_rank_df)}行")
+    return dl_rank_df
 
 
 # ============================================================
@@ -1777,31 +1687,26 @@ def main() -> None:
         raise FileNotFoundError(f"1回目の出力Excelが見つかりません: {actual_first_out}")
 
     # --------------------------------------------------------
-    # DL順位作成: with_feat -> with_dl
+    # DL順位作成: with_feat -> メモリ上のDL順位データ
     # --------------------------------------------------------
-    with_dl_path = _resolve_with_dl_path(raceday_str)
     print("[INFO] ===== DL順位作成を開始します =====")
-    _create_with_dl_excel(Path(actual_first_out), with_dl_path)
-
-    if not with_dl_path.exists():
-        raise FileNotFoundError(f"with_dl Excel が作成されませんでした: {with_dl_path}")
+    dl_rank_df = _create_dl_rank_df(Path(actual_first_out))
 
     # --------------------------------------------------------
-    # 2回目: with_dl -> 最終 with_feat
+    # 2回目: 1回目のwith_feat + メモリ上のDL順位データ -> 最終 with_feat
     # --------------------------------------------------------
-    src_excel_second, out_excel_second = _resolve_second_run_paths(raceday_str)
-
     print("[INFO] ===== 2回目の予想処理を開始します =====")
     run_pipeline(
-        SRC_EXCEL=src_excel_second,
-        OUT_EXCEL=out_excel_second,
+        SRC_EXCEL=actual_first_out,
+        OUT_EXCEL=actual_first_out,
         LEVELS_XL=RACE_LEVEL_XLSX,
         BASE_TIME=BASE_TIME_XLSX,
         ODDS_CSV_PATH=ODDS_CSV,
         RACEDAY=raceday_str,
+        DL_RANK_DF=dl_rank_df,
     )
 
-    actual_final_out = _pick_actual_out_excel(out_excel_second)
+    actual_final_out = _pick_actual_out_excel(actual_first_out)
     if not os.path.exists(actual_final_out):
         raise FileNotFoundError(f"最終出力Excelが見つかりません: {actual_final_out}")
 

@@ -540,14 +540,19 @@ def write_features_to_excel(
     """
     print(f"[INFO] 特徴量を {out_excel} に出力します")
 
-    try:
-        shutil.copy2(src_excel, out_excel)
-    except PermissionError:
-        stem, ext = os.path.splitext(out_excel)
-        alt = f"{stem}_{datetime.now().strftime('%H%M%S')}{ext}"
-        print(f"[WARN] 出力先ファイルに書き込めません（Excelで開いている可能性）: {out_excel} -> {alt}")
-        shutil.copy2(src_excel, alt)
-        out_excel = alt
+    src_abs = os.path.normcase(os.path.abspath(src_excel))
+    out_abs = os.path.normcase(os.path.abspath(out_excel))
+    if src_abs == out_abs:
+        print("[INFO] 入力Excelと出力Excelが同じため、コピーせず既存ブックを更新します")
+    else:
+        try:
+            shutil.copy2(src_excel, out_excel)
+        except PermissionError:
+            stem, ext = os.path.splitext(out_excel)
+            alt = f"{stem}_{datetime.now().strftime('%H%M%S')}{ext}"
+            print(f"[WARN] 出力先ファイルに書き込めません（Excelで開いている可能性）: {out_excel} -> {alt}")
+            shutil.copy2(src_excel, alt)
+            out_excel = alt
 
     feat_export = _build_feature_sheet_for_export(feat_df, FEAT_COLS, JAPANESE_FEATURE_NAMES)
 
@@ -601,6 +606,42 @@ def append_success_report(df: pd.DataFrame, report_path: str) -> None:
     print(f"[INFO] success_report.xlsx を更新しました: {report_path}")
 
 
+def _merge_dl_rank_override(merged: pd.DataFrame, dl_rank_df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """メモリ上で作成した dl_rank / dl_prob を今走データへ結合する。"""
+    if dl_rank_df is None or dl_rank_df.empty:
+        return merged
+    if merged.empty:
+        return merged
+    if not {"rid_str", "馬番"}.issubset(merged.columns):
+        raise RuntimeError("今走データに rid_str / 馬番 列が無く、DL順位データを結合できません")
+
+    required_cols = {"rid_str", "馬番"}
+    if not required_cols.issubset(dl_rank_df.columns):
+        missing = ", ".join(sorted(required_cols - set(dl_rank_df.columns)))
+        raise RuntimeError(f"DL順位データに必要列がありません: {missing}")
+
+    value_cols = [c for c in ["dl_rank", "dl_prob"] if c in dl_rank_df.columns]
+    if not value_cols:
+        return merged
+
+    work = dl_rank_df[["rid_str", "馬番", *value_cols]].copy()
+    work["rid_str"] = _normalize_rid_series(work["rid_str"])
+    work["馬番"] = _normalize_umaban_series(work["馬番"])
+    if "dl_rank" in work.columns:
+        work["dl_rank"] = pd.to_numeric(work["dl_rank"], errors="coerce")
+    if "dl_prob" in work.columns:
+        work["dl_prob"] = pd.to_numeric(work["dl_prob"], errors="coerce")
+    work = work.drop_duplicates(subset=["rid_str", "馬番"], keep="last")
+
+    out = merged.copy()
+    out["rid_str"] = _normalize_rid_series(out["rid_str"])
+    out["馬番"] = _normalize_umaban_series(out["馬番"])
+    out = out.drop(columns=[c for c in value_cols if c in out.columns], errors="ignore")
+    out = pd.merge(out, work, on=["rid_str", "馬番"], how="left")
+    print(f"[INFO] DL順位データをメモリ上で結合しました: {len(work)}行")
+    return out
+
+
 # ================================================================
 # メイン処理
 # ================================================================
@@ -611,6 +652,7 @@ def run_pipeline(
     BASE_TIME: str = str(BASE_TIME_XLSX),
     ODDS_CSV_PATH: str = str(ODDS_CSV),
     RACEDAY: str | None = None,
+    DL_RANK_DF: Optional[pd.DataFrame] = None,
 ) -> None:
     # 各種マスタ読み込み
     levels_df = load_race_levels(LEVELS_XL)
@@ -631,6 +673,7 @@ def run_pipeline(
     # レース登録馬の過去走情報が足りないレースを予想対象から除外
     # ============================================================
     merged, feat_df = _exclude_races_with_missing_history(merged, feat_df)
+    merged = _merge_dl_rank_override(merged, DL_RANK_DF)
 
     # 除外後に空になった場合
     if merged.empty or feat_df.empty:
