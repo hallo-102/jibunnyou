@@ -1,1 +1,1 @@
-racedata_results.xlsx
+main() 実行時にターミナルから入力

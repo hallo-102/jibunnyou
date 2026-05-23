@@ -414,22 +414,70 @@ def _class_map_from_now_df(now_df: Optional[pd.DataFrame]) -> Dict[str, object]:
     return now.groupby("_race_key_for_roi")[class_col].first().to_dict()
 
 
+def _pick_popularity_col_for_roi(df: pd.DataFrame) -> Optional[str]:
+    """人気列の表記ゆれを吸収して、回収率重視シートの条件判定に使う列を返す。"""
+    col = _pick_first_existing_col(df, ["人気", "単勝人気", "予想人気", "ninki", "popularity", "pop"])
+    if col is not None:
+        return col
+
+    for c in df.columns:
+        if "人気" in str(c):
+            return c
+    return None
+
+
+def _rank3_metric_map_from_now_df(now_df: Optional[pd.DataFrame]) -> Dict[Tuple[str, int], Dict[str, float]]:
+    """今走シートから (レースID, 馬番) -> 人気・score・extra_penalty の対応を作る。"""
+    if now_df is None or not isinstance(now_df, pd.DataFrame) or now_df.empty:
+        return {}
+
+    now = now_df.copy()
+    race_col = _pick_first_existing_col(now, ["レースID", "rid_str", "race_id"])
+    umaban_col = _pick_first_existing_col(now, ["馬番", "umaban", "馬 番", "馬番 "])
+    pop_col = _pick_popularity_col_for_roi(now)
+    score_col = _pick_first_existing_col(now, ["score"])
+    extra_col = _pick_first_existing_col(now, ["extra_penalty"])
+    if race_col is None or umaban_col is None or pop_col is None or score_col is None or extra_col is None:
+        return {}
+
+    now["_race_key_for_roi"] = now[race_col].map(_normalize_race_key)
+    now["_umaban_for_roi"] = now[umaban_col].map(_to_umaban_int_for_roi)
+    now["_popularity_for_roi"] = pd.to_numeric(now[pop_col], errors="coerce")
+    now["_score_for_roi"] = pd.to_numeric(now[score_col], errors="coerce")
+    now["_extra_penalty_for_roi"] = pd.to_numeric(now[extra_col], errors="coerce")
+    now = now.dropna(subset=["_race_key_for_roi", "_umaban_for_roi"])
+    if now.empty:
+        return {}
+
+    now = now.drop_duplicates(subset=["_race_key_for_roi", "_umaban_for_roi"], keep="last")
+    metric_map: Dict[Tuple[str, int], Dict[str, float]] = {}
+    for _, r in now.iterrows():
+        metric_map[(str(r["_race_key_for_roi"]), int(r["_umaban_for_roi"]))] = {
+            "popularity": _to_float_safe(r.get("_popularity_for_roi")),
+            "score": _to_float_safe(r.get("_score_for_roi")),
+            "extra_penalty": _to_float_safe(r.get("_extra_penalty_for_roi")),
+        }
+    return metric_map
+
+
 def build_roi_focus_bet_sheet(
     bet_df: pd.DataFrame,
     now_df: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
-    回収率検証で採用した条件に合うレースだけを、購入候補シート用に1レース1行へ整形する。
+    回収率重視の条件に合うレースだけを、購入候補シート用に1レース1行へ整形する。
 
     注意:
     - 着順、払戻、的中判定などの結果情報は使わない。
     - score1/score2/gap12/dango_2_5/1位馬番〜5位馬番は既存の買い目シート値を使う。
+    - ランキング3位の人気・score・extra_penaltyは今走シートの馬ごとの値を使う。
     """
     if bet_df is None or not isinstance(bet_df, pd.DataFrame) or bet_df.empty:
         return pd.DataFrame(columns=ROI_FOCUS_BET_COLUMNS)
 
     work = bet_df.copy()
     class_map = _class_map_from_now_df(now_df)
+    rank3_metric_map = _rank3_metric_map_from_now_df(now_df)
 
     if "クラス" not in work.columns:
         work["クラス"] = pd.NA
@@ -449,12 +497,13 @@ def build_roi_focus_bet_sheet(
         gap12 = _to_float_safe(row.get("gap12"))
         dango_2_5 = _to_float_safe(row.get("dango_2_5"))
 
-        if score1 is None or gap12 is None:
+        if score1 is None or dango_2_5 is None:
             continue
-        if not (gap12 >= 2.0 and score1 >= 65.0):
+        if not (score1 >= 65.0 and dango_2_5 >= 6.0):
             continue
 
         race_id = row.get("レースID", row.get("rid_str", pd.NA))
+        race_key = _normalize_race_key(race_id)
         ranks = [_to_umaban_int_for_roi(row.get(f"{i}位馬番")) for i in range(1, 6)]
         if any(v is None for v in ranks) or len(set(ranks)) != 5:
             print(
@@ -464,6 +513,15 @@ def build_roi_focus_bet_sheet(
             continue
 
         rank1, rank2, rank3, rank4, rank5 = [int(v) for v in ranks]
+        rank3_metrics = rank3_metric_map.get((str(race_key), rank3), {}) if race_key is not None else {}
+        rank3_popularity = _to_float_safe(rank3_metrics.get("popularity"))
+        rank3_score = _to_float_safe(rank3_metrics.get("score"))
+        rank3_extra_penalty = _to_float_safe(rank3_metrics.get("extra_penalty"))
+
+        if rank3_popularity is None or rank3_score is None or rank3_extra_penalty is None:
+            continue
+        if not (rank3_popularity <= 5.0 and rank3_extra_penalty < 2.0 and rank3_score >= 57.0):
+            continue
 
         rows.append(
             {
@@ -485,7 +543,7 @@ def build_roi_focus_bet_sheet(
                 "4位馬番": rank4,
                 "5位馬番": rank5,
                 "購入判定": "購入",
-                "購入理由": "gap12>=2 かつ score1>=65",
+                "購入理由": "score1>=65 かつ dango_2_5>=6 かつ 3位人気<=5 かつ 3位extra_penalty<2 かつ 3位score>=57",
                 "3連複1点目_馬番1": rank1,
                 "3連複1点目_馬番2": rank3,
                 "3連複1点目_馬番3": rank2,
