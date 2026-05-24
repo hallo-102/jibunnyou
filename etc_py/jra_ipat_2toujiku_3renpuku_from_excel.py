@@ -49,7 +49,41 @@ except Exception:
 # ============================================================
 # .env 読み込み
 # ============================================================
-load_dotenv()
+def env_candidates() -> List[pathlib.Path]:
+    """実行場所に依存しないよう、スクリプト位置から .env 候補を列挙する。"""
+    script_path = pathlib.Path(__file__).resolve()
+    candidates: List[pathlib.Path] = []
+
+    for base in [script_path.parent, *script_path.parents]:
+        candidates.append(base / ".env")
+        candidates.append(base / "env" / ".env")
+
+    cwd = pathlib.Path.cwd().resolve()
+    for base in [cwd, *cwd.parents]:
+        candidates.append(base / ".env")
+        candidates.append(base / "env" / ".env")
+
+    unique: List[pathlib.Path] = []
+    seen = set()
+    for path in candidates:
+        key = str(path).lower()
+        if key not in seen:
+            unique.append(path)
+            seen.add(key)
+    return unique
+
+
+def load_env_file() -> Optional[pathlib.Path]:
+    """最初に見つかった .env を読み込み、読み込んだパスを返す。"""
+    for path in env_candidates():
+        if path.exists():
+            load_dotenv(dotenv_path=path)
+            return path
+    load_dotenv()
+    return None
+
+
+ENV_PATH = load_env_file()
 
 INET_ID = os.getenv("INET_ID", "")
 USER_ID = os.getenv("USER_ID", "")
@@ -195,8 +229,14 @@ def validate_env() -> None:
         if not val:
             missing.append(key)
     if missing:
+        searched = "\n".join(f"  - {path}" for path in env_candidates()[:12])
+        loaded = str(ENV_PATH) if ENV_PATH else "未検出"
         raise RuntimeError(
-            ".env にログイン情報が不足しています: " + ", ".join(missing)
+            ".env にログイン情報が不足しています: "
+            + ", ".join(missing)
+            + f"\n読み込んだ.env: {loaded}"
+            + "\n.env の探索候補例:\n"
+            + searched
         )
 
 
