@@ -167,7 +167,8 @@ def build_rid_to_date_map(results_xlsx: str) -> Dict[str, str]:
 
 def parse_rid_meta(rid_str: str, rid_to_date: Dict[str, str]) -> RaceMeta:
     rid_str = str(rid_str)
-    place_code = rid_str[4:6] if len(rid_str) >= 6 else ""
+    # rid_str は YYYYMMDD + 競馬場コード2桁 + レース番号2桁。
+    place_code = rid_str[8:10] if len(rid_str) >= 10 else ""
     place_name = PLACE_MAP.get(place_code, "")
     date = rid_to_date.get(rid_str, "")
     if not date:
