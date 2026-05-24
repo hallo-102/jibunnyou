@@ -96,7 +96,7 @@ P_ARS = os.getenv("P_ARS", "")
 LOGIN_URL = "https://www.ipat.jra.go.jp/"
 
 # ★最重要：最初は True のままテストすること
-DRY_RUN = True
+DRY_RUN = False
 
 # 1点100円なら、JRA画面では「1」と入力する
 BET_UNIT_100YEN = 1
@@ -157,7 +157,15 @@ class BetRow:
     axes: List[int]
     opponents: List[int]
     race_name: str = ""
+    place: str = ""
+    race_no: int = 0
     total_amount: int = 300
+
+
+@dataclass
+class VoteResult:
+    success: bool
+    retryable: bool = True
 
 
 # ============================================================
@@ -184,6 +192,13 @@ def to_int_or_none(value) -> Optional[int]:
     except Exception:
         m = re.search(r"\d+", str(value))
         return int(m.group()) if m else None
+
+
+def normalize_place_name(value) -> str:
+    """Excelの場所列をIPAT画面の競馬場名に寄せる。"""
+    if pd.isna(value):
+        return ""
+    return re.sub(r"[\s\u3000]+", "", str(value)).strip()
 
 
 def pick_required_column(df: pd.DataFrame, candidates: Sequence[str], label: str) -> str:
@@ -359,6 +374,7 @@ def load_bets_from_excel(raceday: str) -> List[BetRow]:
         return []
 
     rid_col = pick_required_column(df, ["レースID", "rid_str", "race_id"], "レースID")
+    place_col = pick_required_column(df, ["場所", "競馬場", "place", "place_name"], "場所")
 
     # 購入判定=購入 の行だけに絞る
     if BUY_FLAG_COL not in df.columns:
@@ -393,6 +409,22 @@ def load_bets_from_excel(raceday: str) -> List[BetRow]:
         opponents = [n for n in dict.fromkeys(opponents) if n not in axes]
 
         race_name = str(row.get("レース名", "")).strip()
+        place = normalize_place_name(row.get(place_col))
+        race_no_int = int(rid[-2:])
+
+        if rid[:8] != raceday:
+            print(
+                f"[WARN] {rid} {race_name}: 入力日付 {raceday} と "
+                f"レースID日付 {rid[:8]} が一致しません。場所列={place}, {race_no_int}R を使用します。"
+            )
+
+        if not place:
+            print(f"[SKIP] {rid} {race_name}: 場所列が空です")
+            continue
+
+        if place not in set(KEIBAJO.values()):
+            print(f"[SKIP] {rid} {race_name}: 場所列がJRA競馬場名ではありません place={place}")
+            continue
 
         if len(axes) != 2 or len(opponents) != 3:
             print(
@@ -407,13 +439,18 @@ def load_bets_from_excel(raceday: str) -> List[BetRow]:
                 axes=axes,
                 opponents=opponents,
                 race_name=race_name,
+                place=place,
+                race_no=race_no_int,
                 total_amount=len(opponents) * BET_UNIT_YEN,
             )
         )
 
     print(f"[INFO] Excelから購入候補を読み込みました: {len(bets)} レース")
     for b in bets:
-        print(f"  - {b.rid} {b.race_name} 軸={b.axes} 相手={b.opponents} 合計={b.total_amount}円")
+        print(
+            f"  - {b.rid} {b.place}{b.race_no}R {b.race_name} "
+            f"軸={b.axes} 相手={b.opponents} 合計={b.total_amount}円"
+        )
     return bets
 
 
@@ -451,18 +488,13 @@ async def click_normal_vote(page: Page) -> None:
     await set_zoom_50(page)
 
 
-async def select_place_and_race(page: Page, rid: str) -> Tuple[str, str, str]:
-    if not re.fullmatch(r"\d{12}", rid):
-        raise RuntimeError(f"レースIDは12桁数字である必要があります: rid={rid}")
-
-    date = rid[:8]
-    place_code = rid[8:10]
-    race_no = f"{int(rid[10:12])}R"
-    place_name = KEIBAJO.get(place_code, "")
-    week = jp_week(date)
+async def select_place_and_race(page: Page, bet: BetRow, raceday: str) -> Tuple[str, str, str]:
+    place_name = normalize_place_name(bet.place)
+    race_no = f"{int(bet.race_no)}R"
+    week = jp_week(raceday)
 
     if not place_name:
-        raise RuntimeError(f"競馬場コードが不明です: rid={rid}, code={place_code}")
+        raise RuntimeError(f"場所が空です: rid={bet.rid}")
 
     print(f"▶ {place_name}({week}) {race_no}")
 
@@ -475,7 +507,7 @@ async def select_place_and_race(page: Page, rid: str) -> Tuple[str, str, str]:
             await page.wait_for_timeout(500)
         except Exception:
             # label完全一致が失敗した場合は、option文字列に競馬場名を含むものを選ぶ
-            await page.evaluate(
+            ok = await page.evaluate(
                 """(placeName) => {
                     const sel = document.querySelector('#select-course-race-course');
                     if (!sel) return false;
@@ -487,13 +519,15 @@ async def select_place_and_race(page: Page, rid: str) -> Tuple[str, str, str]:
                 }""",
                 place_name,
             )
+            if not ok:
+                raise RuntimeError(f"競馬場プルダウンに {place_name} がありません")
             await page.wait_for_timeout(700)
 
         if await race_select.count():
             try:
                 await race_select.select_option(label=race_no)
             except Exception:
-                await page.evaluate(
+                ok = await page.evaluate(
                     """(raceNo) => {
                         const sel = document.querySelector('#select-course-race-race');
                         if (!sel) return false;
@@ -505,6 +539,8 @@ async def select_place_and_race(page: Page, rid: str) -> Tuple[str, str, str]:
                     }""",
                     race_no,
                 )
+                if not ok:
+                    raise RuntimeError(f"レースプルダウンに {race_no} がありません")
             await page.wait_for_timeout(700)
             return place_name, week, race_no
 
@@ -807,7 +843,15 @@ async def click_final_ok_strict(page: Page, timeout_ms: int = 5000) -> bool:
 
 
 SUCCESS_KEYWORDS = ("投票を受け付けました", "購入を受け付けました", "受付番号")
-ERROR_KEYWORDS = ("購入できません", "エラー", "時間外", "締切", "有効期限切れ", "ログイン")
+ERROR_KEYWORDS = (
+    "購入できません",
+    "エラー",
+    "時間外",
+    "投票締切",
+    "発売締切",
+    "有効期限切れ",
+    "ログイン",
+)
 
 
 async def wait_result_modal(page: Page, timeout_ms: int = 10000) -> Tuple[str, str]:
@@ -829,6 +873,46 @@ async def wait_result_modal(page: Page, timeout_ms: int = 10000) -> Tuple[str, s
         return "timeout", ""
 
 
+async def detect_purchase_success_on_page(page: Page, timeout_ms: int = 12000) -> Tuple[bool, str]:
+    """
+    購入完了後の成功判定を画面全体から行う。
+
+    成功とみなす条件:
+    1. 「続けて投票する」ボタンが見える
+    2. 画面全体に受付番号/投票受付/購入受付の文字がある
+    3. 投票結果っぽい画面になっている
+    """
+    end_time = datetime.now().timestamp() + timeout_ms / 1000
+    success_words = [
+        "受付番号",
+        "投票を受け付けました",
+        "購入を受け付けました",
+        "投票結果",
+        "購入結果",
+    ]
+
+    while datetime.now().timestamp() < end_time:
+        try:
+            cont_btn = page.get_by_role("button", name="続けて投票する").first
+            if await cont_btn.count() and await cont_btn.is_visible():
+                return True, "続けて投票するボタンを確認"
+        except Exception:
+            pass
+
+        try:
+            txt = await page.locator("body").inner_text(timeout=1500)
+            tnorm = txt.replace("\n", " ").replace("\r", " ")
+            for word in success_words:
+                if word in tnorm:
+                    return True, f"画面内に成功語句「{word}」を確認"
+        except Exception:
+            pass
+
+        await page.wait_for_timeout(500)
+
+    return False, "成功画面を確認できませんでした"
+
+
 async def wait_limit_decreased(page: Page, before: int, delta: int, timeout_ms: int = 12000) -> bool:
     end_time = datetime.now().timestamp() + timeout_ms / 1000
     while datetime.now().timestamp() < end_time:
@@ -840,94 +924,139 @@ async def wait_limit_decreased(page: Page, before: int, delta: int, timeout_ms: 
 
 
 async def close_result_or_continue(page: Page) -> None:
-    """投票結果画面の『続けて投票する』またはOK/閉じるを押す。"""
-    for name in ["続けて投票する", "OK", "閉じる"]:
+    """
+    投票結果画面の『続けて投票する』を押す。
+    見つからない場合は、OK/閉じる/投票メニューへ戻るも試す。
+    """
+    for name in ["続けて投票する", "通常投票へ", "OK", "閉じる"]:
         try:
             btn = page.get_by_role("button", name=name).first
-            if await btn.count():
+            if await btn.count() and await btn.is_visible():
                 await btn.click(force=True, timeout=3000)
-                await page.wait_for_timeout(800)
+                await page.wait_for_timeout(1000)
+                await set_zoom_50(page)
                 return
         except Exception:
             pass
+
+    try:
+        normal = page.locator(
+            'a:has-text("通常投票"), button[ui-sref="bet.basic"], button:has-text("通常")'
+        ).first
+        if await normal.count():
+            await normal.click(force=True, timeout=3000)
+            await page.wait_for_timeout(1000)
+            await set_zoom_50(page)
+            return
+    except Exception:
+        pass
 
 
 # ============================================================
 # 1レース処理
 # ============================================================
-async def vote_one(page: Page, bet: BetRow) -> bool:
-    success = False
+async def vote_one(page: Page, bet: BetRow, raceday: str) -> VoteResult:
+    final_ok_sent = False
     try:
         print("\n" + "=" * 70)
-        print(f"対象: {bet.rid} {bet.race_name} / 軸={bet.axes} / 相手={bet.opponents}")
+        print(
+            f"対象: {bet.rid} {bet.place}{bet.race_no}R {bet.race_name} "
+            f"/ 軸={bet.axes} / 相手={bet.opponents}"
+        )
 
         if not await page.locator('button[ui-sref="bet.basic"], button:has-text("通常")').count():
             await ipat_login(page)
 
         await click_normal_vote(page)
-        await select_place_and_race(page, bet.rid)
+        await select_place_and_race(page, bet, raceday)
         await select_trio_two_axis_mode(page)
 
         ok = await select_axes_and_opponents(page, bet.axes, bet.opponents)
         if not ok:
-            return False
+            return VoteResult(False)
 
         await set_unit_and_add_to_list(page, BET_UNIT_100YEN)
 
         limit_before = await read_purchase_limit(page)
         ok = await ensure_total_and_buy(page, bet.total_amount)
         if not ok:
-            return False
+            return VoteResult(False)
 
         if DRY_RUN:
             print("  [DRY_RUN] 実購入はしていません。購入予定リストまで確認済みです。")
-            success = True
-            return success
+            return VoteResult(True)
 
         # 最終確認OK
         html_ok = await click_final_ok_strict(page, timeout_ms=5000)
+        final_ok_sent = html_ok
         if not html_ok:
             try:
                 dlg = await page.wait_for_event("dialog", timeout=2500)
                 await dlg.accept()
+                final_ok_sent = True
                 print("  ネイティブ確認ダイアログOK")
             except Exception:
                 print("  └─確認ダイアログを検出できませんでした")
 
-        # 結果確認
-        label, txt = await wait_result_modal(page, timeout_ms=8000)
+        if not final_ok_sent:
+            print("  └─最終確認OKを送信できたか確認できないため、購入後判定へ進みません")
+            return VoteResult(False)
+
+        # ====================================================
+        # 購入後の結果確認
+        # ====================================================
+        try:
+            loading = page.locator(".ipat-loading").first
+            await loading.wait_for(state="visible", timeout=3000)
+            print("  送信中オーバーレイ表示")
+            await loading.wait_for(state="hidden", timeout=15000)
+            await page.wait_for_timeout(1000)
+        except Exception:
+            await page.wait_for_timeout(1500)
+
+        # 1) 画面全体から成功判定する。
+        ok_page, reason = await detect_purchase_success_on_page(page, timeout_ms=12000)
+        if ok_page:
+            print(f"  ✅ 購入完了判定: {reason}")
+            await close_result_or_continue(page)
+            return VoteResult(True)
+
+        # 2) 購入限度額の減少で成功判定する。
+        if limit_before is not None:
+            ok_limit = await wait_limit_decreased(page, limit_before, bet.total_amount, timeout_ms=8000)
+            if ok_limit:
+                after_limit = await read_purchase_limit(page)
+                print(f"  ✅ 購入完了判定: 購入限度額 {limit_before:,} → {after_limit:,}")
+                await close_result_or_continue(page)
+                return VoteResult(True)
+
+        # 3) 最後にモーダル文字で判定する。
+        label, txt = await wait_result_modal(page, timeout_ms=5000)
         if label == "success":
             print("  ✅ 購入完了:", (txt or "")[:160], "...")
-            success = True
-        elif label == "error":
-            print("  ❌ 購入エラー:", (txt or "")[:200], "...")
-            success = False
-        else:
-            if limit_before is not None:
-                ok_limit = await wait_limit_decreased(page, limit_before, bet.total_amount, timeout_ms=12000)
-                if ok_limit:
-                    after_limit = await read_purchase_limit(page)
-                    print(f"  ✅ 購入完了判定: 購入限度額 {limit_before:,} → {after_limit:,}")
-                    success = True
-                else:
-                    print("  └─結果モーダル未検出、購入限度額減少も確認できません")
-                    await safe_shot(page, "after_buy_unknown")
-                    await safe_dump_dom(page, "after_buy_unknown")
-                    success = False
-            else:
-                print("  └─結果確認ができませんでした")
-                await safe_shot(page, "after_buy_unknown")
-                await safe_dump_dom(page, "after_buy_unknown")
-                success = False
+            await close_result_or_continue(page)
+            return VoteResult(True)
 
+        if label == "error":
+            print("  ❌ 購入エラー:", (txt or "")[:200], "...")
+            await safe_shot(page, "after_buy_error")
+            await safe_dump_dom(page, "after_buy_error")
+            await close_result_or_continue(page)
+            return VoteResult(False, retryable=not final_ok_sent)
+
+        # 4) それでも不明なら、自動リトライせず停止する。
+        print("  └─購入完了画面を確認できません")
         await close_result_or_continue(page)
-        return success
+        print("  [STOP] 購入操作後の結果が不確実なため、この買い目は自動リトライしません。")
+        await safe_shot(page, "after_buy_unknown")
+        await safe_dump_dom(page, "after_buy_unknown")
+        return VoteResult(False, retryable=False)
 
     except Exception as e:
         print(f"  ❌ 例外: {e}")
         await safe_shot(page, "fatal")
         await safe_dump_dom(page, "fatal")
-        return False
+        return VoteResult(False, retryable=not final_ok_sent)
 
 
 # ============================================================
@@ -959,11 +1088,19 @@ async def vote_all(raceday: str) -> None:
 
         await ipat_login(page)
 
+        stop_all = False
         for bet in bets:
             attempts = 0
             while attempts <= RETRY_MAX:
-                ok = await vote_one(page, bet)
-                if ok:
+                result = await vote_one(page, bet, raceday)
+                if result.success:
+                    break
+
+                if not result.retryable:
+                    print(
+                        f"[STOP] 自動リトライ停止: {bet.rid} {bet.place}{bet.race_no}R {bet.race_name}"
+                    )
+                    stop_all = True
                     break
 
                 attempts += 1
@@ -979,6 +1116,10 @@ async def vote_all(raceday: str) -> None:
 
             if attempts > RETRY_MAX:
                 print(f"[FAIL] 最終失敗: {bet.rid} {bet.race_name}")
+
+            if stop_all:
+                print("[STOP] 購入結果が不確実なため、以降のレース処理も停止します。")
+                break
 
             if DRY_RUN:
                 print("[DRY_RUN] 1レースだけ確認する設定のため、ここで停止します。")
