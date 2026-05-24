@@ -6,7 +6,7 @@ from __future__ import annotations
 # ───────────────────────────────
 # ▼ ここにパラメータをまとめて設定
 # ───────────────────────────────
-RACE_DATE = "20260523"    # 取得したい開催日 (YYYYMMDD) ← 必要に応じてここだけ変える
+# RACE_DATE は main() で実行時にターミナルから入力する
 HEADLESS = True           # デバッグ時は False にするとブラウザが見える
 SCROLL_PAUSE = 0.8
 SCROLL_MAX = 20
@@ -324,8 +324,12 @@ def save_to_excel(df: pd.DataFrame, file_name: str, sheet_name: str) -> None:
 # ⑦ メイン処理
 # ───────────────────────────────
 def main():
+    race_date = input("対象レース日付を YYYYMMDD 形式で入力してください: ").strip()
+    if not re.fullmatch(r"\d{8}", race_date):
+        raise ValueError("対象レース日付は YYYYMMDD の8桁で入力してください")
+
     race_list_url = (
-        f"https://race.netkeiba.com/top/race_list.html?kaisai_date={RACE_DATE}"
+        f"https://race.netkeiba.com/top/race_list.html?kaisai_date={race_date}"
     )
     user, pw = load_credentials()
     driver = setup_browser()
@@ -347,7 +351,7 @@ def main():
 
         df_all = pd.concat(all_dfs, ignore_index=True)
         # racedata_results.xlsx を OUTPUT_DIR に保存
-        save_to_excel(df_all, "racedata_results.xlsx", RACE_DATE)
+        save_to_excel(df_all, "racedata_results.xlsx", race_date)
     finally:
         driver.quit()
 
