@@ -43,7 +43,7 @@ from openpyxl import load_workbook
 # ================================================================
 # 設定
 # ================================================================
-RACE_DATE = "20260523"         # 対象日（シート名）※必要に応じて変更してください.
+# RACE_DATE は main() で実行時にターミナルから入力する
 TARGET_SHEET_NAME = "TARGET"   # 反映先シート名（TARGET）
 
 # パス設定（keiba_yosou_2026 を基準）
@@ -550,16 +550,20 @@ def _make_out_path(target_xlsx: str) -> str:
 
 
 def main():
+    race_date = input("対象レース日付を YYYYMMDD 形式で入力してください: ").strip()
+    if not re.fullmatch(r"\d{8}", race_date):
+        raise ValueError("対象レース日付は YYYYMMDD の8桁で入力してください")
+
     RESULTS_XLSX = os.path.join(MASTER_DIR, "racedata_results.xlsx")
-    TARGET_XLSX = _choose_target_xlsx(OUTPUT_DIR, RACE_DATE)
+    TARGET_XLSX = _choose_target_xlsx(OUTPUT_DIR, race_date)
     OUT_XLSX = _make_out_path(TARGET_XLSX)
 
-    print("[INFO] 入力(結果):", RESULTS_XLSX, "sheet=", RACE_DATE)
+    print("[INFO] 入力(結果):", RESULTS_XLSX, "sheet=", race_date)
     print("[INFO] 入力(TARGET):", TARGET_XLSX, "sheet=", TARGET_SHEET_NAME)
     print("[INFO] 出力:", OUT_XLSX)
 
     # 1) 結果からマップ作成
-    map_rid_umaban_to_rank, map_rid_name_to_rank, payout_map = _load_results_maps(RESULTS_XLSX, RACE_DATE)
+    map_rid_umaban_to_rank, map_rid_name_to_rank, payout_map = _load_results_maps(RESULTS_XLSX, race_date)
 
     # 2) Excel読み込み
     wb = load_workbook(TARGET_XLSX)
@@ -662,8 +666,8 @@ def main():
 
     # 8) ログ
     print("[OK] 書き込み完了")
-    print(f"  RACE_DATE: {RACE_DATE}")
-    print(f"  入力(結果): {RESULTS_XLSX}  sheet={RACE_DATE}")
+    print(f"  RACE_DATE: {race_date}")
+    print(f"  入力(結果): {RESULTS_XLSX}  sheet={race_date}")
     print(f"  入力(TARGET): {TARGET_XLSX}  sheet={TARGET_SHEET_NAME}")
     print(f"  出力: {OUT_XLSX}")
     print(f"  着順ヒット件数: {hit}")
