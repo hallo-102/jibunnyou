@@ -432,32 +432,116 @@ def _rank3_metric_map_from_now_df(now_df: Optional[pd.DataFrame]) -> Dict[Tuple[
         return {}
 
     now = now_df.copy()
-    race_col = _pick_first_existing_col(now, ["レースID", "rid_str", "race_id"])
+    race_cols = [c for c in ["レースID", "rid_str", "race_id"] if c in now.columns]
     umaban_col = _pick_first_existing_col(now, ["馬番", "umaban", "馬 番", "馬番 "])
     pop_col = _pick_popularity_col_for_roi(now)
     score_col = _pick_first_existing_col(now, ["score"])
     extra_col = _pick_first_existing_col(now, ["extra_penalty"])
-    if race_col is None or umaban_col is None or pop_col is None or score_col is None or extra_col is None:
+    if not race_cols or umaban_col is None or pop_col is None or score_col is None or extra_col is None:
         return {}
 
-    now["_race_key_for_roi"] = now[race_col].map(_normalize_race_key)
+    # レースID表記は出力元によって rid_str / レースID のどちらでも来るため、両方をキー化する。
+    now["_race_keys_for_roi"] = now.apply(
+        lambda r: [
+            str(key)
+            for key in (_normalize_race_key(r.get(c)) for c in race_cols)
+            if key is not None
+        ],
+        axis=1,
+    )
     now["_umaban_for_roi"] = now[umaban_col].map(_to_umaban_int_for_roi)
     now["_popularity_for_roi"] = pd.to_numeric(now[pop_col], errors="coerce")
     now["_score_for_roi"] = pd.to_numeric(now[score_col], errors="coerce")
     now["_extra_penalty_for_roi"] = pd.to_numeric(now[extra_col], errors="coerce")
-    now = now.dropna(subset=["_race_key_for_roi", "_umaban_for_roi"])
+    now = now.dropna(subset=["_umaban_for_roi"])
+    now = now[now["_race_keys_for_roi"].map(bool)]
     if now.empty:
         return {}
 
-    now = now.drop_duplicates(subset=["_race_key_for_roi", "_umaban_for_roi"], keep="last")
     metric_map: Dict[Tuple[str, int], Dict[str, float]] = {}
     for _, r in now.iterrows():
-        metric_map[(str(r["_race_key_for_roi"]), int(r["_umaban_for_roi"]))] = {
+        metrics = {
             "popularity": _to_float_safe(r.get("_popularity_for_roi")),
             "score": _to_float_safe(r.get("_score_for_roi")),
             "extra_penalty": _to_float_safe(r.get("_extra_penalty_for_roi")),
         }
+        for race_key in r["_race_keys_for_roi"]:
+            metric_map[(str(race_key), int(r["_umaban_for_roi"]))] = metrics
     return metric_map
+
+
+def _format_metric_value(value: Optional[float]) -> str:
+    """理由欄に出す数値を、欠損時も読みやすい文字列へそろえる。"""
+    return "不明" if value is None else f"{value:.2f}"
+
+
+def _judge_bet_rank(
+    score1: Optional[float],
+    gap12: Optional[float],
+    dango_2_5: Optional[float],
+    rank3_popularity: Optional[float],
+    rank3_score: Optional[float],
+    rank3_extra_penalty: Optional[float],
+) -> Tuple[str, str, str]:
+    """
+    買い目_レース別1行のランク・判定・理由を決める。
+
+    dango_2_5 は rank2 と rank5 の score差なので、大きいほど2〜5位に差があり、
+    1位側が目立ちやすい状態として扱う。
+    """
+    score1_ok = score1 is not None and score1 >= 65.0
+    dango_ok = dango_2_5 is not None and dango_2_5 >= 6.0
+    rank3_pop_ok = rank3_popularity is not None and rank3_popularity <= 5.0
+    rank3_extra_ok = rank3_extra_penalty is not None and rank3_extra_penalty < 2.0
+    rank3_score_ok = rank3_score is not None and rank3_score >= 57.0
+
+    rank3_detail = (
+        f"3位人気={_format_metric_value(rank3_popularity)}"
+        f" / 3位score={_format_metric_value(rank3_score)}"
+        f" / 3位extra_penalty={_format_metric_value(rank3_extra_penalty)}"
+    )
+    base_detail = (
+        f"score1={_format_metric_value(score1)}"
+        f" / dango_2_5={_format_metric_value(dango_2_5)}"
+        f" / gap12={_format_metric_value(gap12)}"
+    )
+
+    if score1_ok and dango_ok and rank3_pop_ok and rank3_extra_ok and rank3_score_ok:
+        return (
+            "S",
+            "1位・3位とも信頼できる買いレース",
+            f"S条件一致（{base_detail}、{rank3_detail}）",
+        )
+
+    if score1_ok and dango_ok:
+        unmet = []
+        if not rank3_pop_ok:
+            unmet.append("3位人気<=5を満たさず")
+        if not rank3_extra_ok:
+            unmet.append("3位extra_penalty<2を満たさず")
+        if not rank3_score_ok:
+            unmet.append("3位score>=57を満たさず")
+        unmet_text = "、".join(unmet) if unmet else "S条件未満"
+        return (
+            "A",
+            "1位は信頼できるが3位軸は慎重",
+            f"A条件一致（{base_detail}）。S未満: {unmet_text}（{rank3_detail}）",
+        )
+
+    b_score_ok = score1 is not None and score1 >= 63.0
+    b_gap_ok = gap12 is not None and gap12 >= 2.0
+    if b_score_ok or b_gap_ok:
+        return (
+            "B",
+            "少額・参考",
+            f"B条件一致（score1>=63 または gap12>=2）。{base_detail}、{rank3_detail}",
+        )
+
+    return (
+        "-",
+        "見送り",
+        f"見送り条件（S/A/Bに届かず）。{base_detail}、{rank3_detail}",
+    )
 
 
 def build_roi_focus_bet_sheet(
@@ -742,6 +826,7 @@ def _build_bet_sheet(
             now[c] = pd.NA
 
     race_info = now.groupby("rid_str", as_index=False)[race_info_cols].first()
+    rank3_metric_map = _rank3_metric_map_from_now_df(now_export)
 
     # ----------------------------
     # TARGET：rid_str+馬番+score+rank を前提
@@ -761,16 +846,6 @@ def _build_bet_sheet(
     ft["馬番"] = pd.to_numeric(ft["馬番"], errors="coerce").astype("Int64")
     ft["score"] = pd.to_numeric(ft.get("score", pd.Series([pd.NA] * len(ft))), errors="coerce")
     ft["rank"] = pd.to_numeric(ft.get("rank", pd.Series([pd.NA] * len(ft))), errors="coerce").astype("Int64")
-
-    # 休養×距離差リスク列名のゆらぎ吸収
-    rest_col = (
-        "休養×距離差リスク"
-        if "休養×距離差リスク" in ft.columns
-        else ("rest_dist_risk" if "rest_dist_risk" in ft.columns else None)
-    )
-    if rest_col is None:
-        ft["休養×距離差リスク"] = 0.0
-        rest_col = "休養×距離差リスク"
 
     bet_rows: list[dict] = []
 
@@ -796,14 +871,6 @@ def _build_bet_sheet(
         else:
             dango_2_5 = 999.0
 
-        # 1位馬（先頭行）のリスク
-        top1 = sub2.iloc[0] if len(sub2) > 0 else pd.Series()
-        fav = _to_float_safe(top1.get("favorite_risk", 0.0)) or 0.0
-        extra = _to_float_safe(top1.get("extra_penalty", 0.0)) or 0.0
-        rest = _to_float_safe(top1.get(rest_col, 0.0)) or 0.0
-
-        risk_high = (extra >= extra_th) or (rest >= rest_th)
-
         # レース情報（無ければ最低限）
         info = race_info[race_info["rid_str"] == rid]
         info_row = info.iloc[0].to_dict() if not info.empty else {c: pd.NA for c in race_info_cols}
@@ -813,31 +880,51 @@ def _build_bet_sheet(
         # 単勝オッズ（上位1頭）
         odds_top1 = odds_map.get((str(rid), horses6[0])) if horses6[0] is not None else None
 
-        # 判定ロジック（過去シート互換）
-        if gap12 >= gap_min:
-            if risk_high:
-                rank_label = "A"
-                judge = "1頭軸（相手2～6位）＋保険BOX（上位5）"
-                reason = f"gap12={gap12:.2f}だが1位リスク高（fav={fav:.2f},extra={extra:.2f},rest={rest:.2f}）→保険"
-                axis_umaban = horses6[0]
-                axis_opp = ",".join(str(x) for x in horses6[1:6] if x is not None)
-                axis_yen = 100.0
-                box_list = [x for x in horses7[:5] if x is not None]
-                box_umaban = ",".join(str(x) for x in box_list) if box_list else np.nan
-                box_yen = 100.0
-            else:
-                rank_label = "S"
-                judge = "1頭軸（相手2～6位）"
-                reason = f"gap12={gap12:.2f}で1位が強い + リスク低（fav={fav:.2f},extra={extra:.2f},rest={rest:.2f}）"
-                axis_umaban = horses6[0]
-                axis_opp = ",".join(str(x) for x in horses6[1:6] if x is not None)
-                axis_yen = 100.0
-                box_umaban = np.nan
-                box_yen = np.nan
+        # 3位馬の人気・score・extra_penaltyを使い、検証で重視した新条件で判定する。
+        rank3_metrics: Dict[str, float] = {}
+        rank3_umaban = horses6[2]
+        if rank3_umaban is not None:
+            for race_key_src in (info_row.get("レースID"), rid):
+                race_key = _normalize_race_key(race_key_src)
+                if race_key is None:
+                    continue
+                rank3_metrics = rank3_metric_map.get((str(race_key), int(rank3_umaban)), {})
+                if rank3_metrics:
+                    break
+
+        rank3_popularity = _to_float_safe(rank3_metrics.get("popularity"))
+        rank3_score = _to_float_safe(rank3_metrics.get("score"))
+        rank3_extra_penalty = _to_float_safe(rank3_metrics.get("extra_penalty"))
+
+        rank_label, judge, reason = _judge_bet_rank(
+            score1=score1,
+            gap12=gap12,
+            dango_2_5=dango_2_5,
+            rank3_popularity=rank3_popularity,
+            rank3_score=rank3_score,
+            rank3_extra_penalty=rank3_extra_penalty,
+        )
+
+        if rank_label == "S":
+            axis_umaban = horses6[0]
+            axis_opp = ",".join(str(x) for x in horses6[1:6] if x is not None)
+            axis_yen = 100.0
+            box_umaban = np.nan
+            box_yen = np.nan
+        elif rank_label == "A":
+            axis_umaban = horses6[0]
+            axis_opp = ",".join(str(x) for x in horses6[1:6] if x is not None)
+            axis_yen = 100.0
+            box_list = [x for x in horses7[:5] if x is not None]
+            box_umaban = ",".join(str(x) for x in box_list) if box_list else np.nan
+            box_yen = 100.0
+        elif rank_label == "B":
+            axis_umaban = horses6[0]
+            axis_opp = ",".join(str(x) for x in horses6[1:6] if x is not None)
+            axis_yen = 100.0
+            box_umaban = np.nan
+            box_yen = np.nan
         else:
-            rank_label = "-"
-            judge = "見送り"
-            reason = f"gap12={gap12:.2f}小 + 団子でもない（2～5位幅={dango_2_5:.2f}）"
             axis_umaban = np.nan
             axis_opp = np.nan
             axis_yen = np.nan
