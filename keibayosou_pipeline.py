@@ -414,6 +414,44 @@ def _class_map_from_now_df(now_df: Optional[pd.DataFrame]) -> Dict[str, object]:
     return now.groupby("_race_key_for_roi")[class_col].first().to_dict()
 
 
+def _normalize_surface_for_roi(value: object) -> str:
+    """回収率重視シート用に、芝/ダだけを有効なsurfaceとして返す。"""
+    if pd.isna(value):
+        return ""
+    surface = _normalize_surface(str(value))
+    return surface if surface in {"芝", "ダ"} else ""
+
+
+def _surface_map_from_now_df(now_df: Optional[pd.DataFrame]) -> Dict[str, str]:
+    """今走シートから レースID -> surface の対応を作る。判定不能は空文字にする。"""
+    if now_df is None or not isinstance(now_df, pd.DataFrame) or now_df.empty:
+        return {}
+
+    now = now_df.copy()
+    race_col = _pick_first_existing_col(now, ["レースID", "rid_str", "race_id"])
+    surface_col = _pick_first_existing_col(now, ["芝・ダ", "芝ダ", "surface", "Surface"])
+    course_col = _pick_first_existing_col(now, ["コース", "course"])
+    if race_col is None or (surface_col is None and course_col is None):
+        return {}
+
+    now["_race_key_for_roi"] = now[race_col].map(_normalize_race_key)
+    if surface_col is not None:
+        now["_surface_for_roi"] = now[surface_col].map(_normalize_surface_for_roi)
+    else:
+        now["_surface_for_roi"] = ""
+
+    if course_col is not None:
+        course_surface = now[course_col].map(_normalize_surface_for_roi)
+        now["_surface_for_roi"] = now["_surface_for_roi"].where(now["_surface_for_roi"] != "", course_surface)
+
+    now = now.dropna(subset=["_race_key_for_roi"])
+    now = now[now["_surface_for_roi"] != ""]
+    if now.empty:
+        return {}
+
+    return now.groupby("_race_key_for_roi")["_surface_for_roi"].first().to_dict()
+
+
 def _pick_popularity_col_for_roi(df: pd.DataFrame) -> Optional[str]:
     """人気列の表記ゆれを吸収して、回収率重視シートの条件判定に使う列を返す。"""
     col = _pick_first_existing_col(df, ["人気", "単勝人気", "予想人気", "ninki", "popularity", "pop"])
@@ -561,6 +599,7 @@ def build_roi_focus_bet_sheet(
 
     work = bet_df.copy()
     class_map = _class_map_from_now_df(now_df)
+    surface_map = _surface_map_from_now_df(now_df)
     rank3_metric_map = _rank3_metric_map_from_now_df(now_df)
 
     if "クラス" not in work.columns:
@@ -585,9 +624,17 @@ def build_roi_focus_bet_sheet(
             continue
         if not (score1 >= 65.0 and dango_2_5 >= 6.0):
             continue
+        if gap12 is not None and gap12 < 0.5:
+            continue
 
         race_id = row.get("レースID", row.get("rid_str", pd.NA))
         race_key = _normalize_race_key(race_id)
+        surface = surface_map.get(str(race_key), "") if race_key is not None else ""
+        if surface == "":
+            surface = _normalize_surface_for_roi(row.get("コース", pd.NA))
+        if surface == "":
+            continue
+
         ranks = [_to_umaban_int_for_roi(row.get(f"{i}位馬番")) for i in range(1, 6)]
         if any(v is None for v in ranks) or len(set(ranks)) != 5:
             print(
@@ -627,7 +674,7 @@ def build_roi_focus_bet_sheet(
                 "4位馬番": rank4,
                 "5位馬番": rank5,
                 "購入判定": "購入",
-                "購入理由": "score1>=65 かつ dango_2_5>=6 かつ 3位人気<=5 かつ 3位extra_penalty<2 かつ 3位score>=57",
+                "購入理由": "score1>=65 かつ dango_2_5>=6 かつ gap12>=0.5 かつ surfaceが芝/ダ かつ 3位人気<=5 かつ 3位extra_penalty<2 かつ 3位score>=57",
                 "3連複1点目_馬番1": rank1,
                 "3連複1点目_馬番2": rank3,
                 "3連複1点目_馬番3": rank2,
