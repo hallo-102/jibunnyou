@@ -1025,20 +1025,34 @@ def calc_race_level_score(
     pre_top5_mean: Optional[float],
     pre_mean: Optional[float],
     pre_p50: Optional[float],
+    race_best_vs_master_sec: Optional[float] = None,
+    top5_time_vs_master_mean: Optional[float] = None,
+    fast_runner_rate: Optional[float] = None,
 ) -> Optional[float]:
     """
     上位層だけでなく出走馬全体の厚みも見るレースレベル総合スコア。
     pre_top3_mean 単独だと1〜3頭の高ratingに引っ張られるため、平均・中央値も混ぜる。
+    条件別最速基準タイムに近い/速いレースは、時計面のレースレベルとして少し加点する。
     """
     values = [pre_top3_mean, pre_top5_mean, pre_mean, pre_p50]
     if any(v is None or pd.isna(v) for v in values):
         return None
-    return float(
+
+    base_score = float(
         (float(pre_top3_mean) * 0.35)
         + (float(pre_top5_mean) * 0.25)
         + (float(pre_mean) * 0.25)
         + (float(pre_p50) * 0.15)
     )
+    time_adjustment = 0.0
+    if race_best_vs_master_sec is not None and not pd.isna(race_best_vs_master_sec):
+        time_adjustment += clamp(-6.0 * float(race_best_vs_master_sec), -18.0, 12.0)
+    if top5_time_vs_master_mean is not None and not pd.isna(top5_time_vs_master_mean):
+        time_adjustment += clamp(-4.0 * float(top5_time_vs_master_mean), -16.0, 12.0)
+    if fast_runner_rate is not None and not pd.isna(fast_runner_rate):
+        time_adjustment += clamp(float(fast_runner_rate), 0.0, 1.0) * 8.0
+
+    return float(base_score + time_adjustment)
 
 
 def parse_yyyymmdd(value) -> Optional[datetime.date]:
@@ -1518,7 +1532,19 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                 fast_runner_rate = (
                     float(fast_runner_count / timed_runner_count) if timed_runner_count > 0 else None
                 )
-                race_level_score = calc_race_level_score(pre_top3, pre_top5, pre_mean, pre_p50)
+                race_best_vs_master_sec = calc_time_vs_master_sec(best_time, cond_best_time)
+                race_median_vs_master_sec = calc_time_vs_master_sec(median_time, cond_best_time)
+                top5_time_vs_master_mean = mean_or_none(top5_time_vs_master_values)
+                field_time_vs_master_mean = mean_or_none(time_vs_master_values)
+                race_level_score = calc_race_level_score(
+                    pre_top3,
+                    pre_top5,
+                    pre_mean,
+                    pre_p50,
+                    race_best_vs_master_sec,
+                    top5_time_vs_master_mean,
+                    fast_runner_rate,
+                )
                 store.race_levels.append({
                     "race_id": str(rid),
                     "date": date_str,
@@ -1550,12 +1576,12 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     "day_bias_sec": day_bias_sec,
                     "race_best_time": best_time,
                     "race_median_time": median_time,
-                    "race_best_vs_master_sec": calc_time_vs_master_sec(best_time, cond_best_time),
-                    "race_median_vs_master_sec": calc_time_vs_master_sec(median_time, cond_best_time),
+                    "race_best_vs_master_sec": race_best_vs_master_sec,
+                    "race_median_vs_master_sec": race_median_vs_master_sec,
                     "fast_runner_count": fast_runner_count,
                     "fast_runner_rate": fast_runner_rate,
-                    "top5_time_vs_master_mean": mean_or_none(top5_time_vs_master_values),
-                    "field_time_vs_master_mean": mean_or_none(time_vs_master_values),
+                    "top5_time_vs_master_mean": top5_time_vs_master_mean,
+                    "field_time_vs_master_mean": field_time_vs_master_mean,
                     "winner_margin_sec": winner_margin_sec,
                     "surface_rating_mode": surface_key or "overall",
                 })
@@ -1807,7 +1833,7 @@ def build_readme_dataframe(source_xlsx: Path) -> pd.DataFrame:
         "pre_bottom1/pre_bottom5_mean: 下位層の弱さ\n"
         "pre_std/pre_iqr: ばらつき（団子/格差）\n"
         "gap_top1_p50/gap_top3_p50/gap_top5_p50: 1強・上位層の厚み指標\n"
-        "race_level_score: 上位層と全体の厚みを混ぜた複合レースレベル\n"
+        "race_level_score: 上位層・全体の厚み・条件別最速基準への近さを混ぜた複合レースレベル\n"
         "race_level_score_rank/pre_top3_mean_rank: 複合スコア/上位3頭平均の順位\n"
         "cond_best_time_baseline/cond_median_time_baseline/day_bias_sec: 条件別標準タイムと当日馬場差\n"
         "race_best_time/race_median_time/winner_margin_sec: 当該レース実績\n"
