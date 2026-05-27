@@ -1014,7 +1014,7 @@ def _append_estimated_cols(base_df: pd.DataFrame, estimated_df: pd.DataFrame) ->
 
 def _add_estimated_in3_rate_to_excel(out_excel_path: str, raceday_str: Optional[str]) -> int:
     """
-    最終出力Excelに、推定馬券内率・集計表・妙味あり馬シートを書き戻す。
+    最終出力Excelの既存シートへ、推定馬券内率の主要列を書き戻す。
     """
     if not os.path.exists(out_excel_path):
         print(f"[WARN] 出力Excelが見つからないため、推定馬券内率付与をスキップ: {out_excel_path}")
@@ -1054,26 +1054,18 @@ def _add_estimated_in3_rate_to_excel(out_excel_path: str, raceday_str: Optional[
 
     target_aug = _append_estimated_cols(target_df, estimated_df)
     now_aug = _append_estimated_cols(now_df, estimated_df) if now_df is not None and not now_df.empty else now_df
-
-    estimated_sheet = estimated_df.copy()
-    for col in EST_IN3_RESULT_COLS:
-        if col not in estimated_sheet.columns:
-            estimated_sheet[col] = pd.NA
-    estimated_sheet = estimated_sheet[EST_IN3_RESULT_COLS]
-
-    value_sheet = estimated_sheet[estimated_sheet["妙味判定"].isin(["妙味あり", "穴候補"])].copy()
-    if not value_sheet.empty:
-        value_sheet = value_sheet.sort_values(["期待値", "推定馬券内率"], ascending=[False, False], kind="mergesort")
+    estimated_count = int(len(estimated_df))
 
     try:
         with pd.ExcelWriter(out_excel_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+            # 旧バージョンで作成済みの不要シートが残らないよう削除する。
+            for stale_sheet in [EST_IN3_SHEET, RANK_RATE_TABLE_SHEET, SCORE_RATE_TABLE_SHEET, VALUE_HORSE_SHEET]:
+                if stale_sheet in writer.book.sheetnames:
+                    del writer.book[stale_sheet]
+
             target_aug.to_excel(writer, sheet_name=TARGET_SHEET, index=False)
             if now_aug is not None and not now_aug.empty:
                 now_aug.to_excel(writer, sheet_name=NOW_SHEET, index=False)
-            estimated_sheet.to_excel(writer, sheet_name=EST_IN3_SHEET, index=False)
-            rank_rate_table.to_excel(writer, sheet_name=RANK_RATE_TABLE_SHEET, index=False)
-            score_rate_table.to_excel(writer, sheet_name=SCORE_RATE_TABLE_SHEET, index=False)
-            value_sheet.to_excel(writer, sheet_name=VALUE_HORSE_SHEET, index=False)
     except PermissionError:
         print(f"[WARN] 出力Excelが開かれている可能性があります。Excelを閉じてから再実行してください: {out_excel_path}")
         return 0
@@ -1081,8 +1073,8 @@ def _add_estimated_in3_rate_to_excel(out_excel_path: str, raceday_str: Optional[
         print(f"[WARN] 推定馬券内率のExcel書き戻しに失敗しました: {e}")
         return 0
 
-    print(f"[INFO] 推定馬券内率付与完了: {len(estimated_sheet)}頭 -> {out_excel_path}")
-    return int(len(estimated_sheet))
+    print(f"[INFO] 推定馬券内率付与完了: {estimated_count}頭 -> {out_excel_path}")
+    return estimated_count
 
 
 # ============================================================
