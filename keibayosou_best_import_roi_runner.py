@@ -49,15 +49,17 @@ from keibayosou_utils import _normalize_place
 # ============================================================
 OUTPUT_DIR = BASE_DIR / "data" / "output"
 TRAIN_XLSX = BASE_DIR / "data" / "master" / "racedata_results.xlsx"
+OZZU_SCRAPER_SCRIPT = BASE_DIR / "etc_py" / "02_scrape_jra_odds_2.py"
 NOW_SHEET = "今走レース情報"
 TARGET_SHEET = "TARGET"
 EST_IN3_SHEET = "推定馬券内率"
 VALUE_HORSE_SHEET = "妙味あり馬"
+DANGER_HORSE_SHEET = "危険馬"
 RANK_RATE_TABLE_SHEET = "rank_rate_table"
 SCORE_RATE_TABLE_SHEET = "score_rate_table"
 BET_SHEET = "買い目_レース別1行"
 ROI_FOCUS_BET_SHEET = "回収率重視_買い目候補"
-RACE_ID_FORMAT_SHEETS = [BET_SHEET, ROI_FOCUS_BET_SHEET]
+RACE_ID_FORMAT_SHEETS = [BET_SHEET, ROI_FOCUS_BET_SHEET, DANGER_HORSE_SHEET]
 
 
 # ============================================================
@@ -117,6 +119,28 @@ EST_IN3_RESULT_COLS = [
     "期待値_補正前",
     "期待値",
     "妙味判定",
+]
+
+DANGER_HORSE_RESULT_COLS = [
+    "レースID",
+    "場所",
+    "危険人気馬_馬番",
+    "危険人気馬_馬名",
+    "危険人気馬_人気",
+    "危険人気馬_rank",
+    "危険人気馬_score",
+    "危険人気馬スコア",
+    "危険人気馬_判定",
+    "危険人気馬_理由",
+    "危険人気馬_単勝オッズ",
+    "危険人気馬_複勝オッズ",
+    "危険人気馬_extra_penalty",
+    "危険人気馬_favorite_risk",
+    "危険人気馬_rest_dist_risk",
+    "危険人気馬_score1差",
+    "4_8番人気_score上位頭数",
+    "レースscore1",
+    "頭数",
 ]
 
 
@@ -913,12 +937,29 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
             "今回条件適性スコア",
             "穴馬救済スコア",
             "危険馬スコア",
+            "extra_penalty",
+            "favorite_risk",
+            "rest_dist_risk",
+            "休養×距離差リスク",
         ]
-        info_cols = [c for c in info_cols if c in now.columns]
+        info_cols = [c for c in dict.fromkeys(info_cols) if c in now.columns]
         now_info = now[info_cols].drop_duplicates(subset=["rid_str", "馬番"], keep="first")
         target = pd.merge(target, now_info, on=["rid_str", "馬番"], how="left", suffixes=("", "_now"))
 
-        for col in ["レースID", "頭数", "人気", "単勝オッズ", "複勝オッズ", "今回条件適性スコア", "穴馬救済スコア", "危険馬スコア"]:
+        for col in [
+            "レースID",
+            "頭数",
+            "人気",
+            "単勝オッズ",
+            "複勝オッズ",
+            "今回条件適性スコア",
+            "穴馬救済スコア",
+            "危険馬スコア",
+            "extra_penalty",
+            "favorite_risk",
+            "rest_dist_risk",
+            "休養×距離差リスク",
+        ]:
             now_col = f"{col}_now"
             if now_col in target.columns:
                 if col in target.columns:
@@ -946,7 +987,7 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
         )
 
         target = pd.merge(target, odds_use, on=["rid_str", "馬番"], how="left")
-        target["単勝オッズ"] = target["単勝オッズ"].combine_first(target["単勝オッズ_odds_csv"])
+        target["単勝オッズ"] = target["単勝オッズ_odds_csv"].combine_first(target["単勝オッズ"])
         target = target.drop(columns=["単勝オッズ_odds_csv"], errors="ignore")
 
     ozzu_path = _pick_ozzu_csv(str(ODDS_CSV), raceday_str)
@@ -983,9 +1024,9 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
                 return float(fukusho_map.get((place_norm, race_no, int(umaban)), np.nan))
 
             target["単勝オッズ_ozzu_place"] = target.apply(_lookup_tansho_by_place, axis=1)
-            target["単勝オッズ"] = target["単勝オッズ"].combine_first(target["単勝オッズ_ozzu_place"])
+            target["単勝オッズ"] = target["単勝オッズ_ozzu_place"].combine_first(target["単勝オッズ"])
             target["複勝オッズ_ozzu_place"] = target.apply(_lookup_fukusho_by_place, axis=1)
-            target["複勝オッズ"] = target["複勝オッズ"].combine_first(target["複勝オッズ_ozzu_place"])
+            target["複勝オッズ"] = target["複勝オッズ_ozzu_place"].combine_first(target["複勝オッズ"])
             target = target.drop(columns=["単勝オッズ_ozzu_place", "複勝オッズ_ozzu_place"], errors="ignore")
         except Exception as e:
             print(f"[WARN] OZZU場所+R番号照合によるオッズ補完に失敗しました: {e}")
@@ -994,7 +1035,7 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
         target["人気"] = pd.to_numeric(target["人気"], errors="coerce")
         target["単勝オッズ"] = _coerce_float_series(target["単勝オッズ"])
         odds_pop = target.groupby("rid_str")["単勝オッズ"].rank(ascending=True, method="min")
-        target["人気"] = target["人気"].combine_first(odds_pop)
+        target["人気"] = odds_pop.combine_first(target["人気"])
         target["人気"] = pd.to_numeric(target["人気"], errors="coerce").round().astype("Int64")
 
     return target
@@ -1013,6 +1054,185 @@ def _append_estimated_cols(base_df: pd.DataFrame, estimated_df: pd.DataFrame) ->
         on=["rid_str", "馬番"],
         how="left",
     )
+
+
+def _risk_value_series(work: pd.DataFrame, candidates: List[str]) -> pd.Series:
+    """候補列のどれかから、危険馬判定用の数値Seriesを取り出す。"""
+    col = _pick_col(work, candidates)
+    if col is None or col not in work.columns:
+        return pd.Series(np.nan, index=work.index)
+    return _coerce_float_series(work[col])
+
+
+def _danger_horse_label(score: int) -> str:
+    """危険馬スコアを、運用しやすい判定ラベルへ変換する。"""
+    if score >= 7:
+        return "強い切り候補"
+    if score >= 5:
+        return "切り候補"
+    if score >= 3:
+        return "3列目残し候補"
+    return "切らない"
+
+
+def _fmt_reason_num(value: object, digits: int = 1) -> str:
+    """理由文に入れる数値を、欠損に強い短い表記へ寄せる。"""
+    num = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(num):
+        return "不明"
+    return f"{float(num):.{digits}f}"
+
+
+def _build_danger_horse_sheet(estimated_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    1〜3番人気の中で危険馬スコアが最も高い馬を、レースごとに1頭選ぶ。
+    人気は単勝オッズをレース内で昇順rankし、OZZU由来のオッズ評価に寄せる。
+    """
+    if estimated_df is None or estimated_df.empty:
+        return pd.DataFrame(columns=DANGER_HORSE_RESULT_COLS)
+
+    work = _canonical_prediction_frame(estimated_df)
+    work["score"] = pd.to_numeric(work["score"], errors="coerce")
+    work["予想順位"] = pd.to_numeric(work["予想順位"], errors="coerce")
+    work["単勝オッズ"] = _coerce_float_series(work["単勝オッズ"])
+    work["複勝オッズ"] = _coerce_float_series(work["複勝オッズ"])
+    work["_danger_popularity"] = work.groupby("rid_str")["単勝オッズ"].rank(ascending=True, method="min")
+    work["_extra_penalty"] = _risk_value_series(work, ["extra_penalty"])
+    work["_favorite_risk"] = _risk_value_series(work, ["favorite_risk"])
+    work["_rest_dist_risk"] = _risk_value_series(work, ["rest_dist_risk", "休養×距離差リスク"])
+
+    rows: List[Dict[str, object]] = []
+    for rid, race in work.groupby("rid_str", sort=True):
+        if not str(rid).strip():
+            continue
+
+        candidates = race[race["_danger_popularity"].between(1, 3, inclusive="both")].copy()
+        if candidates.empty:
+            continue
+
+        top_score = pd.to_numeric(race["score"], errors="coerce").max()
+        fav_score_min = pd.to_numeric(candidates["score"], errors="coerce").min()
+        scored_rows: List[Tuple[Tuple[float, float, float, float, float], Dict[str, object]]] = []
+
+        for _, row in candidates.iterrows():
+            danger_score = 0
+            reasons: List[str] = []
+
+            pred_rank = row.get("予想順位")
+            horse_score = row.get("score")
+            pop = row.get("_danger_popularity")
+            tansho = row.get("単勝オッズ")
+            extra_penalty = row.get("_extra_penalty")
+            favorite_risk = row.get("_favorite_risk")
+            rest_dist_risk = row.get("_rest_dist_risk")
+
+            pred_rank_num = pd.to_numeric(pd.Series([pred_rank]), errors="coerce").iloc[0]
+            horse_score_num = pd.to_numeric(pd.Series([horse_score]), errors="coerce").iloc[0]
+            pop_num = pd.to_numeric(pd.Series([pop]), errors="coerce").iloc[0]
+            tansho_num = pd.to_numeric(pd.Series([tansho]), errors="coerce").iloc[0]
+            score_gap = (
+                float(top_score - horse_score_num)
+                if pd.notna(top_score) and pd.notna(horse_score_num)
+                else np.nan
+            )
+
+            if pd.notna(pred_rank_num) and pred_rank_num >= 4:
+                danger_score += 2
+                reasons.append(f"{int(pop_num)}番人気だが予想rank{int(pred_rank_num)}位")
+            if pd.notna(pred_rank_num) and pred_rank_num >= 6:
+                danger_score += 2
+                reasons.append("予想rank6位以下")
+
+            if pd.notna(horse_score_num) and pd.notna(fav_score_min) and horse_score_num == fav_score_min:
+                danger_score += 2
+                reasons.append("1〜3番人気内でscore最下位")
+
+            if pd.notna(score_gap) and score_gap >= 5.0:
+                danger_score += 1
+                reasons.append(f"score1との差{_fmt_reason_num(score_gap)}")
+            if pd.notna(score_gap) and score_gap >= 8.0:
+                danger_score += 1
+                reasons.append("score1との差8以上")
+
+            if pd.notna(extra_penalty) and float(extra_penalty) >= 2.0:
+                danger_score += 1
+                reasons.append(f"extra_penalty{_fmt_reason_num(extra_penalty)}")
+            if pd.notna(extra_penalty) and float(extra_penalty) >= 3.0:
+                danger_score += 1
+                reasons.append("extra_penalty3以上")
+
+            if pd.notna(favorite_risk) and float(favorite_risk) >= 2.0:
+                danger_score += 1
+                reasons.append(f"favorite_risk{_fmt_reason_num(favorite_risk)}")
+            if pd.notna(favorite_risk) and float(favorite_risk) >= 3.0:
+                danger_score += 1
+                reasons.append("favorite_risk3以上")
+
+            if pd.notna(rest_dist_risk) and float(rest_dist_risk) >= 2.0:
+                danger_score += 1
+                reasons.append(f"rest_dist_risk{_fmt_reason_num(rest_dist_risk)}")
+            if pd.notna(rest_dist_risk) and float(rest_dist_risk) >= 3.0:
+                danger_score += 1
+                reasons.append("rest_dist_risk3以上")
+
+            mid_higher_count = 0
+            if pd.notna(horse_score_num):
+                mid = race[race["_danger_popularity"].between(4, 8, inclusive="both")]
+                mid_higher_count = int((pd.to_numeric(mid["score"], errors="coerce") > horse_score_num).sum())
+            if mid_higher_count >= 2:
+                danger_score += 2
+                reasons.append(f"4〜8番人気にscore上位馬{mid_higher_count}頭")
+
+            if (
+                pd.notna(tansho_num)
+                and tansho_num <= 5.0
+                and pd.notna(pred_rank_num)
+                and pred_rank_num >= 5
+            ):
+                danger_score += 1
+                reasons.append(f"単勝{_fmt_reason_num(tansho_num)}倍でrank5位以下")
+
+            row_dict = {
+                "レースID": row.get("レースID", rid),
+                "場所": row.get("場所", pd.NA),
+                "危険人気馬_馬番": row.get("馬番", pd.NA),
+                "危険人気馬_馬名": row.get("馬名", pd.NA),
+                "危険人気馬_人気": int(pop_num) if pd.notna(pop_num) else pd.NA,
+                "危険人気馬_rank": int(pred_rank_num) if pd.notna(pred_rank_num) else pd.NA,
+                "危険人気馬_score": round(float(horse_score_num), 2) if pd.notna(horse_score_num) else pd.NA,
+                "危険人気馬スコア": int(danger_score),
+                "危険人気馬_判定": _danger_horse_label(int(danger_score)),
+                "危険人気馬_理由": "、".join(reasons) if reasons else "大きな危険条件なし",
+                "危険人気馬_単勝オッズ": round(float(tansho_num), 2) if pd.notna(tansho_num) else pd.NA,
+                "危険人気馬_複勝オッズ": round(float(row.get("複勝オッズ")), 2) if pd.notna(row.get("複勝オッズ")) else pd.NA,
+                "危険人気馬_extra_penalty": round(float(extra_penalty), 2) if pd.notna(extra_penalty) else pd.NA,
+                "危険人気馬_favorite_risk": round(float(favorite_risk), 2) if pd.notna(favorite_risk) else pd.NA,
+                "危険人気馬_rest_dist_risk": round(float(rest_dist_risk), 2) if pd.notna(rest_dist_risk) else pd.NA,
+                "危険人気馬_score1差": round(float(score_gap), 2) if pd.notna(score_gap) else pd.NA,
+                "4_8番人気_score上位頭数": int(mid_higher_count),
+                "レースscore1": round(float(top_score), 2) if pd.notna(top_score) else pd.NA,
+                "頭数": row.get("頭数", len(race)),
+            }
+            scored_rows.append(
+                (
+                    (
+                        -float(danger_score),
+                        -float(score_gap) if pd.notna(score_gap) else 0.0,
+                        -float(pred_rank_num) if pd.notna(pred_rank_num) else 0.0,
+                        float(horse_score_num) if pd.notna(horse_score_num) else float("inf"),
+                        float(pop_num) if pd.notna(pop_num) else float("inf"),
+                    ),
+                    row_dict,
+                )
+            )
+
+        if scored_rows:
+            scored_rows.sort(key=lambda x: x[0])
+            rows.append(scored_rows[0][1])
+
+    if not rows:
+        return pd.DataFrame(columns=DANGER_HORSE_RESULT_COLS)
+    return pd.DataFrame(rows, columns=DANGER_HORSE_RESULT_COLS)
 
 
 def _add_estimated_in3_rate_to_excel(out_excel_path: str, raceday_str: Optional[str]) -> int:
@@ -1057,18 +1277,27 @@ def _add_estimated_in3_rate_to_excel(out_excel_path: str, raceday_str: Optional[
 
     target_aug = _append_estimated_cols(target_df, estimated_df)
     now_aug = _append_estimated_cols(now_df, estimated_df) if now_df is not None and not now_df.empty else now_df
+    danger_horse_df = _build_danger_horse_sheet(estimated_df)
     estimated_count = int(len(estimated_df))
+    danger_race_count = int(len(danger_horse_df))
 
     try:
         with pd.ExcelWriter(out_excel_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
             # 旧バージョンで作成済みの不要シートが残らないよう削除する。
-            for stale_sheet in [EST_IN3_SHEET, RANK_RATE_TABLE_SHEET, SCORE_RATE_TABLE_SHEET, VALUE_HORSE_SHEET]:
+            for stale_sheet in [
+                EST_IN3_SHEET,
+                RANK_RATE_TABLE_SHEET,
+                SCORE_RATE_TABLE_SHEET,
+                VALUE_HORSE_SHEET,
+                DANGER_HORSE_SHEET,
+            ]:
                 if stale_sheet in writer.book.sheetnames:
                     del writer.book[stale_sheet]
 
             target_aug.to_excel(writer, sheet_name=TARGET_SHEET, index=False)
             if now_aug is not None and not now_aug.empty:
                 now_aug.to_excel(writer, sheet_name=NOW_SHEET, index=False)
+            danger_horse_df.to_excel(writer, sheet_name=DANGER_HORSE_SHEET, index=False)
     except PermissionError:
         print(f"[WARN] 出力Excelが開かれている可能性があります。Excelを閉じてから再実行してください: {out_excel_path}")
         return 0
@@ -1077,6 +1306,7 @@ def _add_estimated_in3_rate_to_excel(out_excel_path: str, raceday_str: Optional[
         return 0
 
     print(f"[INFO] 推定馬券内率付与完了: {estimated_count}頭 -> {out_excel_path}")
+    print(f"[INFO] '{DANGER_HORSE_SHEET}' シート作成完了: {danger_race_count}レース -> {out_excel_path}")
     return estimated_count
 
 
@@ -1087,7 +1317,8 @@ def _pick_ozzu_csv(base: str, raceday: Optional[str]) -> Optional[str]:
     """
     ODDS_CSV（フォルダ or ファイル）から、使う OZZU CSV を1つ選ぶ。
     - base がファイルならそれを使う
-    - base がフォルダなら、raceday を含むファイルを優先し、なければ最新を使う
+    - base がフォルダでracedayがあるなら、racedayを含むファイルだけを使う
+    - base がフォルダでracedayが無いなら、最新ファイルを使う
     """
     if os.path.isfile(base):
         return base
@@ -1102,8 +1333,29 @@ def _pick_ozzu_csv(base: str, raceday: Optional[str]) -> Optional[str]:
         preferred = [p for p in csv_files if str(raceday) in os.path.basename(p)]
         if preferred:
             return max(preferred, key=lambda p: os.path.getmtime(p))
+        return None
 
     return max(csv_files, key=lambda p: os.path.getmtime(p))
+
+
+def _require_target_ozzu_csv_for_raceday(raceday: Optional[str]) -> Optional[str]:
+    """
+    対象日指定時に、対象日のOZZU CSVが無ければ明示エラーで中止する。
+    古い別日CSVを誤って使わないため、スクレイピングの自動実行はしない。
+    """
+    if not raceday:
+        return None
+
+    ozzu_path = _pick_ozzu_csv(str(ODDS_CSV), raceday)
+    if ozzu_path and os.path.exists(ozzu_path):
+        return ozzu_path
+
+    raise FileNotFoundError(
+        "対象日のオッズCSVが見つからないため処理を中止します。"
+        f" 対象日={raceday}"
+        f" / 探索先={ODDS_CSV}"
+        f" / 先に {OZZU_SCRAPER_SCRIPT} を実行して、対象日のOZZU CSVを作成してください。"
+    )
 
 
 def _read_csv_any_encoding(path: str) -> pd.DataFrame:
@@ -1694,6 +1946,7 @@ def main() -> None:
     elif not re.fullmatch(r"\d{8}", raceday_str):
         raise ValueError("対象レース日付は YYYYMMDD の8桁で入力してください")
 
+    _require_target_ozzu_csv_for_raceday(raceday_str)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # --------------------------------------------------------
