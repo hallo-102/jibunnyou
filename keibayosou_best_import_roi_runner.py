@@ -55,6 +55,9 @@ EST_IN3_SHEET = "推定馬券内率"
 VALUE_HORSE_SHEET = "妙味あり馬"
 RANK_RATE_TABLE_SHEET = "rank_rate_table"
 SCORE_RATE_TABLE_SHEET = "score_rate_table"
+BET_SHEET = "買い目_レース別1行"
+ROI_FOCUS_BET_SHEET = "回収率重視_買い目候補"
+RACE_ID_FORMAT_SHEETS = [BET_SHEET, ROI_FOCUS_BET_SHEET]
 
 
 # ============================================================
@@ -1303,6 +1306,43 @@ def _fill_tansho_odds_to_bet_sheet(out_excel_path: str, raceday_str: Optional[st
     return filled
 
 
+def _format_race_id_column_to_integer(out_excel_path: str) -> int:
+    """
+    指定シートのA列（レースID）を、Excelのユーザー定義書式「0」にする。
+    """
+    if not os.path.exists(out_excel_path):
+        print(f"[WARN] 出力Excelが見つからないため、レースID列の書式設定をスキップ: {out_excel_path}")
+        return 0
+
+    wb = None
+    formatted_sheets = 0
+    try:
+        wb = load_workbook(out_excel_path)
+        for sheet_name in RACE_ID_FORMAT_SHEETS:
+            if sheet_name not in wb.sheetnames:
+                print(f"[INFO] '{sheet_name}' シートが無いため、レースID列の書式設定をスキップします")
+                continue
+
+            ws = wb[sheet_name]
+            for row_idx in range(1, ws.max_row + 1):
+                ws.cell(row=row_idx, column=1).number_format = "0"
+            formatted_sheets += 1
+
+        wb.save(out_excel_path)
+    except PermissionError:
+        print(f"[WARN] 出力Excelが開かれている可能性があります。Excelを閉じてから再実行してください: {out_excel_path}")
+        return 0
+    except Exception as e:
+        print(f"[WARN] レースID列の書式設定に失敗しました: {e}")
+        return 0
+    finally:
+        if wb is not None:
+            wb.close()
+
+    print(f"[INFO] レースID列の書式設定完了: {formatted_sheets}シート -> {out_excel_path}")
+    return formatted_sheets
+
+
 # ============================================================
 # DL順位作成ユーティリティ
 # ============================================================
@@ -1705,6 +1745,7 @@ def main() -> None:
     _fill_tansho_odds_to_bet_sheet(actual_final_out, raceday_str)
     _add_estimated_in3_rate_to_excel(actual_final_out, raceday_str)
     append_roi_focus_bet_sheet_to_excel(actual_final_out)
+    _format_race_id_column_to_integer(actual_final_out)
 
     print("[INFO] ===== すべて完了しました =====")
     print(f"[INFO] 最終出力: {actual_final_out}")
