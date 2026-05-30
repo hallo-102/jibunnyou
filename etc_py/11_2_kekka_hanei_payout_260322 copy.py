@@ -14,6 +14,9 @@
      - AC列〜AE列：結果の1〜3着の馬番を入れる（AC=1着, AD=2着, AE=3着）
      - AF列：L列の「ランキング1位の馬番」が実際に3着以内なら、その馬の「複勝払戻金」を入れる
               （3着以内でなければ 0、結果が無ければ空欄）
+  4) 「危険馬」シートのデータ末尾列に危険馬の結果判定を入れる
+     - 危険馬が馬券外（4着以下）なら「〇」
+     - 危険馬が馬券内（1〜3着）なら「×」
 
 入出力（同じフォルダ想定）：
   入力(結果) : racedata_results.xlsx
@@ -45,6 +48,8 @@ from openpyxl import load_workbook
 # ================================================================
 # RACE_DATE は main() で実行時にターミナルから入力する
 TARGET_SHEET_NAME = "TARGET"   # 反映先シート名（TARGET）
+DANGER_HORSE_SHEET_NAME = "危険馬"
+DANGER_HORSE_RESULT_HEADER = "危険馬_結果判定"
 
 # パス設定（keiba_yosou_2026 を基準）
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
@@ -505,6 +510,18 @@ def _find_header_cols(ws):
     return header_cols
 
 
+def _find_last_data_col(ws) -> int:
+    """
+    シート内で実データが入っている一番右の列番号を返す。
+    """
+    last_col = 0
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value not in (None, ""):
+                last_col = max(last_col, cell.column)
+    return last_col
+
+
 def _ensure_header(ws, header_cols: Dict[str, int], wanted_header: str, fixed_col_letter: str) -> int:
     """
     header_cols に無い場合でも、固定列へヘッダを書き込んで列番号を返す。
@@ -517,6 +534,103 @@ def _ensure_header(ws, header_cols: Dict[str, int], wanted_header: str, fixed_co
     ws.cell(row=1, column=col_idx).value = wanted_header
     header_cols[wanted_norm] = col_idx
     return col_idx
+
+
+def _update_danger_horse_sheet_result(
+    wb,
+    map_rid_umaban_to_rank: Dict[Tuple[str, int], int],
+    map_rid_name_to_rank: Dict[Tuple[str, str], int],
+    sheet_name: str = DANGER_HORSE_SHEET_NAME,
+) -> Tuple[int, int, int]:
+    """
+    危険馬シートのデータ末尾列に、危険馬の結果判定を書き込む。
+
+    判定:
+      - 危険馬が馬券外（4着以下）なら「〇」
+      - 危険馬が馬券内（1〜3着）なら「×」
+
+    戻り値: (馬券外_count, 馬券内_count, 着順見つからず_count)
+    """
+    if sheet_name not in wb.sheetnames:
+        print(f"[WARN] '{sheet_name}' シートが見つからないためスキップします（既存: {wb.sheetnames}）")
+        return 0, 0, 0
+
+    ws = wb[sheet_name]
+    header_cols = _find_header_cols(ws)
+
+    # レースID列を探す
+    rid_col = None
+    for k in ["レースID", "rid_str", "raceid", "rid"]:
+        kn = _norm_colname(k)
+        if kn in header_cols:
+            rid_col = header_cols[kn]
+            break
+    if rid_col is None:
+        print(f"[WARN] '{sheet_name}' シートに レースID 列が見つからないためスキップします")
+        return 0, 0, 0
+
+    # 危険馬の馬番列を探す
+    umaban_col = None
+    for k in ["危険人気馬_馬番", "危険馬_馬番", "馬番", "umaban"]:
+        kn = _norm_colname(k)
+        if kn in header_cols:
+            umaban_col = header_cols[kn]
+            break
+
+    # 馬番で見つからない場合に備えて馬名列も探す
+    name_col = None
+    for k in ["危険人気馬_馬名", "危険馬_馬名", "馬名", "horse_name"]:
+        kn = _norm_colname(k)
+        if kn in header_cols:
+            name_col = header_cols[kn]
+            break
+
+    if umaban_col is None and name_col is None:
+        print(f"[WARN] '{sheet_name}' シートに 危険馬の馬番/馬名 列が見つからないためスキップします")
+        return 0, 0, 0
+
+    # 既に判定列がある場合は再利用し、無い場合は実データの一番右へ追加する
+    result_header_norm = _norm_colname(DANGER_HORSE_RESULT_HEADER)
+    if result_header_norm in header_cols:
+        result_col = header_cols[result_header_norm]
+    else:
+        result_col = _find_last_data_col(ws) + 1
+        ws.cell(row=1, column=result_col).value = DANGER_HORSE_RESULT_HEADER
+
+    outside_count = 0
+    inside_count = 0
+    missing_count = 0
+
+    for row in range(2, ws.max_row + 1):
+        rid = _rid_to_str(ws.cell(row=row, column=rid_col).value)
+        if not rid:
+            continue
+
+        rank = None
+
+        # まず馬番で着順を引く
+        if umaban_col is not None:
+            umaban = _to_int(ws.cell(row=row, column=umaban_col).value)
+            if umaban is not None:
+                rank = map_rid_umaban_to_rank.get((rid, int(umaban)))
+
+        # 馬番で引けない場合は馬名で着順を引く
+        if rank is None and name_col is not None:
+            nm = _norm_name(ws.cell(row=row, column=name_col).value)
+            if nm:
+                rank = map_rid_name_to_rank.get((rid, nm))
+
+        if rank is None:
+            ws.cell(row=row, column=result_col).value = ""
+            missing_count += 1
+        elif 1 <= int(rank) <= 3:
+            ws.cell(row=row, column=result_col).value = "×"
+            inside_count += 1
+        else:
+            ws.cell(row=row, column=result_col).value = "〇"
+            outside_count += 1
+
+    return outside_count, inside_count, missing_count
 
 
 def _choose_target_xlsx(base_dir: str, race_date: str) -> str:
@@ -661,6 +775,11 @@ def main():
         wb, rid_to_top3, payout_map, sheet_name="買い目_レース別1行"
     )
 
+    # 6.6) 危険馬 シートへ結果判定を反映
+    danger_outside, danger_inside, danger_missing = _update_danger_horse_sheet_result(
+        wb, map_rid_umaban_to_rank, map_rid_name_to_rank, sheet_name=DANGER_HORSE_SHEET_NAME
+    )
+
     # 7) 保存
     wb.save(OUT_XLSX)
 
@@ -674,9 +793,11 @@ def main():
     print(f"  着順見つからず(空欄): {miss}")
     print(f"  払戻を書いた行数（同一rid_str含む）: {payout_written_rows}")
     print(f"  買い目_レース別1行 的中(〇)件数: {hit_buy} / 不的中件数: {miss_buy}")
+    print(f"  危険馬 馬券外(〇): {danger_outside} / 馬券内(×): {danger_inside} / 着順見つからず(空欄): {danger_missing}")
     print("  ※ miss が多い場合：rid_str / 馬番（または馬名）が結果側と一致しているか確認してください")
     print("  ※ 払戻が空の多い場合：結果側に「払戻種別/組番/払戻金」列があるか確認してください")
     print("  ※ AF列には『L列のランキング1位馬番が3着以内なら複勝払戻、それ以外は0』を入れます")
+    print("  ※ 危険馬シート末尾列には『危険馬が馬券外なら〇、馬券内なら×』を入れます")
 
 
 if __name__ == "__main__":
