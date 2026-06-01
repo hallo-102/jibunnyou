@@ -5,6 +5,6 @@
 - すべてのチャットは日本語で応答すること。
 - コード例を出す場合は、インラインコメントを省略せず書くこと。
 - Notionページへの書き込みは行わないこと。
-- 会話ログはObsidianで読めるMarkdownとして `obsidian/CODEX_YYYYMMDD.md` に追記すること。
+- 会話ログはObsidianで読めるMarkdownとして `C:\Users\okino\OneDrive\ドキュメント\Obsidian Vault\CODEX_YYYYMMDD.md` に追記すること。
 - 同じ日付のログファイルがある場合は新規作成せず、末尾へ追記すること。
 - 会話ログには、ユーザーの質問、回答要約、変更ファイル、検証結果を簡潔に残すこと。
