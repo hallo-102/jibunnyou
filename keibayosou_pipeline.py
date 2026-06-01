@@ -952,32 +952,6 @@ def _build_bet_sheet(
             rank3_extra_penalty=rank3_extra_penalty,
         )
 
-        if rank_label == "S":
-            axis_umaban = horses6[0]
-            axis_opp = ",".join(str(x) for x in horses6[1:6] if x is not None)
-            axis_yen = 100.0
-            box_umaban = np.nan
-            box_yen = np.nan
-        elif rank_label == "A":
-            axis_umaban = horses6[0]
-            axis_opp = ",".join(str(x) for x in horses6[1:6] if x is not None)
-            axis_yen = 100.0
-            box_list = [x for x in horses7[:5] if x is not None]
-            box_umaban = ",".join(str(x) for x in box_list) if box_list else np.nan
-            box_yen = 100.0
-        elif rank_label == "B":
-            axis_umaban = horses6[0]
-            axis_opp = ",".join(str(x) for x in horses6[1:6] if x is not None)
-            axis_yen = 100.0
-            box_umaban = np.nan
-            box_yen = np.nan
-        else:
-            axis_umaban = np.nan
-            axis_opp = np.nan
-            axis_yen = np.nan
-            box_umaban = np.nan
-            box_yen = np.nan
-
         bet_rows.append(
             {
                 "レースID": info_row.get("レースID", rid),
@@ -1000,11 +974,7 @@ def _build_bet_sheet(
                 "ランク(S/A/B)": rank_label,
                 "判定": judge,
                 "理由": reason,
-                "1頭軸_馬番": axis_umaban,
-                "1頭軸_相手": axis_opp,
-                "1頭軸_金額": axis_yen,
-                "保険BOX_馬番": box_umaban,
-                "保険BOX_金額": box_yen,
+                "軸馬番": "-",
                 "単勝オッズ_1位": odds_top1,
             }
         )
@@ -1031,11 +1001,7 @@ def _build_bet_sheet(
         "ランク(S/A/B)",
         "判定",
         "理由",
-        "1頭軸_馬番",
-        "1頭軸_相手",
-        "1頭軸_金額",
-        "保険BOX_馬番",
-        "保険BOX_金額",
+        "軸馬番",
         "単勝オッズ_1位",
     ]
     for c in bet_cols:

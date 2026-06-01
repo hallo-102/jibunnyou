@@ -60,6 +60,8 @@ SCORE_RATE_TABLE_SHEET = "score_rate_table"
 BET_SHEET = "買い目_レース別1行"
 ROI_FOCUS_BET_SHEET = "回収率重視_買い目候補"
 RACE_ID_FORMAT_SHEETS = [BET_SHEET, ROI_FOCUS_BET_SHEET, DANGER_HORSE_SHEET]
+AXIS_UMABAN_COLUMN = "軸馬番"
+OLD_AXIS_BET_COLUMNS = ["1頭軸_馬番", "1頭軸_相手", "1頭軸_金額", "保険BOX_馬番", "保険BOX_金額"]
 
 
 # ============================================================
@@ -1310,6 +1312,174 @@ def _add_estimated_in3_rate_to_excel(out_excel_path: str, raceday_str: Optional[
     return estimated_count
 
 
+def _danger_horse_key_set(danger_df: pd.DataFrame) -> set[Tuple[str, int]]:
+    """危険馬シートから、軸候補から除外する (レースID, 馬番) を作る。"""
+    if danger_df is None or not isinstance(danger_df, pd.DataFrame) or danger_df.empty:
+        return set()
+
+    c_rid = _pick_col(danger_df, ["レースID", "rid_str", "race_id"])
+    c_umaban = _pick_col(danger_df, ["危険人気馬_馬番", "危険馬_馬番", "馬番", "umaban"])
+    if c_rid is None or c_umaban is None:
+        return set()
+
+    c_label = _pick_col(danger_df, ["危険人気馬_判定", "危険馬_判定", "判定"])
+    c_score = _pick_col(danger_df, ["危険人気馬スコア", "危険馬スコア", "danger_score"])
+
+    work = danger_df.copy()
+    work["_axis_rid"] = _normalize_rid_series(work[c_rid])
+    work["_axis_umaban"] = _normalize_umaban_series(work[c_umaban])
+    work["_axis_label"] = work[c_label].astype(str).str.strip() if c_label is not None else ""
+    work["_axis_score"] = pd.to_numeric(work[c_score], errors="coerce") if c_score is not None else np.nan
+
+    no_danger_labels = {"", "-", "なし", "無し", "切らない", "大きな危険条件なし", "nan", "<NA>"}
+    dangerous_keys: set[Tuple[str, int]] = set()
+    for _, row in work.iterrows():
+        rid = str(row.get("_axis_rid", "")).strip()
+        umaban = row.get("_axis_umaban")
+        if not rid or pd.isna(umaban):
+            continue
+
+        label = str(row.get("_axis_label", "")).strip()
+        score = pd.to_numeric(pd.Series([row.get("_axis_score")]), errors="coerce").iloc[0]
+        if pd.notna(score):
+            if float(score) < 3.0:
+                continue
+            dangerous_keys.add((rid, int(umaban)))
+            continue
+        if label in no_danger_labels:
+            continue
+
+        dangerous_keys.add((rid, int(umaban)))
+
+    return dangerous_keys
+
+
+def _build_axis_umaban_map(target_df: pd.DataFrame, danger_df: pd.DataFrame) -> Dict[str, object]:
+    """
+    ranking 1〜3位から、指定条件を満たす軸馬番をレースごとに1頭選ぶ。
+    条件未達のレースは "-" を返す。
+    """
+    if target_df is None or not isinstance(target_df, pd.DataFrame) or target_df.empty:
+        return {}
+
+    work = _canonical_prediction_frame(target_df)
+    work["予想順位"] = pd.to_numeric(work["予想順位"], errors="coerce")
+    work["単勝オッズ"] = _coerce_float_series(work["単勝オッズ"])
+    work["score"] = pd.to_numeric(work.get("score", pd.Series(np.nan, index=work.index)), errors="coerce")
+
+    c_extra = _pick_col(work, ["extra_penalty"])
+    c_ev = _pick_col(work, ["期待値"])
+    work["_axis_extra_penalty"] = (
+        _coerce_float_series(work[c_extra]) if c_extra is not None else pd.Series(np.nan, index=work.index)
+    )
+    work["_axis_ev"] = _coerce_float_series(work[c_ev]) if c_ev is not None else pd.Series(np.nan, index=work.index)
+
+    dangerous_keys = _danger_horse_key_set(danger_df)
+    work["_axis_is_danger"] = [
+        (str(rid), int(umaban)) in dangerous_keys if pd.notna(umaban) else True
+        for rid, umaban in zip(work["rid_str"], work["馬番"])
+    ]
+
+    axis_map: Dict[str, object] = {}
+    for rid, race in work.groupby("rid_str", sort=True):
+        if not str(rid).strip():
+            continue
+
+        candidates = race[
+            race["予想順位"].between(1, 3, inclusive="both")
+            & race["単勝オッズ"].le(12.0)
+            & race["_axis_extra_penalty"].le(1.5)
+            & race["_axis_ev"].ge(0.80)
+            & (~race["_axis_is_danger"])
+        ].copy()
+
+        if candidates.empty:
+            axis_map[str(rid)] = "-"
+            continue
+
+        candidates["_axis_odds_tier"] = np.where(candidates["単勝オッズ"].le(8.0), 0, 1)
+        candidates["_axis_extra_tier"] = np.where(candidates["_axis_extra_penalty"].le(0.5), 0, 1)
+        candidates = candidates.sort_values(
+            [
+                "_axis_odds_tier",
+                "_axis_extra_tier",
+                "予想順位",
+                "単勝オッズ",
+                "_axis_extra_penalty",
+                "score",
+                "_axis_ev",
+                "馬番",
+            ],
+            ascending=[True, True, True, True, True, False, False, True],
+            kind="mergesort",
+            na_position="last",
+        )
+
+        axis_umaban = candidates.iloc[0].get("馬番")
+        axis_map[str(rid)] = int(axis_umaban) if pd.notna(axis_umaban) else "-"
+
+    return axis_map
+
+
+def _fill_axis_umaban_to_bet_sheet(out_excel_path: str) -> int:
+    """
+    「買い目_レース別1行」のU列に、新条件で選んだ軸馬番を書き戻す。
+    旧1頭軸・保険BOX列は、この最終出力から除外する。
+    """
+    if not os.path.exists(out_excel_path):
+        print(f"[WARN] 出力Excelが見つからないため、軸馬番反映をスキップ: {out_excel_path}")
+        return 0
+
+    try:
+        with pd.ExcelFile(out_excel_path, engine="openpyxl") as xls:
+            if BET_SHEET not in xls.sheet_names:
+                print(f"[WARN] '{BET_SHEET}' シートが無いため、軸馬番反映をスキップします")
+                return 0
+            if TARGET_SHEET not in xls.sheet_names:
+                print(f"[WARN] '{TARGET_SHEET}' シートが無いため、軸馬番反映をスキップします")
+                return 0
+
+            bet_df = pd.read_excel(out_excel_path, sheet_name=BET_SHEET, engine="openpyxl")
+            target_df = pd.read_excel(out_excel_path, sheet_name=TARGET_SHEET, engine="openpyxl")
+            danger_df = (
+                pd.read_excel(out_excel_path, sheet_name=DANGER_HORSE_SHEET, engine="openpyxl")
+                if DANGER_HORSE_SHEET in xls.sheet_names
+                else pd.DataFrame()
+            )
+    except Exception as e:
+        print(f"[WARN] 軸馬番反映用のExcel読み込みに失敗しました: {e}")
+        return 0
+
+    axis_map = _build_axis_umaban_map(target_df, danger_df)
+    race_col = _pick_col(bet_df, ["レースID", "rid_str", "race_id"])
+    if race_col is None:
+        bet_df[AXIS_UMABAN_COLUMN] = "-"
+    else:
+        race_keys = _normalize_rid_series(bet_df[race_col])
+        bet_df[AXIS_UMABAN_COLUMN] = race_keys.map(lambda x: axis_map.get(str(x), "-"))
+
+    base_cols = [c for c in bet_df.columns if c not in OLD_AXIS_BET_COLUMNS and c != AXIS_UMABAN_COLUMN]
+    insert_at = base_cols.index("理由") + 1 if "理由" in base_cols else min(20, len(base_cols))
+    bet_cols = base_cols[:insert_at] + [AXIS_UMABAN_COLUMN] + base_cols[insert_at:]
+    bet_df = bet_df[bet_cols]
+
+    filled = int((bet_df[AXIS_UMABAN_COLUMN].astype(str).str.strip() != "-").sum())
+    total = int(len(bet_df))
+
+    try:
+        with pd.ExcelWriter(out_excel_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+            bet_df.to_excel(writer, sheet_name=BET_SHEET, index=False)
+    except PermissionError:
+        print(f"[WARN] 出力Excelが開かれている可能性があります。Excelを閉じてから再実行してください: {out_excel_path}")
+        return 0
+    except Exception as e:
+        print(f"[WARN] 軸馬番のExcel書き戻しに失敗しました: {e}")
+        return 0
+
+    print(f"[INFO] 軸馬番反映完了: {filled}/{total}レース -> {out_excel_path}")
+    return filled
+
+
 # ============================================================
 # OZZU単勝オッズ反映
 # ============================================================
@@ -1997,6 +2167,7 @@ def main() -> None:
 
     _fill_tansho_odds_to_bet_sheet(actual_final_out, raceday_str)
     _add_estimated_in3_rate_to_excel(actual_final_out, raceday_str)
+    _fill_axis_umaban_to_bet_sheet(actual_final_out)
     append_roi_focus_bet_sheet_to_excel(actual_final_out)
     _format_race_id_column_to_integer(actual_final_out)
 
