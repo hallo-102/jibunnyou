@@ -1,0 +1,338 @@
+{
+  "metadata": {
+    "project_root": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026",
+    "result_master_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\master\\race_levels.xlsx",
+    "created_at": "2026-06-03 22:26:26",
+    "prediction_files": [
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260307.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260308.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260314.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260315.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260321.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260322.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260328.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260329.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260404.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260405.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260411.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260412.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260418.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260419.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260425.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260426.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260502.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260503.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260509.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260510.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260516.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260517.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260523.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260524.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260530.xlsx",
+      "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260531.xlsx"
+    ],
+    "sanrenpuku_box_size": 5,
+    "sanrenpuku_bet_points": 15,
+    "stake_yen": 100
+  },
+  "summary": {
+    "target_days": 0,
+    "target_races": 0,
+    "excluded_races": 0,
+    "missing_horses": 0,
+    "ranking_1_in_money_rate": null,
+    "ranking_1_3_in_money_rate": null,
+    "ranking_1_5_in_money_rate": null,
+    "top5_full_capture_rate": null,
+    "sanrenpuku_15_hit_rate": null,
+    "roi": null,
+    "total_bet_yen": 0,
+    "total_payout_yen": null,
+    "longshot_captured_count": 0,
+    "popular_danger_cut_count": 0,
+    "hit_rate_stddev": 0.0,
+    "roi_stddev": 0.0
+  },
+  "daily": [],
+  "monthly": [],
+  "race_records": [],
+  "result_metadata": {
+    "race_key_columns": {
+      "race_id_col": "race_id",
+      "date_col": "date",
+      "place_col": null,
+      "race_no_col": "trainer"
+    },
+    "finish_col": null,
+    "popularity_col": null,
+    "payout_col": null,
+    "top3_cols": [
+      null,
+      null,
+      null
+    ],
+    "result_mode": "unresolved"
+  },
+  "prediction_metadata": [
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260307.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260308.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260314.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260315.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260321.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260322.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260328.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260329.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260404.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260405.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260411.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260412.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260418.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260419.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260425.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260426.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260502.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260503.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260509.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260510.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260516.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260517.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260523.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260524.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260530.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    },
+    {
+      "prediction_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260531.xlsx",
+      "error": "horse_column_unresolved",
+      "race_key_columns": {
+        "race_id_col": "race_id",
+        "date_col": "日付",
+        "place_col": "場所",
+        "race_no_col": "R"
+      }
+    }
+  ]
+}

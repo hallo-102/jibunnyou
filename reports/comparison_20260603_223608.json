@@ -1,0 +1,130 @@
+{
+  "metadata": {
+    "created_at": "2026-06-03 22:36:08",
+    "before_path": "",
+    "after_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\reports\\evaluation_20260603_223449.json"
+  },
+  "rows": [
+    {
+      "metric": "ranking_1_in_money_rate",
+      "label": "ランキング1位の馬券内率",
+      "before": null,
+      "after": 0.6175040518638574,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "higher"
+    },
+    {
+      "metric": "ranking_1_3_in_money_rate",
+      "label": "ランキング1から3位の馬券内率",
+      "before": null,
+      "after": 0.520259319286872,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "higher"
+    },
+    {
+      "metric": "top5_full_capture_rate",
+      "label": "TOP5完全捕捉率",
+      "before": null,
+      "after": 0.35170178282009723,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "higher"
+    },
+    {
+      "metric": "sanrenpuku_15_hit_rate",
+      "label": "3連複想定的中率",
+      "before": null,
+      "after": 0.35170178282009723,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "higher"
+    },
+    {
+      "metric": "roi",
+      "label": "回収率",
+      "before": null,
+      "after": 1.2276499189627228,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "higher"
+    },
+    {
+      "metric": "target_races",
+      "label": "対象レース数",
+      "before": null,
+      "after": 617.0,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "stable_or_higher"
+    },
+    {
+      "metric": "excluded_races",
+      "label": "除外レース数",
+      "before": null,
+      "after": 1.0,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "lower"
+    },
+    {
+      "metric": "missing_horses",
+      "label": "欠損馬数",
+      "before": null,
+      "after": 29.0,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "lower"
+    },
+    {
+      "metric": "longshot_captured_count",
+      "label": "穴馬を拾えた件数",
+      "before": null,
+      "after": 181.0,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "higher"
+    },
+    {
+      "metric": "popular_danger_cut_count",
+      "label": "人気馬を危険馬として切れた件数",
+      "before": null,
+      "after": 337.0,
+      "delta": null,
+      "judgment": "初回",
+      "direction": "higher"
+    }
+  ],
+  "judgment": {
+    "overall_judgment": "初回",
+    "adoption": "初回基準として保存",
+    "reasons": [
+      "比較対象がないため、今回結果を今後の変更前基準として保存する。"
+    ],
+    "next_points": [
+      "次回以降は今回のevaluation JSONを変更前として比較する。"
+    ]
+  },
+  "before_summary": null,
+  "after_summary": {
+    "target_days": 26,
+    "target_races": 617,
+    "excluded_races": 1,
+    "missing_horses": 29,
+    "ranking_1_in_money_rate": 0.6175040518638574,
+    "ranking_1_3_in_money_rate": 0.520259319286872,
+    "ranking_1_5_in_money_rate": 0.41880064829821717,
+    "top5_full_capture_rate": 0.35170178282009723,
+    "sanrenpuku_15_hit_rate": 0.35170178282009723,
+    "roi": 1.2276499189627228,
+    "total_bet_yen": 925500.0,
+    "total_payout_yen": 1136190.0,
+    "longshot_captured_count": 181,
+    "popular_danger_cut_count": 337,
+    "hit_rate_stddev": 0.10389589634634147,
+    "roi_stddev": 1.392428431680274,
+    "best_day": "20260418",
+    "worst_day": "20260530"
+  }
+}

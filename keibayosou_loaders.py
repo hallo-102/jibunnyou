@@ -289,71 +289,114 @@ def _race_to_no(r: Any) -> str:
     return m.group(1).zfill(2) if m else ""
 
 
-def _convert_ozzu_to_odds(df: pd.DataFrame) -> pd.DataFrame:
+def _odds_to_float(x: object) -> Optional[float]:
+    """オッズ文字列を float に変換する。"""
+    s = str(x).replace(",", "")
+    if not re.search(r"\d", s):
+        return None
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _fukusho_to_lower_float(x: object) -> Optional[float]:
+    """複勝オッズが範囲表記の場合は下限を返す。"""
+    s = str(x).replace(",", "")
+    m = re.search(r"(\d+(?:\.\d+)?)", s)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except Exception:
+        return None
+
+
+def _combination_to_umaban(x: object) -> Optional[int]:
+    """OZZUの組番から単勝・複勝用の馬番を取り出す。"""
+    m = re.search(r"(\d+)", str(x))
+    return int(m.group(1)) if m else None
+
+
+def _convert_ozzu_to_odds(df: pd.DataFrame, raceday: Optional[str] = None) -> pd.DataFrame:
     """
     OZZU形式:
       date,racecourse,race,name,bet_type,combination,odds
     を
-      rid_str, umaban, tansho
-    に変換する（単勝のみ利用）
+      date, place, race_no, umaban, tansho, fukusho, ozzu_key
+    に変換する。
+
+    OZZU CSVはJRA公式由来で netkeiba race_id を持たないため、
+    rid_str は作らず、場所・R番号・馬番で照合できる形にする。
     """
+    out_cols = ["date", "place", "race_no", "umaban", "tansho", "fukusho", "ozzu_key"]
     need = {"date", "racecourse", "race", "bet_type", "combination", "odds"}
     if not need.issubset(set(df.columns)):
         raise ValueError(f"OZZU形式として必要列が不足: need={sorted(need)} actual={list(df.columns)}")
 
-    # 競馬場コード（JRA一般のコード）
-    place_code_map = {
-        "札幌": "01",
-        "函館": "02",
-        "福島": "03",
-        "新潟": "04",
-        "東京": "05",
-        "中山": "06",
-        "中京": "07",
-        "京都": "08",
-        "阪神": "09",
-        "小倉": "10",
-    }
-
     d = df.copy()
-    d = d[d["bet_type"].astype(str).str.contains("単勝", na=False)].copy()
 
-    # date: 数字だけ
     d["date"] = d["date"].astype(str).str.replace(r"\D+", "", regex=True)
+    raceday_digits = re.sub(r"\D+", "", str(raceday)) if raceday else ""
+    if re.fullmatch(r"\d{8}", raceday_digits):
+        d = d[d["date"] == raceday_digits].copy()
+    if d.empty:
+        return pd.DataFrame(columns=out_cols)
 
-    # racecourse: 空白除去
-    d["racecourse"] = d["racecourse"].astype(str).str.replace(r"[\s\u3000]+", "", regex=True)
-
+    d["place"] = d["racecourse"].map(_normalize_place)
     d["race_no"] = d["race"].apply(_race_to_no)
-    d["place_code"] = d["racecourse"].map(place_code_map)
+    d["umaban"] = d["combination"].apply(_combination_to_umaban)
+    d = d[
+        d["date"].astype(str).str.fullmatch(r"\d{8}", na=False)
+        & d["place"].astype(str).str.strip().ne("")
+        & d["race_no"].astype(str).str.fullmatch(r"\d{2}", na=False)
+        & d["umaban"].notna()
+    ].copy()
+    if d.empty:
+        return pd.DataFrame(columns=out_cols)
 
-    if d["place_code"].isna().any():
-        bad = d[d["place_code"].isna()]["racecourse"].dropna().unique().tolist()
-        raise ValueError(f"競馬場名→コード変換に失敗: {bad} / place_code_map に追記してください")
+    base_cols = ["date", "place", "race_no", "umaban"]
+    tansho = d[d["bet_type"].astype(str).str.contains("単勝", na=False)].copy()
+    tansho["tansho"] = tansho["odds"].apply(_odds_to_float)
+    tansho = tansho.dropna(subset=base_cols + ["tansho"])
+    tansho = tansho[base_cols + ["tansho"]].drop_duplicates(subset=base_cols, keep="first")
 
-    d["rid_str"] = d["date"] + d["place_code"] + d["race_no"]
-    d["umaban"] = d["combination"].apply(lambda x: _to_int(x))
-    d["tansho"] = d["odds"].apply(
-        lambda x: float(str(x).replace(",", "")) if re.search(r"\d", str(x)) else None
-    )
+    fukusho = d[d["bet_type"].astype(str).str.contains("複勝", na=False)].copy()
+    fukusho["fukusho"] = fukusho["odds"].apply(_fukusho_to_lower_float)
+    fukusho = fukusho.dropna(subset=base_cols + ["fukusho"])
+    fukusho = fukusho[base_cols + ["fukusho"]].drop_duplicates(subset=base_cols, keep="first")
 
-    out = d[["rid_str", "umaban", "tansho"]].copy()
-    out = out.dropna(subset=["rid_str", "umaban", "tansho"])
-    out["rid_str"] = out["rid_str"].astype(str).str.replace(r"\D+", "", regex=True)
+    out = pd.merge(tansho, fukusho, on=base_cols, how="outer")
+    if out.empty:
+        return pd.DataFrame(columns=out_cols)
+
+    out["date"] = out["date"].astype(str)
+    out["place"] = out["place"].astype(str)
+    out["race_no"] = out["race_no"].astype(str).str.zfill(2)
     out["umaban"] = out["umaban"].astype(int)
-    out["tansho"] = pd.to_numeric(out["tansho"], errors="coerce")
-    out = out.dropna(subset=["tansho"])
-    return out
+    out["tansho"] = pd.to_numeric(out.get("tansho"), errors="coerce")
+    out["fukusho"] = pd.to_numeric(out.get("fukusho"), errors="coerce")
+    out["ozzu_key"] = (
+        out["date"]
+        + "_"
+        + out["place"]
+        + "_"
+        + out["race_no"]
+        + "_"
+        + out["umaban"].astype(str)
+    )
+    return out[out_cols]
 
 
 def load_odds_csv(path: str, raceday: Optional[str] = None) -> pd.DataFrame:
     """
-    オッズCSVを読み込み、最低限必要な列（rid_str, umaban, tansho）を返す。
+    オッズCSVを読み込む。
 
     対応形式:
       A) すでに rid_str, umaban, tansho がある（標準形式）
       B) 日本語列名など（例：レースID/馬番/単勝オッズ）→自動リネーム
-      C) OZZU形式（date,racecourse,race,name,bet_type,combination,odds）→単勝だけ変換
+      C) OZZU形式（date,racecourse,race,name,bet_type,combination,odds）
+         → date/place/race_no/umaban/tansho/fukusho/ozzu_key に変換
 
     path がディレクトリの場合:
       - raceday(YYYYMMDD) を含むCSVがあれば優先
@@ -404,12 +447,12 @@ def load_odds_csv(path: str, raceday: Optional[str] = None) -> pd.DataFrame:
     # 3) OZZU形式なら変換（あなたの 02_scrape_jra_odds_2.py の出力に対応）
     ozzu_need = {"date", "racecourse", "race", "bet_type", "combination", "odds"}
     if ozzu_need.issubset(set(df.columns)):
-        return _convert_ozzu_to_odds(df)
+        return _convert_ozzu_to_odds(df, raceday=raceday)
 
     # 4) ここまで来たら形式不明 → 列名とファイルを出してエラー
     raise ValueError(
         "オッズCSVの形式が想定外です。"
-        " / 必要: rid_str, umaban, tansho（または OZZU形式）"
+        " / 必要: rid_str, umaban, tansho（標準形式）または OZZU形式"
         f" / 実際の列={list(df.columns)}"
         f" / 読み込んだファイル={csv_path}"
     )

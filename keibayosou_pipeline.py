@@ -374,6 +374,61 @@ def _normalize_race_key(x: object) -> Optional[str]:
     return s
 
 
+def _race_no_to_2digits(x: object) -> str:
+    """'11R' や 11 を '11' にそろえる。"""
+    m = re.search(r"(\d+)", str(x))
+    return m.group(1).zfill(2) if m else ""
+
+
+def _race_no_from_race_key(x: object) -> str:
+    """netkeiba由来のレースID末尾2桁からR番号を取り出す。"""
+    race_key = _normalize_race_key(x)
+    if race_key is None:
+        return ""
+    m = re.search(r"(\d{2})$", str(race_key))
+    return m.group(1) if m else ""
+
+
+def _build_tansho_odds_maps_for_bet_sheet(
+    odds_df: Optional[pd.DataFrame],
+) -> Tuple[Dict[Tuple[str, int], float], Dict[Tuple[str, str, int], float]]:
+    """
+    買い目シート用に単勝オッズ辞書を作る。
+
+    標準CSVは (rid_str, 馬番)、JRA OZZU CSVは (場所, R番号, 馬番) で参照する。
+    """
+    rid_odds_map: Dict[Tuple[str, int], float] = {}
+    place_odds_map: Dict[Tuple[str, str, int], float] = {}
+
+    if odds_df is None or not isinstance(odds_df, pd.DataFrame) or odds_df.empty:
+        return rid_odds_map, place_odds_map
+
+    od = odds_df.copy()
+
+    if {"rid_str", "umaban", "tansho"}.issubset(od.columns):
+        for r, u, t in zip(od["rid_str"], od["umaban"], od["tansho"]):
+            race_key = _normalize_race_key(r)
+            umaban = _to_int_safe(u)
+            tansho = _to_float_safe(t)
+            if race_key is None or umaban is None or tansho is None:
+                continue
+            rid_odds_map[(str(race_key), int(umaban))] = float(tansho)
+
+    place_col = "place" if "place" in od.columns else "racecourse" if "racecourse" in od.columns else None
+    race_col = "race_no" if "race_no" in od.columns else "race" if "race" in od.columns else None
+    if place_col is not None and race_col is not None and {"umaban", "tansho"}.issubset(od.columns):
+        for p, r, u, t in zip(od[place_col], od[race_col], od["umaban"], od["tansho"]):
+            place_norm = _normalize_place(p)
+            race_no = _race_no_to_2digits(r)
+            umaban = _to_int_safe(u)
+            tansho = _to_float_safe(t)
+            if not place_norm or not race_no or umaban is None or tansho is None:
+                continue
+            place_odds_map[(str(place_norm), str(race_no), int(umaban))] = float(tansho)
+
+    return rid_odds_map, place_odds_map
+
+
 def _to_umaban_int_for_roi(x: object) -> Optional[int]:
     """買い目用の馬番を整数化する。欠損・非整数・0以下は異常値として扱う。"""
     if pd.isna(x):
@@ -839,22 +894,9 @@ def _build_bet_sheet(
     """
 
     # ----------------------------
-    # オッズ（rid_str, umaban -> tansho）マップ
+    # オッズマップ
     # ----------------------------
-    odds_map: Dict[Tuple[str, int], float] = {}
-    if odds_df is not None and isinstance(odds_df, pd.DataFrame) and not odds_df.empty:
-        od = odds_df.copy()
-        if "rid_str" in od.columns:
-            od["rid_str"] = od["rid_str"].astype(str)
-        if "umaban" in od.columns:
-            od["umaban"] = pd.to_numeric(od["umaban"], errors="coerce").astype("Int64")
-        if "tansho" in od.columns:
-            od["tansho"] = pd.to_numeric(od["tansho"], errors="coerce")
-
-        for r, u, t in zip(od.get("rid_str", []), od.get("umaban", []), od.get("tansho", [])):
-            if pd.isna(r) or pd.isna(u) or pd.isna(t):
-                continue
-            odds_map[(str(r), int(u))] = float(t)
+    rid_odds_map, place_odds_map = _build_tansho_odds_maps_for_bet_sheet(odds_df)
 
     # ----------------------------
     # 今走：レース情報（1レース1行）
@@ -925,7 +967,26 @@ def _build_bet_sheet(
             info_row["レースID"] = rid
 
         # 単勝オッズ（上位1頭）
-        odds_top1 = odds_map.get((str(rid), horses6[0])) if horses6[0] is not None else None
+        odds_top1 = None
+        if horses6[0] is not None:
+            top_umaban = int(horses6[0])
+            for race_key_src in (info_row.get("レースID"), rid):
+                race_key = _normalize_race_key(race_key_src)
+                if race_key is None:
+                    continue
+                odds_top1 = rid_odds_map.get((str(race_key), top_umaban))
+                if odds_top1 is not None:
+                    break
+
+            if odds_top1 is None:
+                place_norm = _normalize_place(info_row.get("場所"))
+                race_no = ""
+                for race_key_src in (info_row.get("レースID"), rid):
+                    race_no = _race_no_from_race_key(race_key_src)
+                    if race_no:
+                        break
+                if place_norm and race_no:
+                    odds_top1 = place_odds_map.get((str(place_norm), str(race_no), top_umaban))
 
         # 3位馬の人気・score・extra_penaltyを使い、検証で重視した新条件で判定する。
         rank3_metrics: Dict[str, float] = {}

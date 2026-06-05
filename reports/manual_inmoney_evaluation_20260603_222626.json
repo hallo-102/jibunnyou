@@ -1,0 +1,292 @@
+{
+  "summary": {
+    "target_days": 24,
+    "target_races": 583,
+    "excluded_races": 35,
+    "avg_field_size": 13.495711835334477,
+    "ranking_1_in_money_rate": 0.6329331046312179,
+    "ranking_1_win_rate": 0.27958833619210977,
+    "ranking_1_3_in_money_rate": 0.52715837621498,
+    "ranking_1_5_in_money_rate": 0.423327615780446,
+    "top3_full_capture_rate": 0.10806174957118353,
+    "top5_full_capture_rate": 0.36192109777015435,
+    "popularity_1_in_money_rate": 0.6483704974271012,
+    "popularity_1_3_in_money_rate": 0.5283018867924528,
+    "popularity_top5_full_capture_rate": 0.3704974271012007,
+    "top1_avg_pop": 2.5481099656357387,
+    "top1_estimated_in3_avg": 67.34694682675816,
+    "daily_hit_rate_stddev": 0.09537695561705244
+  },
+  "daily": [
+    {
+      "date": "20260307",
+      "races": 14,
+      "top1_in3_rate": 0.7142857142857143,
+      "top5_full_capture_rate": 0.35714285714285715
+    },
+    {
+      "date": "20260308",
+      "races": 16,
+      "top1_in3_rate": 0.625,
+      "top5_full_capture_rate": 0.5
+    },
+    {
+      "date": "20260314",
+      "races": 23,
+      "top1_in3_rate": 0.4782608695652174,
+      "top5_full_capture_rate": 0.4782608695652174
+    },
+    {
+      "date": "20260315",
+      "races": 23,
+      "top1_in3_rate": 0.7391304347826086,
+      "top5_full_capture_rate": 0.34782608695652173
+    },
+    {
+      "date": "20260321",
+      "races": 24,
+      "top1_in3_rate": 0.5,
+      "top5_full_capture_rate": 0.4583333333333333
+    },
+    {
+      "date": "20260322",
+      "races": 24,
+      "top1_in3_rate": 0.6666666666666666,
+      "top5_full_capture_rate": 0.2916666666666667
+    },
+    {
+      "date": "20260328",
+      "races": 25,
+      "top1_in3_rate": 0.64,
+      "top5_full_capture_rate": 0.4
+    },
+    {
+      "date": "20260329",
+      "races": 25,
+      "top1_in3_rate": 0.56,
+      "top5_full_capture_rate": 0.28
+    },
+    {
+      "date": "20260404",
+      "races": 14,
+      "top1_in3_rate": 0.6428571428571429,
+      "top5_full_capture_rate": 0.35714285714285715
+    },
+    {
+      "date": "20260405",
+      "races": 20,
+      "top1_in3_rate": 0.8,
+      "top5_full_capture_rate": 0.5
+    },
+    {
+      "date": "20260411",
+      "races": 24,
+      "top1_in3_rate": 0.8333333333333334,
+      "top5_full_capture_rate": 0.2916666666666667
+    },
+    {
+      "date": "20260412",
+      "races": 26,
+      "top1_in3_rate": 0.6153846153846154,
+      "top5_full_capture_rate": 0.2692307692307692
+    },
+    {
+      "date": "20260418",
+      "races": 26,
+      "top1_in3_rate": 0.6153846153846154,
+      "top5_full_capture_rate": 0.5769230769230769
+    },
+    {
+      "date": "20260419",
+      "races": 26,
+      "top1_in3_rate": 0.5769230769230769,
+      "top5_full_capture_rate": 0.4230769230769231
+    },
+    {
+      "date": "20260425",
+      "races": 26,
+      "top1_in3_rate": 0.6153846153846154,
+      "top5_full_capture_rate": 0.3076923076923077
+    },
+    {
+      "date": "20260426",
+      "races": 28,
+      "top1_in3_rate": 0.7857142857142857,
+      "top5_full_capture_rate": 0.35714285714285715
+    },
+    {
+      "date": "20260502",
+      "races": 30,
+      "top1_in3_rate": 0.5666666666666667,
+      "top5_full_capture_rate": 0.23333333333333334
+    },
+    {
+      "date": "20260503",
+      "races": 26,
+      "top1_in3_rate": 0.5769230769230769,
+      "top5_full_capture_rate": 0.2692307692307692
+    },
+    {
+      "date": "20260509",
+      "races": 27,
+      "top1_in3_rate": 0.6296296296296297,
+      "top5_full_capture_rate": 0.37037037037037035
+    },
+    {
+      "date": "20260510",
+      "races": 28,
+      "top1_in3_rate": 0.7142857142857143,
+      "top5_full_capture_rate": 0.32142857142857145
+    },
+    {
+      "date": "20260516",
+      "races": 23,
+      "top1_in3_rate": 0.6086956521739131,
+      "top5_full_capture_rate": 0.5217391304347826
+    },
+    {
+      "date": "20260517",
+      "races": 31,
+      "top1_in3_rate": 0.45161290322580644,
+      "top5_full_capture_rate": 0.22580645161290322
+    },
+    {
+      "date": "20260523",
+      "races": 25,
+      "top1_in3_rate": 0.6,
+      "top5_full_capture_rate": 0.32
+    },
+    {
+      "date": "20260524",
+      "races": 29,
+      "top1_in3_rate": 0.7241379310344828,
+      "top5_full_capture_rate": 0.3793103448275862
+    }
+  ],
+  "monthly": [
+    {
+      "month": "202603",
+      "races": 174,
+      "top1_in3_rate": 0.6091954022988506,
+      "top5_full_capture_rate": 0.3850574712643678
+    },
+    {
+      "month": "202604",
+      "races": 190,
+      "top1_in3_rate": 0.6842105263157895,
+      "top5_full_capture_rate": 0.38421052631578945
+    },
+    {
+      "month": "202605",
+      "races": 219,
+      "top1_in3_rate": 0.6073059360730594,
+      "top5_full_capture_rate": 0.3242009132420091
+    }
+  ],
+  "excluded_sample": [
+    {
+      "date": "20260307",
+      "race_id": "202609010512",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202605021102",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202605021104",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202605021106",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202605021107",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202605021108",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202605021109",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202605021110",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202605021111",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202605021112",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202608031104",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202608031106",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202608031107",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202608031108",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202608031109",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202608031110",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202608031111",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260530",
+      "race_id": "202608031112",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260531",
+      "race_id": "202605021202",
+      "reason": "actual_race_not_found"
+    },
+    {
+      "date": "20260531",
+      "race_id": "202605021205",
+      "reason": "actual_race_not_found"
+    }
+  ],
+  "source": {
+    "prediction_run": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\reports\\prediction_run_20260603_210816.json",
+    "actual": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\master\\race_levels.xlsx entries sheet"
+  }
+}

@@ -32,3 +32,21 @@ yosou_py_backup_20260419/
 
 # Local credentials
 config/credentials.ini
+
+# Node.js / pnpm
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# reports配下のnode_modulesを明示的に除外
+reports/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# VSCode不要なら
+.vscode/
+
+# Excel一時ファイル
+~$*.xlsx

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Keiba 3 Month Backtest"
+  short_description: "予想コード変更後に過去3ヶ月の競馬予想成績を自動集計・比較する"
+  default_prompt: "予想コードを変更したので、keiba-3month-auto-backtest-after-change Skillを使って、過去3ヶ月分を回して変更後のランキング成績が改善したか確認して。"
