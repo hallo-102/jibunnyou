@@ -1,0 +1,15 @@
+
+pandas
+openpyxl
+numpy
+scikit-learn
+lightgbm
+requests
+beautifulsoup4
+lxml
+html5lib
+tqdm
+python-dotenv
+selenium
+webdriver-manager
+playwright
