@@ -1,0 +1,114 @@
+{
+  "summary": {
+    "prediction_files": 26,
+    "dates": 26,
+    "matched_races": 617,
+    "matched_horses": 8335,
+    "race_spearman_mean": 0.5203623780547568,
+    "race_spearman_median": 0.5607142857142856,
+    "race_spearman_positive_rate": 0.9643435980551054,
+    "pairwise_accuracy_weighted": 0.6914745190189455,
+    "winner_pred_rank_mean": 3.86385737439222,
+    "winner_pred_rank_median": 3.0,
+    "winner_in_pred_top1_rate": 0.28363047001620745,
+    "winner_in_pred_top3_rate": 0.6094003241491086,
+    "winner_in_pred_top5_rate": 0.7536466774716369,
+    "actual_top3_pred_rank_mean": 4.289487870619946,
+    "actual_top3_in_pred_top5_rate": 0.7148247978436658,
+    "pred_rank1_avg_finish": 3.5899513776337115,
+    "pred_rank1_in3_rate": 0.6320907617504052,
+    "pred_rank5_avg_finish": 6.2808441558441555
+  },
+  "by_pred_rank_top10": [
+    {
+      "pred_rank_int": 1,
+      "horses": 617,
+      "avg_finish": 3.5899513776337115,
+      "median_finish": 3.0,
+      "win_rate": 0.28363047001620745,
+      "in3_rate": 0.6320907617504052,
+      "avg_actual_pop": NaN
+    },
+    {
+      "pred_rank_int": 2,
+      "horses": 615,
+      "avg_finish": 4.369105691056911,
+      "median_finish": 3.0,
+      "win_rate": 0.18699186991869918,
+      "in3_rate": 0.5252032520325203,
+      "avg_actual_pop": NaN
+    },
+    {
+      "pred_rank_int": 3,
+      "horses": 614,
+      "avg_finish": 5.180781758957655,
+      "median_finish": 4.0,
+      "win_rate": 0.14006514657980457,
+      "in3_rate": 0.4153094462540717,
+      "avg_actual_pop": NaN
+    },
+    {
+      "pred_rank_int": 4,
+      "horses": 612,
+      "avg_finish": 5.586601307189542,
+      "median_finish": 5.0,
+      "win_rate": 0.0915032679738562,
+      "in3_rate": 0.3300653594771242,
+      "avg_actual_pop": NaN
+    },
+    {
+      "pred_rank_int": 5,
+      "horses": 616,
+      "avg_finish": 6.2808441558441555,
+      "median_finish": 6.0,
+      "win_rate": 0.05357142857142857,
+      "in3_rate": 0.2532467532467532,
+      "avg_actual_pop": NaN
+    },
+    {
+      "pred_rank_int": 6,
+      "horses": 613,
+      "avg_finish": 6.846655791190865,
+      "median_finish": 6.0,
+      "win_rate": 0.05057096247960848,
+      "in3_rate": 0.2039151712887439,
+      "avg_actual_pop": NaN
+    },
+    {
+      "pred_rank_int": 7,
+      "horses": 606,
+      "avg_finish": 7.582508250825082,
+      "median_finish": 7.0,
+      "win_rate": 0.04785478547854786,
+      "in3_rate": 0.1617161716171617,
+      "avg_actual_pop": NaN
+    },
+    {
+      "pred_rank_int": 8,
+      "horses": 602,
+      "avg_finish": 7.754152823920266,
+      "median_finish": 8.0,
+      "win_rate": 0.044850498338870434,
+      "in3_rate": 0.1362126245847176,
+      "avg_actual_pop": NaN
+    },
+    {
+      "pred_rank_int": 9,
+      "horses": 577,
+      "avg_finish": 8.24263431542461,
+      "median_finish": 8.0,
+      "win_rate": 0.02772963604852686,
+      "in3_rate": 0.1195840554592721,
+      "avg_actual_pop": NaN
+    },
+    {
+      "pred_rank_int": 10,
+      "horses": 554,
+      "avg_finish": 8.768953068592058,
+      "median_finish": 9.0,
+      "win_rate": 0.030685920577617327,
+      "in3_rate": 0.0812274368231047,
+      "avg_actual_pop": NaN
+    }
+  ]
+}

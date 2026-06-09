@@ -281,6 +281,9 @@ def _exclude_races_with_missing_history(
 # ================================================================
 BET_SHEET = "買い目_レース別1行"
 ROI_FOCUS_BET_SHEET = "回収率重視_買い目候補"
+README_SHEET = "README"
+BET_RANK_README_START = "【買い目_レース別1行 ランク条件】"
+BET_RANK_README_END = "【買い目_レース別1行 ランク条件ここまで】"
 
 ROI_FOCUS_BET_COLUMNS = [
     "レースID",
@@ -579,15 +582,9 @@ def _judge_bet_rank(
     """
     買い目_レース別1行のランク・判定・理由を決める。
 
-    dango_2_5 は rank2 と rank5 の score差なので、大きいほど2〜5位に差があり、
-    1位側が目立ちやすい状態として扱う。
+    ランキング1位を軸にした3連複向けに、1位の絶対スコアと2位との差を主軸にする。
+    dango_2_5 と3位馬指標は理由欄の補助情報として残す。
     """
-    score1_ok = score1 is not None and score1 >= 65.0
-    dango_ok = dango_2_5 is not None and dango_2_5 >= 6.0
-    rank3_pop_ok = rank3_popularity is not None and rank3_popularity <= 5.0
-    rank3_extra_ok = rank3_extra_penalty is not None and rank3_extra_penalty < 2.0
-    rank3_score_ok = rank3_score is not None and rank3_score >= 57.0
-
     rank3_detail = (
         f"3位人気={_format_metric_value(rank3_popularity)}"
         f" / 3位score={_format_metric_value(rank3_score)}"
@@ -599,26 +596,30 @@ def _judge_bet_rank(
         f" / gap12={_format_metric_value(gap12)}"
     )
 
-    if score1_ok and dango_ok and rank3_pop_ok and rank3_extra_ok and rank3_score_ok:
+    s_rank_ok = score1 is not None and score1 >= 68.0 and gap12 is not None and gap12 >= 5.0
+    if s_rank_ok:
         return (
             "S",
-            "1位・3位とも信頼できる買いレース",
-            f"S条件一致（{base_detail}、{rank3_detail}）",
+            "1位軸3連複の推奨レース",
+            f"S条件一致（score1>=68 かつ gap12>=5）。{base_detail}、補助情報: {rank3_detail}",
         )
 
-    if score1_ok and dango_ok:
-        unmet = []
-        if not rank3_pop_ok:
-            unmet.append("3位人気<=5を満たさず")
-        if not rank3_extra_ok:
-            unmet.append("3位extra_penalty<2を満たさず")
-        if not rank3_score_ok:
-            unmet.append("3位score>=57を満たさず")
-        unmet_text = "、".join(unmet) if unmet else "S条件未満"
+    a_score_ok = score1 is not None and score1 >= 68.0
+    a_gap_ok = gap12 is not None and gap12 >= 5.0
+    a_balanced_ok = score1 is not None and score1 >= 65.0 and gap12 is not None and gap12 >= 3.0
+    if a_score_ok or a_gap_ok or a_balanced_ok:
+        matched = []
+        if a_score_ok:
+            matched.append("score1>=68")
+        if a_gap_ok:
+            matched.append("gap12>=5")
+        if a_balanced_ok:
+            matched.append("score1>=65 かつ gap12>=3")
+        matched_text = "、".join(matched)
         return (
             "A",
-            "1位は信頼できるが3位軸は慎重",
-            f"A条件一致（{base_detail}）。S未満: {unmet_text}（{rank3_detail}）",
+            "1位軸候補だがSより一段慎重",
+            f"A条件一致（{matched_text}）。S条件は未達。{base_detail}、補助情報: {rank3_detail}",
         )
 
     b_score_ok = score1 is not None and score1 >= 63.0
@@ -627,13 +628,13 @@ def _judge_bet_rank(
         return (
             "B",
             "少額・参考",
-            f"B条件一致（score1>=63 または gap12>=2）。{base_detail}、{rank3_detail}",
+            f"B条件一致（score1>=63 または gap12>=2）。{base_detail}、補助情報: {rank3_detail}",
         )
 
     return (
         "-",
         "見送り",
-        f"見送り条件（S/A/Bに届かず）。{base_detail}、{rank3_detail}",
+        f"見送り条件（S/A/Bに届かず）。{base_detail}、補助情報: {rank3_detail}",
     )
 
 
@@ -791,6 +792,105 @@ def _delete_excel_sheet_if_exists(excel_path: str, sheet_name: str) -> bool:
         del wb[sheet_name]
         wb.save(excel_path)
         return True
+    finally:
+        if wb is not None:
+            wb.close()
+
+
+def _bet_rank_readme_rows() -> list[list[object]]:
+    """READMEシートに出す、買い目ランク条件の説明行を作る。"""
+    return [
+        [BET_RANK_README_START, ""],
+        ["対象シート", BET_SHEET],
+        ["対象列", "R列: ランク(S/A/B)"],
+        ["目的", "ランキング1位を軸にした3連複を買うレース選択の目安"],
+        ["前提", "score1はランキング1位の予想score、gap12はscore1とscore2の差"],
+        ["", ""],
+        ["ランク", "条件", "使い方", "考え方"],
+        [
+            "S",
+            "score1 >= 68 かつ gap12 >= 5",
+            "ランキング1位を軸にした3連複の主候補",
+            "検証で1位3着内率と1位軸3連複の的中率が全体より高かった条件",
+        ],
+        [
+            "A",
+            "score1 >= 68 または gap12 >= 5、または score1 >= 65 かつ gap12 >= 3",
+            "Sより一段慎重な1位軸候補",
+            "1位の絶対評価または2位との差はあるが、S条件ほど強くそろっていない状態",
+        ],
+        [
+            "B",
+            "score1 >= 63 または gap12 >= 2",
+            "少額・参考候補",
+            "1位軸としての根拠は弱めなので、他条件やオッズを確認して扱う",
+        ],
+        [
+            "-",
+            "上記条件を満たさない",
+            "見送り候補",
+            "ランキング1位を軸にする根拠が不足している状態",
+        ],
+        ["", ""],
+        ["補足", "dango_2_5と3位馬の人気・score・extra_penaltyは理由欄の補助情報として残す"],
+        ["注意", "結果後にしか分からない着順・払戻はランク判定に使わない"],
+        [BET_RANK_README_END, ""],
+    ]
+
+
+def _write_bet_rank_readme_to_excel(out_excel_path: str) -> None:
+    """出力ExcelのREADMEシートへ、買い目ランク条件の説明ブロックを書き込む。"""
+    if not os.path.exists(out_excel_path):
+        return
+
+    wb = None
+    try:
+        wb = load_workbook(out_excel_path)
+        ws = wb[README_SHEET] if README_SHEET in wb.sheetnames else wb.create_sheet(README_SHEET)
+
+        start_row = None
+        end_row = None
+        for row_idx in range(1, ws.max_row + 1):
+            value = ws.cell(row=row_idx, column=1).value
+            if value == BET_RANK_README_START:
+                start_row = row_idx
+            if start_row is not None and value == BET_RANK_README_END:
+                end_row = row_idx
+                break
+
+        if start_row is not None and end_row is not None:
+            ws.delete_rows(start_row, end_row - start_row + 1)
+
+        has_existing_content = any(
+            ws.cell(row=row_idx, column=col_idx).value not in (None, "")
+            for row_idx in range(1, ws.max_row + 1)
+            for col_idx in range(1, ws.max_column + 1)
+        )
+        write_row = ws.max_row + 2 if has_existing_content else 1
+
+        for row_values in _bet_rank_readme_rows():
+            for col_idx, value in enumerate(row_values, start=1):
+                ws.cell(row=write_row, column=col_idx).value = value
+            write_row += 1
+
+        for row in ws.iter_rows():
+            first_value = row[0].value if row else None
+            if first_value in {BET_RANK_README_START, BET_RANK_README_END}:
+                row[0].font = Font(bold=True)
+            if first_value == "ランク":
+                for cell in row:
+                    cell.font = Font(bold=True)
+
+        ws.column_dimensions["A"].width = 18
+        ws.column_dimensions["B"].width = 58
+        ws.column_dimensions["C"].width = 34
+        ws.column_dimensions["D"].width = 58
+
+        wb.save(out_excel_path)
+    except PermissionError:
+        print(f"[WARN] 出力Excelが開かれている可能性があります。README更新をスキップします: {out_excel_path}")
+    except Exception as e:
+        print(f"[WARN] READMEシートへのランク条件説明の書き込みに失敗しました: {e}")
     finally:
         if wb is not None:
             wb.close()
@@ -1133,6 +1233,7 @@ def write_features_to_excel(
             bet_df.to_excel(writer, sheet_name=BET_SHEET, index=False)
 
     if not bet_df.empty:
+        _write_bet_rank_readme_to_excel(out_excel)
         append_roi_focus_bet_sheet_to_excel(out_excel)
 
 
