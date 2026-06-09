@@ -131,6 +131,8 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "fast_score": 0.5,
     "avg_score": 0.8,
     "leg_type_suitability": 0.6,
+    "style_pressure_fit": 0.8,
+    "style_confidence": 0.2,
     "lap_match_bonus": 0.7,
     "ta_spkm_best": 0.5,
     "ta_spkm_avg3": -0.3,
@@ -219,6 +221,8 @@ EMPIRICAL_WEIGHT_SIGN_GUARD: Dict[str, int] = {
     "recent_time_idx_trend": 1,
     "dl_rank_score": -1,
     "fast_score": 1,
+    "style_pressure_fit": 1,
+    "style_confidence": 1,
 }
 
 # 使う特徴量（列名）
@@ -241,6 +245,8 @@ FEAT_COLS = [
     "fast_score",
     "avg_score",
     "leg_type_suitability",
+    "style_pressure_fit",
+    "style_confidence",
     "lap_match_bonus",
     "ta_spkm_best",
     "ta_spkm_avg3",
@@ -335,6 +341,8 @@ JAPANESE_FEATURE_NAMES: Dict[str, str] = {
     "fast_score": "高速適性",
     "avg_score": "平均指数",
     "leg_type_suitability": "脚質適性",
+    "style_pressure_fit": "脚質展開適合",
+    "style_confidence": "脚質安定度",
     "lap_match_bonus": "ラップ適合",
     "ta_spkm_best": "1F最速",
     "ta_spkm_avg3": "1F平均3走",

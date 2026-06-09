@@ -545,6 +545,82 @@ def _infer_style_from_pass(pass_str: Any, field_size: Optional[int]) -> Optional
     return "rear"
 
 
+def _dominant_style_from_pass_series(pass_s: pd.Series, field_size: Optional[int]) -> Tuple[Optional[str], float, int]:
+    """
+    過去走の通過順から主脚質と信頼度を返す。
+    信頼度は「最頻脚質の出現数 / 脚質判定できた過去走数」。
+    """
+    if pass_s is None or pass_s.empty:
+        return None, 0.0, 0
+
+    styles: list[str] = []
+    for v in pass_s.dropna().tolist():
+        style = _infer_style_from_pass(v, field_size)
+        if style:
+            styles.append(style)
+
+    if not styles:
+        return None, 0.0, 0
+
+    counts = pd.Series(styles).value_counts()
+    dominant = str(counts.index[0])
+    total = int(counts.sum())
+    confidence = float(counts.iloc[0] / total) if total > 0 else 0.0
+    return dominant, confidence, total
+
+
+def _calc_front_pressure(front_count: int, known_count: int, field_size: Optional[int]) -> float:
+    """
+    レース内の先行圧を 0.0〜1.0 に寄せる。
+    0に近いほど前が楽、1に近いほど先行争いがきつい想定。
+    """
+    if known_count <= 0:
+        return 0.5
+
+    front_ratio = float(front_count) / max(float(known_count), 1.0)
+    count_pressure = min(float(front_count) / 4.0, 1.0)
+    ratio_pressure = min(front_ratio / 0.40, 1.0)
+
+    if field_size is not None and field_size > 0:
+        known_ratio = min(float(known_count) / float(field_size), 1.0)
+    else:
+        known_ratio = 1.0
+
+    raw = 0.70 * count_pressure + 0.30 * ratio_pressure
+    adjusted = raw * (0.70 + 0.30 * known_ratio)
+    return float(max(0.0, min(adjusted, 1.0)))
+
+
+def _calc_style_pressure_fit(
+    style: Optional[str],
+    front_pressure: float,
+    style_confidence: float,
+    race_style_known_ratio: float,
+) -> float:
+    """
+    主脚質とレース内先行圧の相性を -1.0〜1.0 で返す。
+    - front: 先行圧が低いほど加点、高いほど減点
+    - rear: 先行圧が高いほど加点、低いほど減点
+    - mid: 極端な前残り/前崩れより、標準的な流れを加点
+    """
+    if not style:
+        return 0.0
+
+    pressure = max(0.0, min(float(front_pressure), 1.0))
+    if style == "front":
+        base = 1.0 - 2.0 * pressure
+    elif style == "rear":
+        base = 2.0 * pressure - 1.0
+    else:
+        base = 1.0 - abs(pressure - 0.50) * 4.0
+
+    base = max(-1.0, min(float(base), 1.0))
+    confidence = max(0.0, min(float(style_confidence), 1.0))
+    known_ratio = max(0.0, min(float(race_style_known_ratio), 1.0))
+    reliability = confidence * (0.50 + 0.50 * known_ratio)
+    return round(base * reliability, 4)
+
+
 def _compute_horse_features_from_race_sheets(
     book: Dict[Any, pd.DataFrame],
     now_df: pd.DataFrame,
@@ -630,16 +706,55 @@ def _compute_horse_features_from_race_sheets(
 
         df["__horse_name__"] = df[c_name].astype(str).str.strip()
 
+        def _select_past_rows_for_horse(horse_name_val: Any) -> pd.DataFrame:
+            """今走馬名に対応する過去走行を抽出する。"""
+            name_text = str(horse_name_val or "").strip()
+            if not name_text:
+                return pd.DataFrame(columns=df.columns)
+
+            selected = df[df["__horse_name__"] == name_text].copy()
+            if selected.empty:
+                key = re.sub(r"\s+", "", name_text)
+                selected = df[df["__horse_name__"].map(lambda x: re.sub(r"\s+", "", str(x))) == key].copy()
+            return selected
+
+        def _style_lookup_key(horse_name_val: Any, umaban_val: Any) -> Tuple[str, Optional[int]]:
+            """レース内脚質マップ用のキーを作る。"""
+            uma_num = pd.to_numeric(pd.Series([umaban_val]), errors="coerce").iloc[0]
+            uma_i = int(uma_num) if pd.notna(uma_num) else None
+            return _normalize_horse_name(horse_name_val), uma_i
+
+        race_field_size = field_size_map.get(rid_str)
+        race_style_map: Dict[Tuple[str, Optional[int]], Dict[str, Any]] = {}
+        if c_pass:
+            for _, r_style in g.iterrows():
+                style_horse_name = str(r_style.get("馬名") or "").strip()
+                if not style_horse_name:
+                    continue
+                one_style = _select_past_rows_for_horse(style_horse_name)
+                style, confidence, style_n = _dominant_style_from_pass_series(one_style[c_pass], race_field_size)
+                race_style_map[_style_lookup_key(style_horse_name, r_style.get("馬番"))] = {
+                    "style": style,
+                    "style_confidence": confidence,
+                    "style_n": style_n,
+                }
+
+        known_styles = [v for v in race_style_map.values() if v.get("style")]
+        race_known_count = len(known_styles)
+        race_front_count = sum(1 for v in known_styles if v.get("style") == "front")
+        race_front_pressure = _calc_front_pressure(race_front_count, race_known_count, race_field_size)
+        if race_field_size is not None and race_field_size > 0:
+            race_style_known_ratio = min(float(race_known_count) / float(race_field_size), 1.0)
+        else:
+            race_style_known_ratio = min(float(race_known_count) / max(float(len(g)), 1.0), 1.0)
+
         for _, r_now in g.iterrows():
             umaban = r_now.get("馬番")
             horse_name = str(r_now.get("馬名") or "").strip()
             if not horse_name:
                 continue
 
-            one = df[df["__horse_name__"] == horse_name].copy()
-            if one.empty:
-                key = re.sub(r"\s+", "", horse_name)
-                one = df[df["__horse_name__"].map(lambda x: re.sub(r"\s+", "", str(x))) == key].copy()
+            one = _select_past_rows_for_horse(horse_name)
 
             finish_s = _to_float_series(one[c_finish]) if c_finish else pd.Series(dtype=float)
             pop_s = _to_float_series(one[c_pop]) if c_pop else pd.Series(dtype=float)
@@ -733,15 +848,18 @@ def _compute_horse_features_from_race_sheets(
             place = str(r_now.get("場所") or "")
             surface = _parse_surface(r_now.get("コース")) if "コース" in now.columns else ""
             field_size = field_size_map.get(rid_str)
-            style = None
-            if c_pass and not one.empty:
-                styles = []
-                for v in one[c_pass].dropna().tolist():
-                    st = _infer_style_from_pass(v, field_size)
-                    if st:
-                        styles.append(st)
-                if styles:
-                    style = pd.Series(styles).mode().iloc[0]
+            style_meta = race_style_map.get(_style_lookup_key(horse_name, umaban), {})
+            style = style_meta.get("style")
+            style_confidence = float(style_meta.get("style_confidence") or 0.0)
+            if style is None and c_pass and not one.empty:
+                style, style_confidence, _style_n = _dominant_style_from_pass_series(one[c_pass], field_size)
+
+            style_pressure_fit = _calc_style_pressure_fit(
+                style=style,
+                front_pressure=race_front_pressure,
+                style_confidence=style_confidence,
+                race_style_known_ratio=race_style_known_ratio,
+            )
 
             bias = _course_bias(place, surface, now_dist)
             if bias == "neutral" or style is None:
@@ -803,6 +921,8 @@ def _compute_horse_features_from_race_sheets(
                     "fast_score": fast_score,
                     "avg_score": avg_score,
                     "leg_type_suitability": leg_type_suitability,
+                    "style_pressure_fit": style_pressure_fit,
+                    "style_confidence": style_confidence,
                     "lap_match_bonus": lap_match_bonus,
                     "ta_spkm_best": ta_spkm_best,
                     "ta_spkm_avg3": ta_spkm_avg3,
