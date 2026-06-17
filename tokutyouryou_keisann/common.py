@@ -11,7 +11,14 @@ from typing import Any, Dict, List, Tuple, TypeAlias
 import numpy as np
 import pandas as pd
 
-from .config import CONFIG, EMPIRICAL_WEIGHT_SIGN_GUARD, FEAT_COLS, PLACE_MAP, RACELEVEL_COLS
+from .config import (
+    CONFIG,
+    EMPIRICAL_WEIGHT_SIGN_GUARD,
+    FEAT_COLS,
+    OPTIMIZER_FIXED_ZERO_FEATURES,
+    PLACE_MAP,
+    RACELEVEL_COLS,
+)
 
 
 WeightKey: TypeAlias = str | tuple[str, str]
@@ -59,6 +66,9 @@ def _yen_to_int(x: Any) -> int:
 
 
 def _clip_weight_by_name(name: str, value: float) -> float:
+    if name in OPTIMIZER_FIXED_ZERO_FEATURES:
+        return 0.0
+
     if name in RACELEVEL_COLS:
         lo = float(CONFIG["RACELEVEL_WEIGHT_MIN"])
         hi = float(CONFIG["RACELEVEL_WEIGHT_MAX"])

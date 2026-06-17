@@ -30,6 +30,11 @@ import re
 import numpy as np
 import pandas as pd
 
+from keibayosou_course_style import (
+    calc_course_style_features,
+    dominant_running_style_from_pass_series,
+    normalize_pace,
+)
 from keibayosou_config import (
     NOW_SHEET,
     TARGET_SHEET,
@@ -282,8 +287,8 @@ def _pick_now_pace(row: pd.Series) -> str:
     """
     for col in ["想定ペース", "ペース", "レースペース", "pace"]:
         if col in row.index:
-            val = str(row.get(col) or "").strip().lower()
-            if val in {"slow", "mid", "fast"}:
+            val = normalize_pace(row.get(col))
+            if val in {"slow", "mid", "fast", "very_fast"}:
                 return val
     return ""
 
@@ -733,10 +738,17 @@ def _compute_horse_features_from_race_sheets(
                     continue
                 one_style = _select_past_rows_for_horse(style_horse_name)
                 style, confidence, style_n = _dominant_style_from_pass_series(one_style[c_pass], race_field_size)
+                running_style, running_style_confidence, running_style_n = dominant_running_style_from_pass_series(
+                    one_style[c_pass],
+                    race_field_size,
+                )
                 race_style_map[_style_lookup_key(style_horse_name, r_style.get("馬番"))] = {
                     "style": style,
                     "style_confidence": confidence,
                     "style_n": style_n,
+                    "running_style": running_style,
+                    "running_style_confidence": running_style_confidence,
+                    "running_style_n": running_style_n,
                 }
 
         known_styles = [v for v in race_style_map.values() if v.get("style")]
@@ -853,6 +865,13 @@ def _compute_horse_features_from_race_sheets(
             style_confidence = float(style_meta.get("style_confidence") or 0.0)
             if style is None and c_pass and not one.empty:
                 style, style_confidence, _style_n = _dominant_style_from_pass_series(one[c_pass], field_size)
+            running_style = str(style_meta.get("running_style") or "")
+            running_style_confidence = float(style_meta.get("running_style_confidence") or 0.0)
+            if not running_style and c_pass and not one.empty:
+                running_style, running_style_confidence, _running_style_n = dominant_running_style_from_pass_series(
+                    one[c_pass],
+                    field_size,
+                )
 
             style_pressure_fit = _calc_style_pressure_fit(
                 style=style,
@@ -868,6 +887,16 @@ def _compute_horse_features_from_race_sheets(
                 leg_type_suitability = 1.0
             else:
                 leg_type_suitability = -1.0
+
+            course_style_feats = calc_course_style_features(
+                place=now_place,
+                surface=now_surface,
+                distance=now_dist,
+                track_condition=r_now.get("馬場", r_now.get("馬場状態", "")),
+                running_style=running_style,
+                course_text=r_now.get("コース", ""),
+                pace=now_pace,
+            )
 
             if not last3_s.dropna().empty and len(last3_s.dropna()) >= 2:
                 var = float(np.nanvar(last3_s))
@@ -923,6 +952,13 @@ def _compute_horse_features_from_race_sheets(
                     "leg_type_suitability": leg_type_suitability,
                     "style_pressure_fit": style_pressure_fit,
                     "style_confidence": style_confidence,
+                    "running_style_code": course_style_feats["running_style_code"],
+                    "running_style_confidence": running_style_confidence,
+                    "course_style_fit": course_style_feats["course_style_fit"],
+                    "bad_track_style_fit": course_style_feats["bad_track_style_fit"],
+                    "pace_adjusted_course_style_fit": course_style_feats["pace_adjusted_course_style_fit"],
+                    "local_small_course_front_bonus": course_style_feats["local_small_course_front_bonus"],
+                    "long_straight_late_bonus": course_style_feats["long_straight_late_bonus"],
                     "lap_match_bonus": lap_match_bonus,
                     "ta_spkm_best": ta_spkm_best,
                     "ta_spkm_avg3": ta_spkm_avg3,

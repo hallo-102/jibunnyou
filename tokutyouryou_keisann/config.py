@@ -169,6 +169,27 @@ CONFIG: Dict[str, Any] = {
     "MIN_WEAKNESS_GROUP_RACES": 20,
 }
 
+# 今回コース脚質適性関連の特徴量。
+# course_style_fit だけを最適化対象にし、内訳列は診断用として固定0にする。
+COURSE_STYLE_FEATURE_COLS: List[str] = [
+    "running_style_code",
+    "running_style_confidence",
+    "course_style_fit",
+    "bad_track_style_fit",
+    "pace_adjusted_course_style_fit",
+    "local_small_course_front_bonus",
+    "long_straight_late_bonus",
+]
+
+OPTIMIZER_FIXED_ZERO_FEATURES = {
+    "running_style_code",
+    "running_style_confidence",
+    "bad_track_style_fit",
+    "pace_adjusted_course_style_fit",
+    "local_small_course_front_bonus",
+    "long_straight_late_bonus",
+}
+
 # 本番側 keibayosou_config.py の FEAT_COLS と揃える
 FEAT_COLS: List[str] = [
     "avg_finish",
@@ -191,6 +212,13 @@ FEAT_COLS: List[str] = [
     "leg_type_suitability",
     "style_pressure_fit",
     "style_confidence",
+    "running_style_code",
+    "running_style_confidence",
+    "course_style_fit",
+    "bad_track_style_fit",
+    "pace_adjusted_course_style_fit",
+    "local_small_course_front_bonus",
+    "long_straight_late_bonus",
     "lap_match_bonus",
     "ta_spkm_best",
     "ta_spkm_avg3",
@@ -247,6 +275,13 @@ FEATURE_WEIGHTS_SEED: Dict[str, float] = {
     "leg_type_suitability": 0.6,
     "style_pressure_fit": 0.8,
     "style_confidence": 0.2,
+    "running_style_code": 0.0,
+    "running_style_confidence": 0.0,
+    "course_style_fit": 1.0,
+    "bad_track_style_fit": 0.0,
+    "pace_adjusted_course_style_fit": 0.0,
+    "local_small_course_front_bonus": 0.0,
+    "long_straight_late_bonus": 0.0,
     "lap_match_bonus": 0.7,
     "ta_spkm_best": 0.5,
     "ta_spkm_avg3": -0.3,
@@ -287,6 +322,9 @@ if PIPE_FEAT_COLS:
     for _col in FEAT_COLS:
         if _col not in FEATURE_WEIGHTS_SEED:
             FEATURE_WEIGHTS_SEED[_col] = float(PIPE_FEATURE_WEIGHTS_BASE.get(_col, 0.0))
+
+for _col in OPTIMIZER_FIXED_ZERO_FEATURES:
+    FEATURE_WEIGHTS_SEED[_col] = 0.0
 
 PLACE_MAP = {
     "01": "札幌",

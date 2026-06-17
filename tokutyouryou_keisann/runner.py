@@ -16,9 +16,12 @@ from .common import (
     parse_rid_meta,
 )
 from .config import (
+    COURSE_STYLE_FEATURE_COLS,
     CONFIG,
     EXCEL_DIR,
     FEAT_COLS,
+    FEATURE_WEIGHTS_SEED,
+    OPTIMIZER_FIXED_ZERO_FEATURES,
     PROJECT_ROOT,
     PY_DIR,
     RACE_LEVEL_XLSX,
@@ -467,6 +470,50 @@ def _print_rid_rows_summary(df: pd.DataFrame, label: str) -> dict:
     return summary
 
 
+def _build_feature_column_summary(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """
+    指定特徴量が最適化データに入っているか、欠損や非0件数を確認する。
+    """
+    rows = []
+    for col in columns:
+        if col not in df.columns:
+            rows.append(
+                {
+                    "feature": col,
+                    "exists": 0,
+                    "non_null": 0,
+                    "non_zero": 0,
+                    "seed_weight": float(FEATURE_WEIGHTS_SEED.get(col, 0.0)),
+                    "fixed_zero": int(col in OPTIMIZER_FIXED_ZERO_FEATURES),
+                }
+            )
+            continue
+
+        values = pd.to_numeric(df[col], errors="coerce")
+        rows.append(
+            {
+                "feature": col,
+                "exists": 1,
+                "non_null": int(values.notna().sum()),
+                "non_zero": int((values.fillna(0.0) != 0.0).sum()),
+                "seed_weight": float(FEATURE_WEIGHTS_SEED.get(col, 0.0)),
+                "fixed_zero": int(col in OPTIMIZER_FIXED_ZERO_FEATURES),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _print_course_style_feature_summary(df: pd.DataFrame, label: str) -> pd.DataFrame:
+    """今回コース脚質適性関連の特徴量状態をログに出す。"""
+    summary_df = _build_feature_column_summary(df, COURSE_STYLE_FEATURE_COLS)
+    print(f"\n=== [{label}] course style feature summary ===")
+    if summary_df.empty:
+        print("summary_empty=1")
+    else:
+        print(summary_df.to_string(index=False))
+    return summary_df
+
+
 def _build_file_debug_row(
     file_path: Path,
     df_feat: pd.DataFrame,
@@ -863,6 +910,10 @@ def main() -> None:
         excluded_count = int(df_file_exclusion_summary["exclude_from_train"].sum())
         print(f"[INFO] train除外ファイル数={excluded_count}")
 
+    all_course_style_feature_summary = _print_course_style_feature_summary(df_feat_all, "ALL FEATURES")
+    train_course_style_feature_summary = _print_course_style_feature_summary(df_train, "TRAIN FEATURES")
+    test_course_style_feature_summary = _print_course_style_feature_summary(df_test, "TEST FEATURES")
+
     all_rid_summary = _print_rid_rows_summary(df_feat_all, "ALL FEATURES")
     train_rid_summary = _print_rid_rows_summary(df_train, "TRAIN FEATURES")
     test_rid_summary = _print_rid_rows_summary(df_test, "TEST FEATURES")
@@ -1167,6 +1218,15 @@ def main() -> None:
         ]
     )
 
+    course_style_feature_summary_df = pd.concat(
+        [
+            all_course_style_feature_summary.assign(mode="ALL"),
+            train_course_style_feature_summary.assign(mode="TRAIN"),
+            test_course_style_feature_summary.assign(mode="TEST"),
+        ],
+        ignore_index=True,
+    )
+
     clean_target_summary_df = pd.DataFrame(
         [
             {"mode": "CLEAN_ALL", **clean_all_target_summary},
@@ -1262,6 +1322,7 @@ def main() -> None:
         clean_condition_analysis_df.to_excel(writer, sheet_name="clean_condition_analysis", index=False)
         debug_summary_df.to_excel(writer, sheet_name="debug_summary", index=False)
         rid_row_summary_df.to_excel(writer, sheet_name="rid_row_summary", index=False)
+        course_style_feature_summary_df.to_excel(writer, sheet_name="course_style_features", index=False)
         df_file_debug.to_excel(writer, sheet_name="file_debug", index=False)
 
         if df_file_exclusion_summary is not None and not df_file_exclusion_summary.empty:
