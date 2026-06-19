@@ -99,8 +99,8 @@ LOGIN_URL = "https://www.ipat.jra.go.jp/"
 DRY_RUN = False
 
 # 1点100円なら、JRA画面では「1」と入力する
-BET_UNIT_100YEN = 1
-BET_UNIT_YEN = BET_UNIT_100YEN * 100
+BET_UNIT_100YEN = 2
+BET_UNIT_YEN = BET_UNIT_100YEN * 200
 
 # Excel設定
 SHEET_NAME = "回収率重視_買い目候補"

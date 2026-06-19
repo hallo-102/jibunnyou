@@ -284,6 +284,13 @@ ROI_FOCUS_BET_SHEET = "回収率重視_買い目候補"
 README_SHEET = "README"
 BET_RANK_README_START = "【買い目_レース別1行 ランク条件】"
 BET_RANK_README_END = "【買い目_レース別1行 ランク条件ここまで】"
+S_RANK_SCORE_MIN = 64.0
+S_RANK_RATING4_AVG_MIN = 400.0
+S_RANK_RECENT3_TIME_IDX_MIN = 80.0
+S_RANK_EXTRA_PENALTY_MAX = 1.25
+RATING4_AVG_COL_CANDIDATES = ["rating4平均", "rating4_avg", "rating4_mean", "rating4"]
+RECENT3_TIME_IDX_COL_CANDIDATES = ["近3走タイム指数", "近3走平均タイム指数", "recent3_time_idx", "recent3_time_index"]
+EXTRA_PENALTY_COL_CANDIDATES = ["extra_penalty", "追加ペナルティ", "補正ペナルティ"]
 
 ROI_FOCUS_BET_COLUMNS = [
     "レースID",
@@ -355,6 +362,25 @@ def _to_float_safe(x: object) -> Optional[float]:
         return float(x)
     except Exception:
         return None
+
+
+def _first_float(*values: object) -> Optional[float]:
+    """複数候補から最初に数値化できる値を返す。"""
+    for value in values:
+        float_value = _to_float_safe(value)
+        if float_value is not None:
+            return float_value
+    return None
+
+
+def _metric_from_row(row: pd.Series, candidates: list[str]) -> Optional[float]:
+    """行データから候補列名の順に数値指標を取り出す。"""
+    for col in candidates:
+        if col in row.index:
+            float_value = _to_float_safe(row.get(col))
+            if float_value is not None:
+                return float_value
+    return None
 
 
 def _normalize_race_key(x: object) -> Optional[str]:
@@ -522,22 +548,26 @@ def _pick_popularity_col_for_roi(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
-def _rank3_metric_map_from_now_df(now_df: Optional[pd.DataFrame]) -> Dict[Tuple[str, int], Dict[str, float]]:
-    """今走シートから (レースID, 馬番) -> 人気・score・extra_penalty の対応を作る。"""
-    if now_df is None or not isinstance(now_df, pd.DataFrame) or now_df.empty:
+def _horse_metric_map_from_prediction_df(pred_df: Optional[pd.DataFrame]) -> Dict[Tuple[str, int], Dict[str, float]]:
+    """予想系シートから (レースID, 馬番) -> ランク判定用指標 の対応を作る。"""
+    if pred_df is None or not isinstance(pred_df, pd.DataFrame) or pred_df.empty:
         return {}
 
-    now = now_df.copy()
-    race_cols = [c for c in ["レースID", "rid_str", "race_id"] if c in now.columns]
-    umaban_col = _pick_first_existing_col(now, ["馬番", "umaban", "馬 番", "馬番 "])
-    pop_col = _pick_popularity_col_for_roi(now)
-    score_col = _pick_first_existing_col(now, ["score"])
-    extra_col = _pick_first_existing_col(now, ["extra_penalty"])
-    if not race_cols or umaban_col is None or pop_col is None or score_col is None or extra_col is None:
+    pred = pred_df.copy()
+    race_cols = [c for c in ["レースID", "rid_str", "race_id"] if c in pred.columns]
+    umaban_col = _pick_first_existing_col(pred, ["馬番", "umaban", "馬 番", "馬番 "])
+    metric_cols = {
+        "popularity": _pick_popularity_col_for_roi(pred),
+        "score": _pick_first_existing_col(pred, ["score"]),
+        "extra_penalty": _pick_first_existing_col(pred, EXTRA_PENALTY_COL_CANDIDATES),
+        "rating4_avg": _pick_first_existing_col(pred, RATING4_AVG_COL_CANDIDATES),
+        "recent3_time_idx": _pick_first_existing_col(pred, RECENT3_TIME_IDX_COL_CANDIDATES),
+    }
+    if not race_cols or umaban_col is None or not any(metric_cols.values()):
         return {}
 
     # レースID表記は出力元によって rid_str / レースID のどちらでも来るため、両方をキー化する。
-    now["_race_keys_for_roi"] = now.apply(
+    pred["_race_keys_for_roi"] = pred.apply(
         lambda r: [
             str(key)
             for key in (_normalize_race_key(r.get(c)) for c in race_cols)
@@ -545,25 +575,52 @@ def _rank3_metric_map_from_now_df(now_df: Optional[pd.DataFrame]) -> Dict[Tuple[
         ],
         axis=1,
     )
-    now["_umaban_for_roi"] = now[umaban_col].map(_to_umaban_int_for_roi)
-    now["_popularity_for_roi"] = pd.to_numeric(now[pop_col], errors="coerce")
-    now["_score_for_roi"] = pd.to_numeric(now[score_col], errors="coerce")
-    now["_extra_penalty_for_roi"] = pd.to_numeric(now[extra_col], errors="coerce")
-    now = now.dropna(subset=["_umaban_for_roi"])
-    now = now[now["_race_keys_for_roi"].map(bool)]
-    if now.empty:
+    pred["_umaban_for_roi"] = pred[umaban_col].map(_to_umaban_int_for_roi)
+    for metric_name, col in metric_cols.items():
+        pred[f"_{metric_name}_for_roi"] = pd.to_numeric(pred[col], errors="coerce") if col is not None else np.nan
+
+    pred = pred.dropna(subset=["_umaban_for_roi"])
+    pred = pred[pred["_race_keys_for_roi"].map(bool)]
+    if pred.empty:
         return {}
 
     metric_map: Dict[Tuple[str, int], Dict[str, float]] = {}
-    for _, r in now.iterrows():
+    for _, r in pred.iterrows():
         metrics = {
             "popularity": _to_float_safe(r.get("_popularity_for_roi")),
             "score": _to_float_safe(r.get("_score_for_roi")),
             "extra_penalty": _to_float_safe(r.get("_extra_penalty_for_roi")),
+            "rating4_avg": _to_float_safe(r.get("_rating4_avg_for_roi")),
+            "recent3_time_idx": _to_float_safe(r.get("_recent3_time_idx_for_roi")),
         }
         for race_key in r["_race_keys_for_roi"]:
             metric_map[(str(race_key), int(r["_umaban_for_roi"]))] = metrics
     return metric_map
+
+
+def _rank3_metric_map_from_now_df(now_df: Optional[pd.DataFrame]) -> Dict[Tuple[str, int], Dict[str, float]]:
+    """今走シートから (レースID, 馬番) -> 人気・score・extra_penalty の対応を作る。"""
+    return _horse_metric_map_from_prediction_df(now_df)
+
+
+def _horse_metrics_for_race_keys(
+    metric_map: Dict[Tuple[str, int], Dict[str, float]],
+    race_key_sources: Tuple[object, ...],
+    umaban: object,
+) -> Dict[str, float]:
+    """複数のレースID表記候補から、指定馬番の指標を探す。"""
+    umaban_int = _to_umaban_int_for_roi(umaban)
+    if umaban_int is None:
+        return {}
+
+    for race_key_src in race_key_sources:
+        race_key = _normalize_race_key(race_key_src)
+        if race_key is None:
+            continue
+        metrics = metric_map.get((str(race_key), int(umaban_int)), {})
+        if metrics:
+            return metrics
+    return {}
 
 
 def _format_metric_value(value: Optional[float]) -> str:
@@ -575,6 +632,9 @@ def _judge_bet_rank(
     score1: Optional[float],
     gap12: Optional[float],
     dango_2_5: Optional[float],
+    rank1_rating4_avg: Optional[float],
+    rank1_recent3_time_idx: Optional[float],
+    rank1_extra_penalty: Optional[float],
     rank3_popularity: Optional[float],
     rank3_score: Optional[float],
     rank3_extra_penalty: Optional[float],
@@ -582,9 +642,14 @@ def _judge_bet_rank(
     """
     買い目_レース別1行のランク・判定・理由を決める。
 
-    ランキング1位を軸にした3連複向けに、1位の絶対スコアと2位との差を主軸にする。
-    dango_2_5 と3位馬指標は理由欄の補助情報として残す。
+    ランキング1位を軸にした3連複向けに、Sは1位馬の指定条件で判定する。
+    A/Bは従来どおりscore1と2位との差を使い、補助指標は理由欄に残す。
     """
+    rank1_detail = (
+        f"1位rating4平均={_format_metric_value(rank1_rating4_avg)}"
+        f" / 1位近3走タイム指数={_format_metric_value(rank1_recent3_time_idx)}"
+        f" / 1位extra_penalty={_format_metric_value(rank1_extra_penalty)}"
+    )
     rank3_detail = (
         f"3位人気={_format_metric_value(rank3_popularity)}"
         f" / 3位score={_format_metric_value(rank3_score)}"
@@ -596,12 +661,22 @@ def _judge_bet_rank(
         f" / gap12={_format_metric_value(gap12)}"
     )
 
-    s_rank_ok = score1 is not None and score1 >= 68.0 and gap12 is not None and gap12 >= 5.0
+    s_rank_ok = (
+        score1 is not None
+        and score1 >= S_RANK_SCORE_MIN
+        and rank1_rating4_avg is not None
+        and rank1_rating4_avg >= S_RANK_RATING4_AVG_MIN
+        and rank1_recent3_time_idx is not None
+        and rank1_recent3_time_idx >= S_RANK_RECENT3_TIME_IDX_MIN
+        and rank1_extra_penalty is not None
+        and rank1_extra_penalty <= S_RANK_EXTRA_PENALTY_MAX
+    )
     if s_rank_ok:
         return (
             "S",
             "1位軸3連複の推奨レース",
-            f"S条件一致（score1>=68 かつ gap12>=5）。{base_detail}、補助情報: {rank3_detail}",
+            "S条件一致（ランキング1位: score>=64 かつ rating4平均>=400 "
+            f"かつ 近3走タイム指数>=80 かつ extra_penalty<=1.25）。{base_detail} / {rank1_detail}、補助情報: {rank3_detail}",
         )
 
     a_score_ok = score1 is not None and score1 >= 68.0
@@ -619,7 +694,7 @@ def _judge_bet_rank(
         return (
             "A",
             "1位軸候補だがSより一段慎重",
-            f"A条件一致（{matched_text}）。S条件は未達。{base_detail}、補助情報: {rank3_detail}",
+            f"A条件一致（{matched_text}）。S条件は未達。{base_detail} / {rank1_detail}、補助情報: {rank3_detail}",
         )
 
     b_score_ok = score1 is not None and score1 >= 63.0
@@ -628,13 +703,13 @@ def _judge_bet_rank(
         return (
             "B",
             "少額・参考",
-            f"B条件一致（score1>=63 または gap12>=2）。{base_detail}、補助情報: {rank3_detail}",
+            f"B条件一致（score1>=63 または gap12>=2）。{base_detail} / {rank1_detail}、補助情報: {rank3_detail}",
         )
 
     return (
         "-",
         "見送り",
-        f"見送り条件（S/A/Bに届かず）。{base_detail}、補助情報: {rank3_detail}",
+        f"見送り条件（S/A/Bに届かず）。{base_detail} / {rank1_detail}、補助情報: {rank3_detail}",
     )
 
 
@@ -804,14 +879,14 @@ def _bet_rank_readme_rows() -> list[list[object]]:
         ["対象シート", BET_SHEET],
         ["対象列", "R列: ランク(S/A/B)"],
         ["目的", "ランキング1位を軸にした3連複を買うレース選択の目安"],
-        ["前提", "score1はランキング1位の予想score、gap12はscore1とscore2の差"],
+        ["前提", "Sはランキング1位馬のscore・rating4平均・近3走タイム指数・extra_penaltyで判定"],
         ["", ""],
         ["ランク", "条件", "使い方", "考え方"],
         [
             "S",
-            "score1 >= 68 かつ gap12 >= 5",
+            "ランキング1位の score >= 64 かつ rating4平均 >= 400 かつ 近3走タイム指数 >= 80 かつ extra_penalty <= 1.25",
             "ランキング1位を軸にした3連複の主候補",
-            "検証で1位3着内率と1位軸3連複の的中率が全体より高かった条件",
+            "1位馬の絶対評価・近走時計・リスクの条件がそろっている状態",
         ],
         [
             "A",
@@ -832,7 +907,7 @@ def _bet_rank_readme_rows() -> list[list[object]]:
             "ランキング1位を軸にする根拠が不足している状態",
         ],
         ["", ""],
-        ["補足", "dango_2_5と3位馬の人気・score・extra_penaltyは理由欄の補助情報として残す"],
+        ["補足", "1位馬のrating4平均・近3走タイム指数・extra_penaltyと、3位馬の人気・score・extra_penaltyは理由欄に残す"],
         ["注意", "結果後にしか分からない着順・払戻はランク判定に使わない"],
         [BET_RANK_README_END, ""],
     ]
@@ -1015,7 +1090,7 @@ def _build_bet_sheet(
             now[c] = pd.NA
 
     race_info = now.groupby("rid_str", as_index=False)[race_info_cols].first()
-    rank3_metric_map = _rank3_metric_map_from_now_df(now_export)
+    now_metric_map = _horse_metric_map_from_prediction_df(now_export)
 
     # ----------------------------
     # TARGET：rid_str+馬番+score+rank を前提
@@ -1035,6 +1110,7 @@ def _build_bet_sheet(
     ft["馬番"] = pd.to_numeric(ft["馬番"], errors="coerce").astype("Int64")
     ft["score"] = pd.to_numeric(ft.get("score", pd.Series([pd.NA] * len(ft))), errors="coerce")
     ft["rank"] = pd.to_numeric(ft.get("rank", pd.Series([pd.NA] * len(ft))), errors="coerce").astype("Int64")
+    target_metric_map = _horse_metric_map_from_prediction_df(ft)
 
     bet_rows: list[dict] = []
 
@@ -1042,6 +1118,7 @@ def _build_bet_sheet(
         # 上位馬番（同点は馬番昇順）を取る
         sub2 = sub.sort_values(["score", "馬番"], ascending=[False, True], kind="mergesort")
         top7 = sub2.head(7)
+        top1_row = top7.iloc[0] if not top7.empty else pd.Series(dtype=object)
 
         horses7 = [_to_int_safe(v) for v in top7["馬番"].tolist()]
         horses6 = horses7[:6] + [None] * (6 - len(horses7[:6]))
@@ -1065,12 +1142,13 @@ def _build_bet_sheet(
         info_row = info.iloc[0].to_dict() if not info.empty else {c: pd.NA for c in race_info_cols}
         if pd.isna(info_row.get("レースID")):
             info_row["レースID"] = rid
+        race_key_sources = (info_row.get("レースID"), rid)
 
         # 単勝オッズ（上位1頭）
         odds_top1 = None
         if horses6[0] is not None:
             top_umaban = int(horses6[0])
-            for race_key_src in (info_row.get("レースID"), rid):
+            for race_key_src in race_key_sources:
                 race_key = _normalize_race_key(race_key_src)
                 if race_key is None:
                     continue
@@ -1081,33 +1159,51 @@ def _build_bet_sheet(
             if odds_top1 is None:
                 place_norm = _normalize_place(info_row.get("場所"))
                 race_no = ""
-                for race_key_src in (info_row.get("レースID"), rid):
+                for race_key_src in race_key_sources:
                     race_no = _race_no_from_race_key(race_key_src)
                     if race_no:
                         break
                 if place_norm and race_no:
                     odds_top1 = place_odds_map.get((str(place_norm), str(race_no), top_umaban))
 
-        # 3位馬の人気・score・extra_penaltyを使い、検証で重視した新条件で判定する。
-        rank3_metrics: Dict[str, float] = {}
-        rank3_umaban = horses6[2]
-        if rank3_umaban is not None:
-            for race_key_src in (info_row.get("レースID"), rid):
-                race_key = _normalize_race_key(race_key_src)
-                if race_key is None:
-                    continue
-                rank3_metrics = rank3_metric_map.get((str(race_key), int(rank3_umaban)), {})
-                if rank3_metrics:
-                    break
+        # 1位馬のrating4平均・近3走タイム指数・extra_penaltyをS判定に使う。
+        rank1_target_metrics = _horse_metrics_for_race_keys(target_metric_map, race_key_sources, horses6[0])
+        rank1_now_metrics = _horse_metrics_for_race_keys(now_metric_map, race_key_sources, horses6[0])
+        rank1_rating4_avg = _first_float(
+            _metric_from_row(top1_row, RATING4_AVG_COL_CANDIDATES),
+            rank1_target_metrics.get("rating4_avg"),
+            rank1_now_metrics.get("rating4_avg"),
+        )
+        rank1_recent3_time_idx = _first_float(
+            _metric_from_row(top1_row, RECENT3_TIME_IDX_COL_CANDIDATES),
+            rank1_target_metrics.get("recent3_time_idx"),
+            rank1_now_metrics.get("recent3_time_idx"),
+        )
+        rank1_extra_penalty = _first_float(
+            _metric_from_row(top1_row, EXTRA_PENALTY_COL_CANDIDATES),
+            rank1_target_metrics.get("extra_penalty"),
+            rank1_now_metrics.get("extra_penalty"),
+        )
 
-        rank3_popularity = _to_float_safe(rank3_metrics.get("popularity"))
-        rank3_score = _to_float_safe(rank3_metrics.get("score"))
-        rank3_extra_penalty = _to_float_safe(rank3_metrics.get("extra_penalty"))
+        # 3位馬の人気・score・extra_penaltyは理由欄と回収率重視シート用に残す。
+        rank3_umaban = horses6[2]
+        rank3_target_metrics = _horse_metrics_for_race_keys(target_metric_map, race_key_sources, rank3_umaban)
+        rank3_now_metrics = _horse_metrics_for_race_keys(now_metric_map, race_key_sources, rank3_umaban)
+
+        rank3_popularity = _first_float(rank3_now_metrics.get("popularity"), rank3_target_metrics.get("popularity"))
+        rank3_score = _first_float(rank3_target_metrics.get("score"), rank3_now_metrics.get("score"))
+        rank3_extra_penalty = _first_float(
+            rank3_target_metrics.get("extra_penalty"),
+            rank3_now_metrics.get("extra_penalty"),
+        )
 
         rank_label, judge, reason = _judge_bet_rank(
             score1=score1,
             gap12=gap12,
             dango_2_5=dango_2_5,
+            rank1_rating4_avg=rank1_rating4_avg,
+            rank1_recent3_time_idx=rank1_recent3_time_idx,
+            rank1_extra_penalty=rank1_extra_penalty,
             rank3_popularity=rank3_popularity,
             rank3_score=rank3_score,
             rank3_extra_penalty=rank3_extra_penalty,

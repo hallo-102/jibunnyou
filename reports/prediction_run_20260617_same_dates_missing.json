@@ -1,0 +1,152 @@
+{
+  "metadata": {
+    "project_root": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026",
+    "input_dir": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input",
+    "output_dir": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output",
+    "runner_script": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\keibayosou_best_import_roi_runner.py",
+    "prediction_command": "echo {date} | \"{python}\" \"{runner_script}\"",
+    "created_at": "2026-06-17 23:41:59",
+    "run_dir": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\reports\\backtest_run_20260617_233026"
+  },
+  "target_manifest": {
+    "metadata": {
+      "project_root": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026",
+      "input_dir": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input",
+      "input_patterns": [
+        "馬の競走成績_{date}.xlsx"
+      ],
+      "start_date": "20260307",
+      "end_date": "20260315",
+      "created_at": "2026-06-17 23:30:15"
+    },
+    "target_dates": [
+      {
+        "date": "20260307",
+        "iso_date": "2026-03-07",
+        "weekday": "Sat",
+        "input_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260307.xlsx",
+        "all_input_paths": [
+          "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260307.xlsx"
+        ],
+        "reason": "input_excel_exists"
+      },
+      {
+        "date": "20260308",
+        "iso_date": "2026-03-08",
+        "weekday": "Sun",
+        "input_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260308.xlsx",
+        "all_input_paths": [
+          "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260308.xlsx"
+        ],
+        "reason": "input_excel_exists"
+      },
+      {
+        "date": "20260314",
+        "iso_date": "2026-03-14",
+        "weekday": "Sat",
+        "input_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260314.xlsx",
+        "all_input_paths": [
+          "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260314.xlsx"
+        ],
+        "reason": "input_excel_exists"
+      },
+      {
+        "date": "20260315",
+        "iso_date": "2026-03-15",
+        "weekday": "Sun",
+        "input_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260315.xlsx",
+        "all_input_paths": [
+          "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260315.xlsx"
+        ],
+        "reason": "input_excel_exists"
+      }
+    ],
+    "skipped_dates": [],
+    "ignored_dates": [
+      {
+        "date": "20260309",
+        "iso_date": "2026-03-09",
+        "weekday": "Mon",
+        "reason": "weekday_without_input"
+      },
+      {
+        "date": "20260310",
+        "iso_date": "2026-03-10",
+        "weekday": "Tue",
+        "reason": "weekday_without_input"
+      },
+      {
+        "date": "20260311",
+        "iso_date": "2026-03-11",
+        "weekday": "Wed",
+        "reason": "weekday_without_input"
+      },
+      {
+        "date": "20260312",
+        "iso_date": "2026-03-12",
+        "weekday": "Thu",
+        "reason": "weekday_without_input"
+      },
+      {
+        "date": "20260313",
+        "iso_date": "2026-03-13",
+        "weekday": "Fri",
+        "reason": "weekday_without_input"
+      }
+    ],
+    "counts": {
+      "target_days": 4,
+      "skipped_days": 0,
+      "ignored_days": 5
+    }
+  },
+  "results": [
+    {
+      "date": "20260307",
+      "status": "success",
+      "reason": "output_found",
+      "return_code": 0,
+      "input_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260307.xlsx",
+      "output_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260307.xlsx",
+      "log_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\reports\\backtest_run_20260617_233026\\logs\\20260307.log",
+      "command": "echo 20260307 | \"C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\.venv\\Scripts\\python.exe\" \"C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\keibayosou_best_import_roi_runner.py\""
+    },
+    {
+      "date": "20260308",
+      "status": "success",
+      "reason": "output_found",
+      "return_code": 0,
+      "input_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260308.xlsx",
+      "output_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260308.xlsx",
+      "log_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\reports\\backtest_run_20260617_233026\\logs\\20260308.log",
+      "command": "echo 20260308 | \"C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\.venv\\Scripts\\python.exe\" \"C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\keibayosou_best_import_roi_runner.py\""
+    },
+    {
+      "date": "20260314",
+      "status": "success",
+      "reason": "output_found",
+      "return_code": 0,
+      "input_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260314.xlsx",
+      "output_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260314.xlsx",
+      "log_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\reports\\backtest_run_20260617_233026\\logs\\20260314.log",
+      "command": "echo 20260314 | \"C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\.venv\\Scripts\\python.exe\" \"C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\keibayosou_best_import_roi_runner.py\""
+    },
+    {
+      "date": "20260315",
+      "status": "success",
+      "reason": "output_found",
+      "return_code": 0,
+      "input_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\input\\馬の競走成績_20260315.xlsx",
+      "output_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\output\\馬の競走成績_with_feat_20260315.xlsx",
+      "log_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\reports\\backtest_run_20260617_233026\\logs\\20260315.log",
+      "command": "echo 20260315 | \"C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\.venv\\Scripts\\python.exe\" \"C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\keibayosou_best_import_roi_runner.py\""
+    }
+  ],
+  "skipped_dates": [],
+  "counts": {
+    "success_days": 4,
+    "failed_days": 0,
+    "dry_run_days": 0,
+    "skipped_days": 0
+  }
+}
