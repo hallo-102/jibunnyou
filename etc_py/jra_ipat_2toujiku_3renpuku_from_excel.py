@@ -98,9 +98,9 @@ LOGIN_URL = "https://www.ipat.jra.go.jp/"
 # ★最重要：最初は True のままテストすること
 DRY_RUN = False
 
-# 1点100円なら、JRA画面では「1」と入力する
-BET_UNIT_100YEN = 2
-BET_UNIT_YEN = BET_UNIT_100YEN * 200
+# JRA画面の金額欄は100円単位。Excelに金額列が無い場合はこの単位を使う。
+BET_UNIT_100YEN = 1
+BET_UNIT_YEN = BET_UNIT_100YEN * 100
 
 # Excel設定
 SHEET_NAME = "回収率重視_買い目候補"
@@ -136,7 +136,8 @@ ERRDOM = pathlib.Path("errshot_dom")
 ERRSHOT.mkdir(exist_ok=True)
 ERRDOM.mkdir(exist_ok=True)
 
-# rid_str は YYYYMMDD + 競馬場コード2桁 + レース番号2桁
+# 12桁レースIDは主に YYYY + 競馬場コード2桁 + 開催回2桁 + 開催日2桁 + レース番号2桁。
+# 末尾2桁はどの形式でもレース番号として使う。
 KEIBAJO = {
     "01": "札幌",
     "02": "函館",
@@ -160,6 +161,7 @@ class BetRow:
     place: str = ""
     race_no: int = 0
     total_amount: int = 300
+    unit_100yen: int = BET_UNIT_100YEN
 
 
 @dataclass
@@ -412,10 +414,11 @@ def load_bets_from_excel(raceday: str) -> List[BetRow]:
         place = normalize_place_name(row.get(place_col))
         race_no_int = int(rid[-2:])
 
-        if rid[:8] != raceday:
+        # netkeiba系IDでは rid[:8] は開催日ではないため、場所コードが合えば警告しない。
+        if rid[:8] != raceday and KEIBAJO.get(rid[4:6]) != place:
             print(
                 f"[WARN] {rid} {race_name}: 入力日付 {raceday} と "
-                f"レースID日付 {rid[:8]} が一致しません。場所列={place}, {race_no_int}R を使用します。"
+                f"レースID先頭8桁 {rid[:8]} が一致しません。場所列={place}, {race_no_int}R を使用します。"
             )
 
         if not place:
@@ -433,6 +436,26 @@ def load_bets_from_excel(raceday: str) -> List[BetRow]:
             )
             continue
 
+        unit_100yen = BET_UNIT_100YEN
+        total_amount = len(opponents) * BET_UNIT_YEN
+        excel_trio_amount = to_int_or_none(row.get("3連複_金額")) if "3連複_金額" in df.columns else None
+        if excel_trio_amount is not None and excel_trio_amount > 0:
+            if excel_trio_amount % len(opponents) != 0:
+                print(
+                    f"[SKIP] {rid} {race_name}: 3連複_金額を点数で割り切れません "
+                    f"amount={excel_trio_amount}, points={len(opponents)}"
+                )
+                continue
+            amount_per_point = excel_trio_amount // len(opponents)
+            if amount_per_point % 100 != 0:
+                print(
+                    f"[SKIP] {rid} {race_name}: 3連複_金額が100円単位になっていません "
+                    f"amount={excel_trio_amount}, points={len(opponents)}"
+                )
+                continue
+            unit_100yen = int(amount_per_point // 100)
+            total_amount = excel_trio_amount
+
         bets.append(
             BetRow(
                 rid=rid,
@@ -441,7 +464,8 @@ def load_bets_from_excel(raceday: str) -> List[BetRow]:
                 race_name=race_name,
                 place=place,
                 race_no=race_no_int,
-                total_amount=len(opponents) * BET_UNIT_YEN,
+                total_amount=total_amount,
+                unit_100yen=unit_100yen,
             )
         )
 
@@ -449,7 +473,7 @@ def load_bets_from_excel(raceday: str) -> List[BetRow]:
     for b in bets:
         print(
             f"  - {b.rid} {b.place}{b.race_no}R {b.race_name} "
-            f"軸={b.axes} 相手={b.opponents} 合計={b.total_amount}円"
+            f"軸={b.axes} 相手={b.opponents} 単位={b.unit_100yen} 合計={b.total_amount}円"
         )
     return bets
 
@@ -975,7 +999,7 @@ async def vote_one(page: Page, bet: BetRow, raceday: str) -> VoteResult:
         if not ok:
             return VoteResult(False)
 
-        await set_unit_and_add_to_list(page, BET_UNIT_100YEN)
+        await set_unit_and_add_to_list(page, bet.unit_100yen)
 
         limit_before = await read_purchase_limit(page)
         ok = await ensure_total_and_buy(page, bet.total_amount)
