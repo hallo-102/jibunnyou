@@ -1,0 +1,413 @@
+競馬予想AIの特徴量として、
+
+- 開催場所
+- 距離
+- 芝/ダート
+
+だけでなく、
+
+- 直線長
+- コーナー数
+- 小回り/大箱
+- 坂
+- 洋芝
+- 馬場悪化耐性
+- 脚質有利不利
+
+まで考慮するためのグループ分け。
+したいので以下の内容を反映させて。
+
+
+# ============================================================
+# 修正1：keibayosou_config.py
+# FEATURE_WEIGHTS_BASE に追加
+# 場所目安：FEATURE_WEIGHTS_BASE の "time_idx_context_value": 0.6, の直後
+# ============================================================
+
+    # 競馬場・距離グループ適性
+    "course_group_match_score": 1.0,
+    "small_turn_score": 0.8,
+    "large_turn_score": 0.5,
+    "slope_power_score": 0.6,
+    "youshiba_score": 0.8,
+    "dirt_small_turn_score": 0.8,
+    "straight_length_score": 0.5,
+    "front_bias_course_score": 0.7,
+    "late_bias_course_score": 0.5,
+    "long_spurt_score": 0.6,
+# ============================================================
+# 修正2：keibayosou_config.py
+# FEAT_COLS に追加
+# 場所目安："time_idx_context_value", の直後
+# ============================================================
+
+    # 競馬場・距離グループ適性
+    "course_group_match_score",
+    "small_turn_score",
+    "large_turn_score",
+    "slope_power_score",
+    "youshiba_score",
+    "dirt_small_turn_score",
+    "straight_length_score",
+    "front_bias_course_score",
+    "late_bias_course_score",
+    "long_spurt_score",
+# ============================================================
+# 修正3：keibayosou_config.py
+# JAPANESE_FEATURE_NAMES に追加
+# 場所目安："time_idx_context_value": "条件文脈タイム価値", の直後
+# ============================================================
+
+    # 競馬場・距離グループ適性
+    "course_group_match_score": "同系統コース適性",
+    "small_turn_score": "小回り適性",
+    "large_turn_score": "大箱適性",
+    "slope_power_score": "坂パワー適性",
+    "youshiba_score": "洋芝適性",
+    "dirt_small_turn_score": "小回りダート適性",
+    "straight_length_score": "直線長適性",
+    "front_bias_course_score": "前有利コース適性",
+    "late_bias_course_score": "差し有利コース適性",
+    "long_spurt_score": "ロングスパート適性",
+# ============================================================
+# 修正4：keibayosou_features.py
+# 追加する関数
+# 場所目安：_bucket_distance() の直後あたりに追加
+# ============================================================
+
+def _course_group_key(place: str, surface: str, dist: Optional[int]) -> str:
+    """
+    競馬場 × 芝ダ × 距離 を、予想用の同系統コースグループへ変換する。
+    """
+    p = _normalize_place_text(place)
+    s = _parse_surface(surface)
+    d = None
+    try:
+        d = int(dist) if dist is not None and not pd.isna(dist) else None
+    except Exception:
+        d = None
+
+    if d is None:
+        return ""
+
+    # 芝
+    if s == "芝":
+        if d <= 1200:
+            if p in {"函館", "札幌"}:
+                return "turf_youshiba_power_sprint"
+            if p in {"小倉", "福島"}:
+                return "turf_small_turn_speed_sprint"
+            if p == "中山":
+                return "turf_slope_power_sprint"
+            if p in {"阪神", "中京"}:
+                return "turf_power_sprint"
+            if p == "京都":
+                return "turf_flat_speed_sprint"
+            if p == "新潟":
+                return "turf_niigata_straight_or_speed"
+            return "turf_sprint"
+
+        if d <= 1400:
+            if p in {"東京", "阪神", "中京"}:
+                return "turf_large_1400"
+            if p in {"京都", "新潟"}:
+                return "turf_flat_1400"
+            return "turf_1400"
+
+        if d <= 1600:
+            if p in {"東京", "新潟"}:
+                return "turf_large_mile"
+            if p in {"京都", "阪神"}:
+                return "turf_outer_mile"
+            if p in {"中山"}:
+                return "turf_small_turn_mile"
+            if p == "中京":
+                return "turf_slope_mile"
+            return "turf_mile"
+
+        if d <= 1800:
+            if p in {"東京", "新潟", "京都"}:
+                return "turf_large_middle_1800"
+            if p in {"中山", "福島", "小倉", "函館", "札幌"}:
+                return "turf_small_turn_middle_1800"
+            if p == "阪神":
+                return "turf_slope_middle_1800"
+            return "turf_1800"
+
+        if d <= 2000:
+            if p in {"東京", "新潟"}:
+                return "turf_large_2000"
+            if p in {"函館", "札幌", "福島", "小倉"}:
+                return "turf_small_turn_2000"
+            if p in {"中山", "阪神", "京都", "中京"}:
+                return "turf_stamina_2000"
+            return "turf_2000"
+
+        if d <= 2500:
+            if p == "東京":
+                return "turf_tokyo_2400"
+            if p == "中山":
+                return "turf_nakayama_long"
+            if p == "京都":
+                return "turf_kyoto_outer_long"
+            if p == "阪神":
+                return "turf_hanshin_long"
+            return "turf_long"
+
+        if d >= 2600:
+            if p in {"函館", "札幌"}:
+                return "turf_youshiba_stamina_long"
+            if p in {"福島", "小倉"}:
+                return "turf_small_turn_stamina_long"
+            return "turf_stamina_long"
+
+    # ダート
+    if s == "ダ":
+        if d <= 1200:
+            if p in {"中山", "阪神"}:
+                return "dirt_slope_sprint"
+            if p in {"京都", "新潟"}:
+                return "dirt_flat_speed_sprint"
+            if p == "中京":
+                return "dirt_chukyo_sprint"
+            return "dirt_sprint"
+
+        if d <= 1400:
+            if p in {"東京", "中京"}:
+                return "dirt_large_1400"
+            if p in {"阪神", "京都"}:
+                return "dirt_front_1400"
+            return "dirt_1400"
+
+        if d <= 1600:
+            if p == "東京":
+                return "dirt_tokyo_1600"
+            return "dirt_mile"
+
+        if d <= 1700:
+            if p in {"函館", "札幌"}:
+                return "dirt_youshiba_small_turn_1700"
+            if p in {"福島", "小倉"}:
+                return "dirt_small_turn_1700"
+            return "dirt_1700"
+
+        if d <= 1800:
+            if p in {"中山", "阪神"}:
+                return "dirt_slope_1800"
+            if p == "京都":
+                return "dirt_flat_1800"
+            if p == "中京":
+                return "dirt_chukyo_1800"
+            if p == "新潟":
+                return "dirt_flat_front_1800"
+            return "dirt_1800"
+
+        if d <= 2100:
+            if p == "東京":
+                return "dirt_tokyo_2100"
+            if p == "中京":
+                return "dirt_chukyo_1900"
+            if p == "京都":
+                return "dirt_kyoto_1900"
+            return "dirt_stamina"
+
+    return ""
+
+
+def _course_group_tags(group: str) -> Dict[str, float]:
+    """
+    コースグループを、特徴のタグへ分解する。
+    1.0 = その特徴が強い
+    0.0 = その特徴が弱い
+    """
+    g = str(group or "")
+
+    return {
+        "small_turn": 1.0 if any(x in g for x in ["small_turn", "youshiba_power_sprint", "slope_power_sprint"]) else 0.0,
+        "large_turn": 1.0 if any(x in g for x in ["large", "tokyo_2400", "outer"]) else 0.0,
+        "slope_power": 1.0 if any(x in g for x in ["slope", "power", "stamina"]) else 0.0,
+        "youshiba": 1.0 if "youshiba" in g else 0.0,
+        "dirt_small_turn": 1.0 if g.startswith("dirt") and "small_turn" in g else 0.0,
+        "short_straight": 1.0 if any(x in g for x in ["small_turn", "sprint", "1700"]) else 0.0,
+        "long_straight": 1.0 if any(x in g for x in ["large", "tokyo", "chukyo"]) else 0.0,
+        "front_bias": 1.0 if any(x in g for x in ["small_turn", "sprint", "front", "flat_speed"]) else 0.0,
+        "late_bias": 1.0 if any(x in g for x in ["large", "outer", "tokyo", "chukyo"]) else 0.0,
+        "long_spurt": 1.0 if any(x in g for x in ["stamina", "long", "2000", "2400", "2600"]) else 0.0,
+    }
+
+
+def _course_group_compatibility(now_group: str, past_group: str) -> float:
+    """
+    今走グループと過去走グループの近さを 0〜1 で返す。
+    """
+    if not now_group or not past_group:
+        return 0.0
+
+    if now_group == past_group:
+        return 1.0
+
+    now_tags = _course_group_tags(now_group)
+    past_tags = _course_group_tags(past_group)
+
+    keys = list(now_tags.keys())
+    if not keys:
+        return 0.0
+
+    same = 0.0
+    active = 0.0
+
+    for k in keys:
+        if now_tags.get(k, 0.0) > 0:
+            active += 1.0
+            if past_tags.get(k, 0.0) > 0:
+                same += 1.0
+
+    if active <= 0:
+        return 0.0
+
+    return float(same / active)
+
+
+def _calc_course_group_features(
+    one: pd.DataFrame,
+    now_place: str,
+    now_surface: str,
+    now_dist: Optional[int],
+) -> Dict[str, float]:
+    """
+    過去走が、今走と似た競馬場・距離グループで走れているかを特徴量化する。
+    """
+    empty_result = {
+        "course_group_match_score": 0.0,
+        "small_turn_score": 0.0,
+        "large_turn_score": 0.0,
+        "slope_power_score": 0.0,
+        "youshiba_score": 0.0,
+        "dirt_small_turn_score": 0.0,
+        "straight_length_score": 0.0,
+        "front_bias_course_score": 0.0,
+        "late_bias_course_score": 0.0,
+        "long_spurt_score": 0.0,
+    }
+
+    if one is None or one.empty:
+        return empty_result
+
+    now_group = _course_group_key(now_place, now_surface, now_dist)
+    if not now_group:
+        return empty_result
+
+    now_tags = _course_group_tags(now_group)
+
+    place_s = one.get("__place__", pd.Series([""] * len(one), index=one.index)).fillna("").astype(str)
+    surface_s = one.get("__surface__", pd.Series([""] * len(one), index=one.index)).fillna("").astype(str)
+    dist_s = pd.to_numeric(one.get("__dist__", pd.Series([np.nan] * len(one), index=one.index)), errors="coerce")
+
+    past_groups = []
+    for idx in one.index:
+        past_groups.append(
+            _course_group_key(
+                place=str(place_s.loc[idx]),
+                surface=str(surface_s.loc[idx]),
+                dist=int(dist_s.loc[idx]) if pd.notna(dist_s.loc[idx]) else None,
+            )
+        )
+
+    past_groups_s = pd.Series(past_groups, index=one.index).fillna("").astype(str)
+    valid_groups = past_groups_s[past_groups_s != ""]
+
+    if valid_groups.empty:
+        return empty_result
+
+    compat_s = valid_groups.map(lambda g: _course_group_compatibility(now_group, g))
+    course_group_match_score = float(compat_s.mean()) if not compat_s.empty else 0.0
+
+    tag_rows = []
+    for g in valid_groups:
+        tag_rows.append(_course_group_tags(g))
+
+    tag_df = pd.DataFrame(tag_rows)
+    if tag_df.empty:
+        return empty_result
+
+    def _fit_score(tag_name: str) -> float:
+        if now_tags.get(tag_name, 0.0) <= 0:
+            return 0.0
+        if tag_name not in tag_df.columns:
+            return 0.0
+        return float(pd.to_numeric(tag_df[tag_name], errors="coerce").fillna(0.0).mean())
+
+    short_fit = _fit_score("short_straight")
+    long_fit = _fit_score("long_straight")
+
+    # 今走が短直線なら short_fit、長直線なら long_fit を使う
+    if now_tags.get("short_straight", 0.0) > 0:
+        straight_length_score = short_fit
+    elif now_tags.get("long_straight", 0.0) > 0:
+        straight_length_score = long_fit
+    else:
+        straight_length_score = 0.0
+
+    return {
+        "course_group_match_score": course_group_match_score,
+        "small_turn_score": _fit_score("small_turn"),
+        "large_turn_score": _fit_score("large_turn"),
+        "slope_power_score": _fit_score("slope_power"),
+        "youshiba_score": _fit_score("youshiba"),
+        "dirt_small_turn_score": _fit_score("dirt_small_turn"),
+        "straight_length_score": float(straight_length_score),
+        "front_bias_course_score": _fit_score("front_bias"),
+        "late_bias_course_score": _fit_score("late_bias"),
+        "long_spurt_score": _fit_score("long_spurt"),
+    }
+# ============================================================
+# 修正5：keibayosou_features.py
+# _compute_horse_features_from_race_sheets 内に追加
+#
+# 場所目安：
+# context_feats = _calc_contextual_last3f_features(...)
+# の直後に追加
+# ============================================================
+
+            course_group_feats = _calc_course_group_features(
+                one=one,
+                now_place=now_place,
+                now_surface=now_surface,
+                now_dist=now_dist,
+            )
+# ============================================================
+# 修正6：keibayosou_features.py
+# rows.append({...}) の中に追加
+#
+# 場所目安：
+# "time_idx_context_value": context_feats["time_idx_context_value"],
+# の直後に追加
+# ============================================================
+
+                    # 競馬場・距離グループ適性
+                    "course_group_match_score": course_group_feats["course_group_match_score"],
+                    "small_turn_score": course_group_feats["small_turn_score"],
+                    "large_turn_score": course_group_feats["large_turn_score"],
+                    "slope_power_score": course_group_feats["slope_power_score"],
+                    "youshiba_score": course_group_feats["youshiba_score"],
+                    "dirt_small_turn_score": course_group_feats["dirt_small_turn_score"],
+                    "straight_length_score": course_group_feats["straight_length_score"],
+                    "front_bias_course_score": course_group_feats["front_bias_course_score"],
+                    "late_bias_course_score": course_group_feats["late_bias_course_score"],
+                    "long_spurt_score": course_group_feats["long_spurt_score"],
+これで追加される考え方：
+
+1. 函館芝1200と札幌芝1200を同系統として評価
+2. 小倉芝1200・福島芝1200も小回り短距離として部分評価
+3. 東京・新潟外回りのような大箱コースは別系統として評価
+4. 中山・阪神・中京の坂適性を別評価
+5. 函館・札幌の洋芝適性を別評価
+6. ダート1700の小回り適性も別評価
+7. 直線長、前有利、差し有利、ロングスパート適性も数値化
+
+keibayosou_best_import_roi_runner.py は修正不要。
+ただし、実行時にこの2ファイルが読み込まれる必要があります。
+
+修正対象：
+- keibayosou_config.py
+- keibayosou_features.py
