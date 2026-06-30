@@ -41,6 +41,11 @@ node_modules/
 # reports配下のnode_modulesを明示的に除外
 reports/node_modules/
 
+# Codex auto-backtest local implementation and run artifacts
+docs/auto_backtest_design_spec.md
+reports/auto_backtest_runs/
+reports/backtest_history.jsonl
+
 # Python
 __pycache__/
 *.pyc
