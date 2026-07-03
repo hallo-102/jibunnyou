@@ -14,12 +14,12 @@ JRA オッズ一括スクレイパー NAS Docker対応版
     6. 既存のスクレイピング方法は基本そのまま維持
 
 実行例:
-    python3 02_scrape_jra_odds_2.py 20260606
-    python3 02_scrape_jra_odds_2.py
-    python3 02_scrape_jra_odds_2.py 20260606 --show
+    python3 1_02_scrape_jra_odds_2.py 20260606
+    python3 1_02_scrape_jra_odds_2.py
+    python3 1_02_scrape_jra_odds_2.py 20260606 --show
 
 NAS Docker実行例:
-    sudo docker run --rm -v /volume1/docker/keiba_yosou_2026:/workspace -w /workspace/app keiba-yosou-python:latest python3 02_scrape_jra_odds_2.py 20260606
+    sudo docker run --rm -v /volume1/docker/keiba_yosou_2026:/workspace -w /workspace/app keiba-yosou-python:latest python3 1_02_scrape_jra_odds_2.py 20260606
 """
 
 import argparse
@@ -81,7 +81,7 @@ def get_base_dir() -> Path:
         2. Docker内の /workspace
         3. このファイルの親フォルダの1つ上
            例:
-             app/02_scrape_jra_odds_2.py
+             app/1_02_scrape_jra_odds_2.py
              → プロジェクトルート
     """
     env_base = os.getenv("KEIBA_BASE_DIR")
@@ -115,8 +115,8 @@ def normalize_argv(argv: List[str]) -> List[str]:
     旧コード互換のため、裸の show を --show に置き換える。
 
     例:
-        python3 02_scrape_jra_odds_2.py show
-        python3 02_scrape_jra_odds_2.py 20260606 show
+        python3 1_02_scrape_jra_odds_2.py show
+        python3 1_02_scrape_jra_odds_2.py 20260606 show
     """
     normalized = []
     for arg in argv:

@@ -1,9 +1,9 @@
 # =========================
-# keibayosou_pipeline.py
+# 1_keibayosou_pipeline.py
 # =========================
 # penalties（新規ファイル）を呼び出す形に整理した完全版。
 # 旧：pipeline内に _calc_extra_penalty / _calc_rest_dist_risk を直書き
-# 新：keibayosou_penalties.py に分離し、ここは「流れ」に集中
+# 新：1_keibayosou_penalties.py に分離し、ここは「流れ」に集中
 #
 # 今回の追加修正:
 # - レース登録馬の過去走情報が不足しているレースを予想対象から除外
@@ -25,11 +25,31 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import re
 import shutil
+import sys
 from datetime import datetime
 from typing import Dict, Optional, Tuple
+
+
+def _register_renamed_keibayosou_modules() -> None:
+    """1_ 始まりへリネームした自作モジュールを、旧import名でも参照できるようにする。"""
+    module_aliases = [
+        ("keibayosou_config", "1_keibayosou_config"),
+        ("keibayosou_utils", "1_keibayosou_utils"),
+        ("keibayosou_course_style", "1_keibayosou_course_style"),
+        ("keibayosou_loaders", "1_keibayosou_loaders"),
+        ("keibayosou_features", "1_keibayosou_features"),
+        ("keibayosou_penalties", "1_keibayosou_penalties"),
+    ]
+    for old_name, new_name in module_aliases:
+        if old_name not in sys.modules:
+            sys.modules[old_name] = importlib.import_module(new_name)
+
+
+_register_renamed_keibayosou_modules()
 
 import numpy as np
 import pandas as pd

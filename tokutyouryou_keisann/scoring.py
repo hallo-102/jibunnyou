@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -35,7 +36,8 @@ from .config import (
 
 # 本番 pipeline と optimizer 側の score 式を揃えるために使う
 try:
-    from keibayosou_config import DL_SCORE_BONUS
+    _keibayosou_config = importlib.import_module("1_keibayosou_config")
+    DL_SCORE_BONUS = _keibayosou_config.DL_SCORE_BONUS
 except Exception:
     DL_SCORE_BONUS = 10.0
 

@@ -19,7 +19,7 @@
 
 
 # ============================================================
-# 修正1：keibayosou_config.py
+# 修正1：1_keibayosou_config.py
 # FEATURE_WEIGHTS_BASE に追加
 # 場所目安：FEATURE_WEIGHTS_BASE の "time_idx_context_value": 0.6, の直後
 # ============================================================
@@ -36,7 +36,7 @@
     "late_bias_course_score": 0.5,
     "long_spurt_score": 0.6,
 # ============================================================
-# 修正2：keibayosou_config.py
+# 修正2：1_keibayosou_config.py
 # FEAT_COLS に追加
 # 場所目安："time_idx_context_value", の直後
 # ============================================================
@@ -53,7 +53,7 @@
     "late_bias_course_score",
     "long_spurt_score",
 # ============================================================
-# 修正3：keibayosou_config.py
+# 修正3：1_keibayosou_config.py
 # JAPANESE_FEATURE_NAMES に追加
 # 場所目安："time_idx_context_value": "条件文脈タイム価値", の直後
 # ============================================================
@@ -70,7 +70,7 @@
     "late_bias_course_score": "差し有利コース適性",
     "long_spurt_score": "ロングスパート適性",
 # ============================================================
-# 修正4：keibayosou_features.py
+# 修正4：1_keibayosou_features.py
 # 追加する関数
 # 場所目安：_bucket_distance() の直後あたりに追加
 # ============================================================
@@ -361,7 +361,7 @@ def _calc_course_group_features(
         "long_spurt_score": _fit_score("long_spurt"),
     }
 # ============================================================
-# 修正5：keibayosou_features.py
+# 修正5：1_keibayosou_features.py
 # _compute_horse_features_from_race_sheets 内に追加
 #
 # 場所目安：
@@ -376,7 +376,7 @@ def _calc_course_group_features(
                 now_dist=now_dist,
             )
 # ============================================================
-# 修正6：keibayosou_features.py
+# 修正6：1_keibayosou_features.py
 # rows.append({...}) の中に追加
 #
 # 場所目安：
@@ -405,9 +405,9 @@ def _calc_course_group_features(
 6. ダート1700の小回り適性も別評価
 7. 直線長、前有利、差し有利、ロングスパート適性も数値化
 
-keibayosou_best_import_roi_runner.py は修正不要。
+1_keibayosou_best_import_roi_runner.py は修正不要。
 ただし、実行時にこの2ファイルが読み込まれる必要があります。
 
 修正対象：
-- keibayosou_config.py
-- keibayosou_features.py
+- 1_keibayosou_config.py
+- 1_keibayosou_features.py

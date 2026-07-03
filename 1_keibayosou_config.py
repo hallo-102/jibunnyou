@@ -1,5 +1,5 @@
 # ============================================================
-# keibayosou_config.py（完全コード）
+# 1_keibayosou_config.py（完全コード）
 # 修正内容：
 # - race_levels.xlsx / 場所_馬場_タイム.xlsx を複数候補から自動検出
 # - 既存 pipeline 互換用に DL_PROB_BLEND などを追加
@@ -25,7 +25,7 @@ import importlib.util  # best_feature_weights_YYYYMMDD.py 動的読込用
 TARGET_SHEET = "TARGET"           # 特徴量を出力するシート名
 NOW_SHEET = "今走レース情報"      # 今走用シート名
 
-# horses シート名（keibayosou_features.py が参照）
+# horses シート名（1_keibayosou_features.py が参照）
 HORSES_SHEET = "horses"
 
 # 出力用カラム（互換用：存在しても未使用なら問題なし）
@@ -98,7 +98,7 @@ SUCCESS_REPORT = EXCEL_DIR / "success_report.xlsx"
 # ================================================================
 # 既存 pipeline 互換設定
 # ================================================================
-# keibayosou_pipeline.py が import しているため必須
+# 1_keibayosou_pipeline.py が import しているため必須
 DL_PROB_BLEND = 0.35
 DL_RANK_BLEND = 0.00
 DL_SCORE_BONUS = 10.0

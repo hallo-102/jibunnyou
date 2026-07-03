@@ -1,6 +1,7 @@
 # config.py
 from __future__ import annotations
 
+import importlib
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -54,34 +55,35 @@ PY_DIR = _detect_py_dir(PROJECT_ROOT)
 RACE_LEVEL_XLSX = PROJECT_ROOT / "data" / "master" / "race_levels.xlsx"
 
 try:
-    from keibayosou_penalties import calc_rest_dist_risk, calc_extra_penalty
+    _keibayosou_penalties = importlib.import_module("1_keibayosou_penalties")
+    calc_rest_dist_risk = _keibayosou_penalties.calc_rest_dist_risk
+    calc_extra_penalty = _keibayosou_penalties.calc_extra_penalty
 except Exception:
     calc_rest_dist_risk = None
     calc_extra_penalty = None
 
 try:
-    from keibayosou_config import (
-        ALPHA as PIPE_ALPHA,
-        BASE_TIME_XLSX,
-        ODDS_CSV,
-        EXTRA_ALPHA as PIPE_EXTRA_ALPHA,
-        PEN_FAV_POP_TH,
-        PEN_FAV_POP_K,
-        PEN_FAV_POP_APPLY_WINRATE_MAX,
-        PEN_GOOD_LOSER_L,
-        PEN_GOOD_LOSER_H,
-        PEN_GOOD_LOSER_K,
-        PEN_GOOD_LOSER_APPLY_WINRATE_MAX,
-        PEN_TA_N_CAP,
-        PEN_TA_N_K,
-        PEN_CLOSE_LOSS_FINISH_TH,
-        PEN_CLOSE_LOSS_MARGIN_TH,
-        PEN_CLOSE_LOSS_K,
-        PEN_CLOSE_LOSS_APPLY_WINRATE_MAX,
-        EMPIRICAL_WEIGHT_SIGN_GUARD,
-        FEAT_COLS as PIPE_FEAT_COLS,
-        FEATURE_WEIGHTS_BASE as PIPE_FEATURE_WEIGHTS_BASE,
-    )
+    _keibayosou_config = importlib.import_module("1_keibayosou_config")
+    PIPE_ALPHA = _keibayosou_config.ALPHA
+    BASE_TIME_XLSX = _keibayosou_config.BASE_TIME_XLSX
+    ODDS_CSV = _keibayosou_config.ODDS_CSV
+    PIPE_EXTRA_ALPHA = _keibayosou_config.EXTRA_ALPHA
+    PEN_FAV_POP_TH = _keibayosou_config.PEN_FAV_POP_TH
+    PEN_FAV_POP_K = _keibayosou_config.PEN_FAV_POP_K
+    PEN_FAV_POP_APPLY_WINRATE_MAX = _keibayosou_config.PEN_FAV_POP_APPLY_WINRATE_MAX
+    PEN_GOOD_LOSER_L = _keibayosou_config.PEN_GOOD_LOSER_L
+    PEN_GOOD_LOSER_H = _keibayosou_config.PEN_GOOD_LOSER_H
+    PEN_GOOD_LOSER_K = _keibayosou_config.PEN_GOOD_LOSER_K
+    PEN_GOOD_LOSER_APPLY_WINRATE_MAX = _keibayosou_config.PEN_GOOD_LOSER_APPLY_WINRATE_MAX
+    PEN_TA_N_CAP = _keibayosou_config.PEN_TA_N_CAP
+    PEN_TA_N_K = _keibayosou_config.PEN_TA_N_K
+    PEN_CLOSE_LOSS_FINISH_TH = _keibayosou_config.PEN_CLOSE_LOSS_FINISH_TH
+    PEN_CLOSE_LOSS_MARGIN_TH = _keibayosou_config.PEN_CLOSE_LOSS_MARGIN_TH
+    PEN_CLOSE_LOSS_K = _keibayosou_config.PEN_CLOSE_LOSS_K
+    PEN_CLOSE_LOSS_APPLY_WINRATE_MAX = _keibayosou_config.PEN_CLOSE_LOSS_APPLY_WINRATE_MAX
+    EMPIRICAL_WEIGHT_SIGN_GUARD = _keibayosou_config.EMPIRICAL_WEIGHT_SIGN_GUARD
+    PIPE_FEAT_COLS = _keibayosou_config.FEAT_COLS
+    PIPE_FEATURE_WEIGHTS_BASE = _keibayosou_config.FEATURE_WEIGHTS_BASE
 except Exception:
     BASE_TIME_XLSX = PROJECT_ROOT / "data" / "master" / "base_time.xlsx"
     ODDS_CSV = PROJECT_ROOT / "csv"
@@ -190,7 +192,7 @@ OPTIMIZER_FIXED_ZERO_FEATURES = {
     "long_straight_late_bonus",
 }
 
-# 本番側 keibayosou_config.py の FEAT_COLS と揃える
+# 本番側 1_keibayosou_config.py の FEAT_COLS と揃える
 FEAT_COLS: List[str] = [
     "avg_finish",
     "avg_pop",

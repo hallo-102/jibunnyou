@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 """
-keibayosou_features.py（完全版）
+1_keibayosou_features.py（完全版）
 
 提供する関数（pipeline が import しているもの）
 - apply_weights
@@ -24,11 +24,28 @@ keibayosou_features.py（完全版）
 修正必要箇所以外は既存のまま
 """
 
+import importlib
+import sys
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import re
 import numpy as np
 import pandas as pd
+
+
+def _register_renamed_keibayosou_modules() -> None:
+    """1_ 始まりへリネームした自作モジュールを、旧import名でも参照できるようにする。"""
+    module_aliases = [
+        ("keibayosou_config", "1_keibayosou_config"),
+        ("keibayosou_utils", "1_keibayosou_utils"),
+        ("keibayosou_course_style", "1_keibayosou_course_style"),
+    ]
+    for old_name, new_name in module_aliases:
+        if old_name not in sys.modules:
+            sys.modules[old_name] = importlib.import_module(new_name)
+
+
+_register_renamed_keibayosou_modules()
 
 from keibayosou_course_style import (
     calc_course_style_features,
@@ -1077,7 +1094,7 @@ def score_sum(weighted_feats: Dict[str, float]) -> float:
 def normalize_score(x: pd.Series) -> pd.Series:
     """
     レース内で正規化（Z→0〜100の雰囲気にする）
-    ※keibayosou_pipeline.py 側で groupby(transform) される想定
+    ※1_keibayosou_pipeline.py 側で groupby(transform) される想定
     """
     z = _safe_z(pd.to_numeric(x, errors="coerce").fillna(0.0))
     return (50.0 + 10.0 * z).clip(lower=0.0, upper=100.0)

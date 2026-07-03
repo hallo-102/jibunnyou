@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-keibayosou_utils.py（完全版）
+1_keibayosou_utils.py（完全版）
 
 いまの状況：
-- keibayosou_features.py から
+- 1_keibayosou_features.py から
   _ensure_rid_str と _normalize_place_surface を import しようとしている
 - しかし、あなたが上書きした utils.py には
   _normalize_place_surface が無くて ImportError になっていました
 
-このファイルは、あなたがアップロードした keibayosou_utils.py をベースに
+このファイルは、あなたがアップロードした 1_keibayosou_utils.py をベースに
 ✅ _normalize_place_surface を「追記」して
 ✅ 既存の関数は消さずに
 “完全な全体コード”としてまとめたものです。

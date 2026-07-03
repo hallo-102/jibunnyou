@@ -11,7 +11,7 @@ description: 競馬予想コードを変更したあと、過去約3ヶ月分の
 
 ## 2. CodexがこのSkillを使うべきタイミング
 
-ユーザーが「予想コードを変更した」「過去3ヶ月を回して」「ランキング成績が改善したか」「前回精度と比較して」と依頼したら、このSkillを使う。対象は主に `keibayosou_best_import_roi_runner.py`、`keibayosou_utils.py`、`keibayosou_pipeline.py`、`keibayosou_penalties.py`、`keibayosou_loaders.py`、`keibayosou_features.py`、`keibayosou_config.py` だが、実ファイル名は存在確認と探索で判断する。
+ユーザーが「予想コードを変更した」「過去3ヶ月を回して」「ランキング成績が改善したか」「前回精度と比較して」と依頼したら、このSkillを使う。対象は主に `1_keibayosou_best_import_roi_runner.py`、`1_keibayosou_utils.py`、`1_keibayosou_pipeline.py`、`1_keibayosou_penalties.py`、`1_keibayosou_loaders.py`、`1_keibayosou_features.py`、`1_keibayosou_config.py` だが、実ファイル名は存在確認と探索で判断する。
 
 ## 3. 実行前チェック
 
@@ -45,7 +45,7 @@ description: 競馬予想コードを変更したあと、過去約3ヶ月分の
 
 ## 7. 予想コードの実行方法
 
-`run_3month_predictions.py` は、設定された `prediction_command` を最優先する。コマンドには `{date}`、`{input_file}`、`{output_dir}`、`{project_root}`、`{python}` を埋め込める。指定がない場合は `keibayosou_best_import_roi_runner.py` などの候補を探索し、日付、入力Excel、出力ディレクトリを引数として実行する。実プロジェクトのRunner引数が異なる場合は、必ず設定JSONで `prediction_command` を指定する。
+`run_3month_predictions.py` は、設定された `prediction_command` を最優先する。コマンドには `{date}`、`{input_file}`、`{output_dir}`、`{project_root}`、`{python}` を埋め込める。指定がない場合は `1_keibayosou_best_import_roi_runner.py` などの候補を探索し、日付、入力Excel、出力ディレクトリを引数として実行する。実プロジェクトのRunner引数が異なる場合は、必ず設定JSONで `prediction_command` を指定する。
 
 ## 8. 出力Excelの探し方
 

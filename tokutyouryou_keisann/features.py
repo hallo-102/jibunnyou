@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import importlib
 import os
 import re
 from functools import lru_cache
@@ -10,14 +11,18 @@ from typing import Any, Dict, Tuple
 import numpy as np
 import pandas as pd
 
-from keibayosou_features import (
-    _normalize_rid_series,
-    _normalize_umaban_series,
-    build_calc_favorite_risk,
-    build_features_from_excel,
-)
-from keibayosou_loaders import load_base_time, load_odds_csv, load_race_levels
-from keibayosou_utils import _to_int
+_keibayosou_features = importlib.import_module("1_keibayosou_features")
+_keibayosou_loaders = importlib.import_module("1_keibayosou_loaders")
+_keibayosou_utils = importlib.import_module("1_keibayosou_utils")
+
+_normalize_rid_series = _keibayosou_features._normalize_rid_series
+_normalize_umaban_series = _keibayosou_features._normalize_umaban_series
+build_calc_favorite_risk = _keibayosou_features.build_calc_favorite_risk
+build_features_from_excel = _keibayosou_features.build_features_from_excel
+load_base_time = _keibayosou_loaders.load_base_time
+load_odds_csv = _keibayosou_loaders.load_odds_csv
+load_race_levels = _keibayosou_loaders.load_race_levels
+_to_int = _keibayosou_utils._to_int
 
 from .common import _norm_name, _normalize_surface_name
 from .config import (
@@ -31,7 +36,9 @@ from .config import (
 )
 
 try:
-    from keibayosou_config import DL_PROB_BLEND, DL_RANK_BLEND
+    _keibayosou_config = importlib.import_module("1_keibayosou_config")
+    DL_PROB_BLEND = _keibayosou_config.DL_PROB_BLEND
+    DL_RANK_BLEND = _keibayosou_config.DL_RANK_BLEND
 except Exception:
     DL_PROB_BLEND = 0.35
     DL_RANK_BLEND = 0.0
@@ -56,12 +63,11 @@ def _load_dl_model_cache():
     本番予想と同じDLモデルを最適化用データ作成でも使う。
     学習は重いので、プロセス内で1回だけ実行する。
     """
-    from keibayosou_best_import_roi_runner import (
-        DL_FEATURE_COLS,
-        TRAIN_XLSX,
-        _build_training_dataframe,
-        _train_model,
-    )
+    best_runner = importlib.import_module("1_keibayosou_best_import_roi_runner")
+    DL_FEATURE_COLS = best_runner.DL_FEATURE_COLS
+    TRAIN_XLSX = best_runner.TRAIN_XLSX
+    _build_training_dataframe = best_runner._build_training_dataframe
+    _train_model = best_runner._train_model
 
     train_path = Path(str(CONFIG.get("RESULTS_FILE") or TRAIN_XLSX))
     if not train_path.exists():
@@ -315,7 +321,8 @@ def _attach_dl_features(merged: pd.DataFrame, feat_df: pd.DataFrame) -> pd.DataF
     out = feat_df.copy()
 
     try:
-        from keibayosou_best_import_roi_runner import _predict_dl_rank
+        best_runner = importlib.import_module("1_keibayosou_best_import_roi_runner")
+        _predict_dl_rank = best_runner._predict_dl_rank
 
         model, mean, std = _load_dl_model_cache()
         dl_df = _predict_dl_rank(model, mean, std, merged.copy())

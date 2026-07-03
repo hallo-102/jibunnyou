@@ -1,5 +1,5 @@
 # =========================
-# keibayosou_penalties.py
+# 1_keibayosou_penalties.py
 # =========================
 # 目的：
 # - 「条件付きペナルティ（extra_penalty）」と
@@ -17,9 +17,20 @@
 
 from __future__ import annotations
 
+import importlib
+import sys
 from typing import Optional
 
 import pandas as pd
+
+
+def _register_renamed_keibayosou_modules() -> None:
+    """1_ 始まりへリネームした自作モジュールを、旧import名でも参照できるようにする。"""
+    if "keibayosou_config" not in sys.modules:
+        sys.modules["keibayosou_config"] = importlib.import_module("1_keibayosou_config")
+
+
+_register_renamed_keibayosou_modules()
 
 from keibayosou_config import (
     # A-1) 人気常連
@@ -104,7 +115,7 @@ def calc_rest_dist_risk(row: pd.Series) -> float:
     - 距離差が大きい（閾値超え）ほど危険
     - 2つを掛け算して、両方が揃ったときに強く効く
 
-    設定値は keibayosou_config.py の以下を使います：
+    設定値は 1_keibayosou_config.py の以下を使います：
     - REST_RISK_TH_DAYS / REST_RISK_MAX_DAYS
     - DIST_RISK_TH_M / DIST_RISK_MAX_M
     - REST_DIST_RISK_K

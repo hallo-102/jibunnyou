@@ -760,7 +760,7 @@ def main() -> None:
     print(f"[INFO] RACE_LEVEL_XLSX={RACE_LEVEL_XLSX}")
 
     if calc_extra_penalty is None or calc_rest_dist_risk is None:
-        print("[WARN] keibayosou_penalties.py を import できませんでした。フォールバックで動きます。")
+        print("[WARN] 1_keibayosou_penalties.py を import できませんでした。フォールバックで動きます。")
     else:
         print("[INFO] penalties.py を使用します。")
 

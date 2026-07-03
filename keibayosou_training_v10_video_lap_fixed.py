@@ -10,7 +10,7 @@ keibayosou_training_v7_full_training_history.py
 
 想定する使い方:
 1) まず単体で実行して調教スコアExcelを作る
-2) 後で keibayosou_pipeline.py 側で TARGET / 今走レース情報 に merge する
+2) 後で 1_keibayosou_pipeline.py 側で TARGET / 今走レース情報 に merge する
 
 注意:
 - netkeiba はページ構造が変わることがあります。
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import importlib
 import os
 import re
 import time
@@ -42,13 +43,17 @@ from bs4 import BeautifulSoup
 # 既存pyから流用する設定・関数
 # ============================================================
 try:
-    from keibayosou_config import NOW_SHEET, HORSES_SHEET
+    _keibayosou_config = importlib.import_module("1_keibayosou_config")
+    NOW_SHEET = _keibayosou_config.NOW_SHEET
+    HORSES_SHEET = _keibayosou_config.HORSES_SHEET
 except Exception:
     NOW_SHEET = "今走レース情報"
     HORSES_SHEET = "horses"
 
 try:
-    from keibayosou_utils import _retry_session, _ensure_rid_str
+    _keibayosou_utils = importlib.import_module("1_keibayosou_utils")
+    _retry_session = _keibayosou_utils._retry_session
+    _ensure_rid_str = _keibayosou_utils._ensure_rid_str
 except Exception:
     _retry_session = None
 
@@ -63,7 +68,9 @@ except Exception:
         return df
 
 try:
-    from keibayosou_features import _normalize_rid_series, _normalize_umaban_series
+    _keibayosou_features = importlib.import_module("1_keibayosou_features")
+    _normalize_rid_series = _keibayosou_features._normalize_rid_series
+    _normalize_umaban_series = _keibayosou_features._normalize_umaban_series
 except Exception:
     def _normalize_rid_series(s: pd.Series) -> pd.Series:
         def one(v: Any) -> str:
@@ -226,7 +233,8 @@ def _find_credentials_ini(explicit_path: str = "") -> Optional[Path]:
     )
 
     try:
-        from keibayosou_config import INI_DIR  # type: ignore
+        _keibayosou_config = importlib.import_module("1_keibayosou_config")
+        INI_DIR = _keibayosou_config.INI_DIR
         candidates.append(Path(INI_DIR) / "credentials.ini")
     except Exception:
         pass
@@ -1759,7 +1767,7 @@ def append_training_scores_to_excel(
 def merge_training_scores(base_df: pd.DataFrame, training_score_df: pd.DataFrame) -> pd.DataFrame:
     """
     TARGET や 今走レース情報 に調教スコア列を結合するための関数。
-    後で keibayosou_pipeline.py から import して使える形にしている。
+    後で 1_keibayosou_pipeline.py から import して使える形にしている。
     """
     if base_df is None or base_df.empty:
         return base_df

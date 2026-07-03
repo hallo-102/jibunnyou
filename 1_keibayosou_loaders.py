@@ -3,12 +3,23 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import re
+import sys
 import unicodedata
 from typing import Optional, Dict, List, Tuple, Any
 
 import pandas as pd
+
+
+def _register_renamed_keibayosou_modules() -> None:
+    """1_ 始まりへリネームした自作モジュールを、旧import名でも参照できるようにする。"""
+    if "keibayosou_utils" not in sys.modules:
+        sys.modules["keibayosou_utils"] = importlib.import_module("1_keibayosou_utils")
+
+
+_register_renamed_keibayosou_modules()
 
 from keibayosou_utils import _normalize_place, _normalize_surface, _to_int
 
@@ -444,7 +455,7 @@ def load_odds_csv(path: str, raceday: Optional[str] = None) -> pd.DataFrame:
         out = out.dropna(subset=["tansho"])
         return out
 
-    # 3) OZZU形式なら変換（あなたの 02_scrape_jra_odds_2.py の出力に対応）
+    # 3) OZZU形式なら変換（あなたの 1_02_scrape_jra_odds_2.py の出力に対応）
     ozzu_need = {"date", "racecourse", "race", "bet_type", "combination", "odds"}
     if ozzu_need.issubset(set(df.columns)):
         return _convert_ozzu_to_odds(df, raceday=raceday)

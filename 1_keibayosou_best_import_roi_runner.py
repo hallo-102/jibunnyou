@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-keibayosou_best_import_roi_runner.py
+1_keibayosou_best_import_roi_runner.py
 
 やりたいこと
 - 1回目: 元の入力Excelから特徴量計算して with_feat を作る
@@ -8,13 +8,13 @@ keibayosou_best_import_roi_runner.py
 - 2回目: dl_rank / dl_prob をメモリ渡しして最終予想Excelを作る
 
 このコードでは、
-1) keibayosou_best_import_roi_runner.py を1回目実行
+1) 1_keibayosou_best_import_roi_runner.py を1回目実行
 2) make_dl_rank_from_racedata_results.py 相当のDL順位作成
-3) keibayosou_best_import_roi_runner.py の2回目予想
+3) 1_keibayosou_best_import_roi_runner.py の2回目予想
 
 という3回実行を、
 
-keibayosou_best_import_roi_runner.py の1回実行
+1_keibayosou_best_import_roi_runner.py の1回実行
 
 だけで完了できるようにしています。
 
@@ -26,8 +26,10 @@ keibayosou_best_import_roi_runner.py の1回実行
 
 from __future__ import annotations
 
+import importlib
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -37,6 +39,25 @@ import torch
 from openpyxl import load_workbook
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
+
+
+def _register_renamed_keibayosou_modules() -> None:
+    """1_ 始まりへリネームした自作モジュールを、旧import名でも参照できるようにする。"""
+    module_aliases = [
+        ("keibayosou_config", "1_keibayosou_config"),
+        ("keibayosou_utils", "1_keibayosou_utils"),
+        ("keibayosou_course_style", "1_keibayosou_course_style"),
+        ("keibayosou_loaders", "1_keibayosou_loaders"),
+        ("keibayosou_features", "1_keibayosou_features"),
+        ("keibayosou_penalties", "1_keibayosou_penalties"),
+        ("keibayosou_pipeline", "1_keibayosou_pipeline"),
+    ]
+    for old_name, new_name in module_aliases:
+        if old_name not in sys.modules:
+            sys.modules[old_name] = importlib.import_module(new_name)
+
+
+_register_renamed_keibayosou_modules()
 
 from keibayosou_config import BASE_DIR, HORSE_RESULTS_DIR, RACE_LEVEL_XLSX, BASE_TIME_XLSX, ODDS_CSV
 from keibayosou_loaders import load_odds_csv
@@ -49,7 +70,7 @@ from keibayosou_utils import _normalize_place
 # ============================================================
 OUTPUT_DIR = BASE_DIR / "data" / "output"
 TRAIN_XLSX = BASE_DIR / "data" / "master" / "racedata_results.xlsx"
-OZZU_SCRAPER_SCRIPT = BASE_DIR / "etc_py" / "02_scrape_jra_odds_2.py"
+OZZU_SCRAPER_SCRIPT = BASE_DIR / "etc_py" / "1_02_scrape_jra_odds_2.py"
 NOW_SHEET = "今走レース情報"
 TARGET_SHEET = "TARGET"
 EST_IN3_SHEET = "推定馬券内率"
