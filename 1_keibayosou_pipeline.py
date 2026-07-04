@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 from datetime import datetime
 from typing import Dict, Optional, Tuple
 
@@ -438,42 +439,134 @@ def _race_no_from_race_key(x: object) -> str:
     return m.group(1) if m else ""
 
 
+def _normalize_horse_name_for_odds_key(x: object) -> str:
+    """オッズ照合キー用に馬名の全角半角・空白ゆらぎを吸収する。"""
+    if x is None:
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except Exception:
+        pass
+    s = unicodedata.normalize("NFKC", str(x))
+    s = re.sub(r"[\s\u3000]+", "", s)
+    return s.strip()
+
+
+def _extract_yyyymmdd_for_odds_key(x: object) -> str:
+    """日付列の値から YYYYMMDD を取り出す。"""
+    if x is None:
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except Exception:
+        pass
+    digits = re.sub(r"\D", "", str(x))
+    return digits[:8] if len(digits) >= 8 else ""
+
+
+def _put_unique_odds_value(target: Dict[tuple, float], key: tuple, value: float, context: str) -> None:
+    """同一キーが複数ある場合は、上書きせず例外で停止する。"""
+    if key in target:
+        raise ValueError(f"{context} に同一キーのオッズが複数あります。上書きせず中止します: key={key}")
+    target[key] = float(value)
+
+
+def _lookup_rid_tansho_odds(
+    rid_odds_map: Dict[Tuple[str, int, str], float],
+    race_key: str,
+    umaban: int,
+    horse_name_norm: str,
+) -> Optional[float]:
+    """rid_str・馬番・馬名で単勝オッズを引く。旧形式は空馬名キーを許容する。"""
+    keys = [(str(race_key), int(umaban), horse_name_norm)]
+    if horse_name_norm:
+        keys.append((str(race_key), int(umaban), ""))
+    for key in keys:
+        if key in rid_odds_map:
+            return rid_odds_map[key]
+    return None
+
+
+def _lookup_place_tansho_odds(
+    place_odds_map: Dict[Tuple[str, str, str, int, str], float],
+    date_key: str,
+    place_norm: str,
+    race_no: str,
+    umaban: int,
+    horse_name_norm: str,
+) -> Optional[float]:
+    """日付・場所・R番号・馬番・馬名で単勝オッズを引く。旧形式は空日付/空馬名キーを許容する。"""
+    keys = []
+    if date_key:
+        keys.append((str(date_key), str(place_norm), str(race_no), int(umaban), horse_name_norm))
+        if horse_name_norm:
+            keys.append((str(date_key), str(place_norm), str(race_no), int(umaban), ""))
+    keys.append(("", str(place_norm), str(race_no), int(umaban), horse_name_norm))
+    if horse_name_norm:
+        keys.append(("", str(place_norm), str(race_no), int(umaban), ""))
+    for key in keys:
+        if key in place_odds_map:
+            return place_odds_map[key]
+    return None
+
+
 def _build_tansho_odds_maps_for_bet_sheet(
     odds_df: Optional[pd.DataFrame],
-) -> Tuple[Dict[Tuple[str, int], float], Dict[Tuple[str, str, int], float]]:
+) -> Tuple[Dict[Tuple[str, int, str], float], Dict[Tuple[str, str, str, int, str], float]]:
     """
     買い目シート用に単勝オッズ辞書を作る。
 
-    標準CSVは (rid_str, 馬番)、JRA OZZU CSVは (場所, R番号, 馬番) で参照する。
+    標準CSVは (rid_str, 馬番, 馬名)、JRA OZZU CSVは
+    (日付, 場所, R番号, 馬番, 馬名) で参照する。
     """
-    rid_odds_map: Dict[Tuple[str, int], float] = {}
-    place_odds_map: Dict[Tuple[str, str, int], float] = {}
+    rid_odds_map: Dict[Tuple[str, int, str], float] = {}
+    place_odds_map: Dict[Tuple[str, str, str, int, str], float] = {}
 
     if odds_df is None or not isinstance(odds_df, pd.DataFrame) or odds_df.empty:
         return rid_odds_map, place_odds_map
 
     od = odds_df.copy()
+    name_col = None
+    for cand in ["name_norm", "馬名_norm", "name", "馬名", "horse_name"]:
+        if cand in od.columns:
+            name_col = cand
+            break
 
     if {"rid_str", "umaban", "tansho"}.issubset(od.columns):
-        for r, u, t in zip(od["rid_str"], od["umaban"], od["tansho"]):
+        for _, row in od.iterrows():
+            r = row.get("rid_str")
+            u = row.get("umaban")
+            t = row.get("tansho")
             race_key = _normalize_race_key(r)
             umaban = _to_int_safe(u)
             tansho = _to_float_safe(t)
             if race_key is None or umaban is None or tansho is None:
                 continue
-            rid_odds_map[(str(race_key), int(umaban))] = float(tansho)
+            horse_name_norm = _normalize_horse_name_for_odds_key(row.get(name_col)) if name_col else ""
+            key = (str(race_key), int(umaban), horse_name_norm)
+            _put_unique_odds_value(rid_odds_map, key, float(tansho), "標準単勝オッズ")
 
     place_col = "place" if "place" in od.columns else "racecourse" if "racecourse" in od.columns else None
     race_col = "race_no" if "race_no" in od.columns else "race" if "race" in od.columns else None
+    date_col = "date" if "date" in od.columns else "日付" if "日付" in od.columns else None
     if place_col is not None and race_col is not None and {"umaban", "tansho"}.issubset(od.columns):
-        for p, r, u, t in zip(od[place_col], od[race_col], od["umaban"], od["tansho"]):
+        for _, row in od.iterrows():
+            p = row.get(place_col)
+            r = row.get(race_col)
+            u = row.get("umaban")
+            t = row.get("tansho")
             place_norm = _normalize_place(p)
             race_no = _race_no_to_2digits(r)
             umaban = _to_int_safe(u)
             tansho = _to_float_safe(t)
             if not place_norm or not race_no or umaban is None or tansho is None:
                 continue
-            place_odds_map[(str(place_norm), str(race_no), int(umaban))] = float(tansho)
+            date_key = _extract_yyyymmdd_for_odds_key(row.get(date_col)) if date_col else ""
+            horse_name_norm = _normalize_horse_name_for_odds_key(row.get(name_col)) if name_col else ""
+            key = (str(date_key), str(place_norm), str(race_no), int(umaban), horse_name_norm)
+            _put_unique_odds_value(place_odds_map, key, float(tansho), "OZZU単勝オッズ")
 
     return rid_odds_map, place_odds_map
 
@@ -1092,6 +1185,8 @@ def _build_bet_sheet(
     # オッズマップ
     # ----------------------------
     rid_odds_map, place_odds_map = _build_tansho_odds_maps_for_bet_sheet(odds_df)
+    place_odds_dates = {k[0] for k in place_odds_map.keys() if k[0]}
+    default_odds_date = next(iter(place_odds_dates)) if len(place_odds_dates) == 1 else ""
 
     # ----------------------------
     # 今走：レース情報（1レース1行）
@@ -1104,7 +1199,22 @@ def _build_bet_sheet(
             now["rid_str"] = pd.NA
     now["rid_str"] = now["rid_str"].astype(str)
 
-    race_info_cols = ["レースID", "レース名", "発走時刻", "場所", "コース", "馬場", "頭数", "レース種別", "クラス"]
+    race_info_cols = [
+        "レースID",
+        "レース名",
+        "発走時刻",
+        "場所",
+        "コース",
+        "馬場",
+        "頭数",
+        "レース種別",
+        "クラス",
+        "日付",
+        "開催日",
+        "年月日",
+        "raceday",
+        "date",
+    ]
     for c in race_info_cols:
         if c not in now.columns:
             now[c] = pd.NA
@@ -1163,16 +1273,24 @@ def _build_bet_sheet(
         if pd.isna(info_row.get("レースID")):
             info_row["レースID"] = rid
         race_key_sources = (info_row.get("レースID"), rid)
+        row_date_key = ""
+        for date_col in ["日付", "開催日", "年月日", "raceday", "date"]:
+            row_date_key = _extract_yyyymmdd_for_odds_key(info_row.get(date_col))
+            if row_date_key:
+                break
+        if not row_date_key:
+            row_date_key = default_odds_date
 
         # 単勝オッズ（上位1頭）
         odds_top1 = None
         if horses6[0] is not None:
             top_umaban = int(horses6[0])
+            top_horse_name_norm = _normalize_horse_name_for_odds_key(top1_row.get("馬名"))
             for race_key_src in race_key_sources:
                 race_key = _normalize_race_key(race_key_src)
                 if race_key is None:
                     continue
-                odds_top1 = rid_odds_map.get((str(race_key), top_umaban))
+                odds_top1 = _lookup_rid_tansho_odds(rid_odds_map, str(race_key), top_umaban, top_horse_name_norm)
                 if odds_top1 is not None:
                     break
 
@@ -1184,7 +1302,14 @@ def _build_bet_sheet(
                     if race_no:
                         break
                 if place_norm and race_no:
-                    odds_top1 = place_odds_map.get((str(place_norm), str(race_no), top_umaban))
+                    odds_top1 = _lookup_place_tansho_odds(
+                        place_odds_map,
+                        row_date_key,
+                        str(place_norm),
+                        str(race_no),
+                        top_umaban,
+                        top_horse_name_norm,
+                    )
 
         # 1位馬のrating4平均・近3走タイム指数・extra_penaltyをS判定に使う。
         rank1_target_metrics = _horse_metrics_for_race_keys(target_metric_map, race_key_sources, horses6[0])
@@ -1337,6 +1462,8 @@ def write_features_to_excel(
     # ★追加：買い目シートを生成
     try:
         bet_df = _build_bet_sheet(feat_export=feat_export, now_export=now_export, odds_df=odds_df)
+    except ValueError:
+        raise
     except Exception as e:
         print(f"[WARN] '{BET_SHEET}' の作成に失敗したためスキップします: {e}")
         bet_df = pd.DataFrame()

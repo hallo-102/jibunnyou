@@ -329,19 +329,82 @@ def _combination_to_umaban(x: object) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def _normalize_horse_name_for_key(x: object) -> str:
+    """オッズ照合キー用に馬名の全角半角・空白ゆらぎを吸収する。"""
+    if x is None:
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except Exception:
+        pass
+    s = unicodedata.normalize("NFKC", str(x))
+    s = re.sub(r"[\s\u3000]+", "", s)
+    return s.strip()
+
+
+def _format_duplicate_sample(df: pd.DataFrame, cols: List[str], limit: int = 10) -> List[Dict[str, object]]:
+    """重複エラーに表示するサンプル行を作る。"""
+    sample_cols = [c for c in cols if c in df.columns]
+    return df[sample_cols].head(limit).to_dict("records")
+
+
+def _raise_on_duplicate_keys(
+    df: pd.DataFrame,
+    key_cols: List[str],
+    context: str,
+    horse_name_col: Optional[str] = None,
+) -> None:
+    """同一キーが複数ある場合は、黙って先勝ちにせず例外で停止する。"""
+    if df.empty:
+        return
+
+    missing = [c for c in key_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"{context} の重複検査に必要な列が不足しています: {missing}")
+
+    dup = df[df.duplicated(subset=key_cols, keep=False)].copy()
+    if dup.empty:
+        return
+
+    if horse_name_col is not None and horse_name_col in dup.columns:
+        work = dup.copy()
+        work["_horse_name_norm_for_key"] = work[horse_name_col].map(_normalize_horse_name_for_key)
+        bad_name_keys = (
+            work.groupby(key_cols)["_horse_name_norm_for_key"]
+            .nunique(dropna=True)
+            .loc[lambda s: s > 1]
+        )
+        if not bad_name_keys.empty:
+            sample = _format_duplicate_sample(work, key_cols + [horse_name_col, "_horse_name_norm_for_key"])
+            raise ValueError(
+                f"{context} で同一キーに複数の馬名を検知しました。"
+                f" key_cols={key_cols}"
+                f" sample={sample}"
+            )
+
+    sample_cols = key_cols + ([horse_name_col] if horse_name_col and horse_name_col in dup.columns else [])
+    sample = _format_duplicate_sample(dup, sample_cols)
+    raise ValueError(
+        f"{context} で重複データを検知しました。keep='first' で処理せず中止します。"
+        f" key_cols={key_cols}"
+        f" sample={sample}"
+    )
+
+
 def _convert_ozzu_to_odds(df: pd.DataFrame, raceday: Optional[str] = None) -> pd.DataFrame:
     """
     OZZU形式:
       date,racecourse,race,name,bet_type,combination,odds
     を
-      date, place, race_no, umaban, tansho, fukusho, ozzu_key
+      date, place, race_no, umaban, name, name_norm, tansho, fukusho, ozzu_key
     に変換する。
 
     OZZU CSVはJRA公式由来で netkeiba race_id を持たないため、
-    rid_str は作らず、場所・R番号・馬番で照合できる形にする。
+    rid_str は作らず、日付・場所・R番号・馬番・馬名で照合できる形にする。
     """
-    out_cols = ["date", "place", "race_no", "umaban", "tansho", "fukusho", "ozzu_key"]
-    need = {"date", "racecourse", "race", "bet_type", "combination", "odds"}
+    out_cols = ["date", "place", "race_no", "umaban", "name", "name_norm", "tansho", "fukusho", "ozzu_key"]
+    need = {"date", "racecourse", "race", "name", "bet_type", "combination", "odds"}
     if not need.issubset(set(df.columns)):
         raise ValueError(f"OZZU形式として必要列が不足: need={sorted(need)} actual={list(df.columns)}")
 
@@ -357,30 +420,46 @@ def _convert_ozzu_to_odds(df: pd.DataFrame, raceday: Optional[str] = None) -> pd
     d["place"] = d["racecourse"].map(_normalize_place)
     d["race_no"] = d["race"].apply(_race_to_no)
     d["umaban"] = d["combination"].apply(_combination_to_umaban)
+    d["bet_type"] = d["bet_type"].fillna("").astype(str).str.strip()
+    d["name"] = d["name"].fillna("").astype(str).str.strip()
+    d["name_norm"] = d["name"].map(_normalize_horse_name_for_key)
     d = d[
         d["date"].astype(str).str.fullmatch(r"\d{8}", na=False)
         & d["place"].astype(str).str.strip().ne("")
         & d["race_no"].astype(str).str.fullmatch(r"\d{2}", na=False)
         & d["umaban"].notna()
+        & d["name_norm"].astype(str).str.strip().ne("")
     ].copy()
     if d.empty:
         return pd.DataFrame(columns=out_cols)
 
-    base_cols = ["date", "place", "race_no", "umaban"]
+    _raise_on_duplicate_keys(
+        d,
+        ["date", "place", "race_no", "umaban", "bet_type"],
+        "OZZU CSV",
+        horse_name_col="name",
+    )
+
+    base_cols = ["date", "place", "race_no", "umaban", "name_norm"]
     tansho = d[d["bet_type"].astype(str).str.contains("単勝", na=False)].copy()
     tansho["tansho"] = tansho["odds"].apply(_odds_to_float)
     tansho = tansho.dropna(subset=base_cols + ["tansho"])
-    tansho = tansho[base_cols + ["tansho"]].drop_duplicates(subset=base_cols, keep="first")
+    _raise_on_duplicate_keys(tansho, base_cols, "OZZU単勝オッズ", horse_name_col="name")
+    tansho = tansho[base_cols + ["name", "tansho"]].copy()
 
     fukusho = d[d["bet_type"].astype(str).str.contains("複勝", na=False)].copy()
     fukusho["fukusho"] = fukusho["odds"].apply(_fukusho_to_lower_float)
     fukusho = fukusho.dropna(subset=base_cols + ["fukusho"])
-    fukusho = fukusho[base_cols + ["fukusho"]].drop_duplicates(subset=base_cols, keep="first")
+    _raise_on_duplicate_keys(fukusho, base_cols, "OZZU複勝オッズ", horse_name_col="name")
+    fukusho = fukusho[base_cols + ["name", "fukusho"]].copy()
 
-    out = pd.merge(tansho, fukusho, on=base_cols, how="outer")
+    out = pd.merge(tansho, fukusho, on=base_cols, how="outer", suffixes=("_tansho", "_fukusho"))
     if out.empty:
         return pd.DataFrame(columns=out_cols)
 
+    out["name"] = out.get("name_tansho", pd.Series(pd.NA, index=out.index)).combine_first(
+        out.get("name_fukusho", pd.Series(pd.NA, index=out.index))
+    )
     out["date"] = out["date"].astype(str)
     out["place"] = out["place"].astype(str)
     out["race_no"] = out["race_no"].astype(str).str.zfill(2)
@@ -395,6 +474,8 @@ def _convert_ozzu_to_odds(df: pd.DataFrame, raceday: Optional[str] = None) -> pd
         + out["race_no"]
         + "_"
         + out["umaban"].astype(str)
+        + "_"
+        + out["name_norm"].astype(str)
     )
     return out[out_cols]
 
@@ -453,6 +534,8 @@ def load_odds_csv(path: str, raceday: Optional[str] = None) -> pd.DataFrame:
         out["umaban"] = out["umaban"].astype(int)
         out["tansho"] = pd.to_numeric(out["tansho"], errors="coerce")
         out = out.dropna(subset=["tansho"])
+        out = out[out["rid_str"].astype(str).str.strip().ne("")]
+        _raise_on_duplicate_keys(out, ["rid_str", "umaban"], "標準オッズCSV")
         return out
 
     # 3) OZZU形式なら変換（あなたの 1_02_scrape_jra_odds_2.py の出力に対応）

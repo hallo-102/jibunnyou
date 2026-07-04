@@ -30,6 +30,7 @@ import importlib
 import os
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -256,6 +257,70 @@ def _coerce_float_series(s: pd.Series) -> pd.Series:
     text = s.astype(str).str.replace(",", "", regex=False)
     picked = pd.to_numeric(text.str.extract(r"([-+]?\d+(?:\.\d+)?)", expand=False), errors="coerce")
     return direct.combine_first(picked)
+
+
+def _normalize_horse_name_for_odds_key(x: object) -> str:
+    """オッズ照合キー用に馬名の全角半角・空白ゆらぎを吸収する。"""
+    if x is None:
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except Exception:
+        pass
+    s = unicodedata.normalize("NFKC", str(x))
+    s = re.sub(r"[\s\u3000]+", "", s)
+    return s.strip()
+
+
+def _extract_yyyymmdd_for_odds_key(x: object) -> str:
+    """日付列の値から YYYYMMDD を取り出す。"""
+    if x is None:
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except Exception:
+        pass
+    digits = re.sub(r"\D", "", str(x))
+    return digits[:8] if len(digits) >= 8 else ""
+
+
+def _race_no_to_2digits_for_odds_key(x: object) -> str:
+    """'11R' や 11 を '11' にそろえる。"""
+    m = re.search(r"(\d+)", str(x))
+    return m.group(1).zfill(2) if m else ""
+
+
+def _race_no_from_rid_for_odds_key(rid_val: object) -> str:
+    """レースID末尾2桁からR番号を取り出す。"""
+    m = re.search(r"(\d{2})$", str(rid_val))
+    return m.group(1) if m else ""
+
+
+def _raise_on_duplicate_odds_keys(df: pd.DataFrame, key_cols: List[str], context: str) -> None:
+    """同一キーが複数ある場合は、上書きせず例外で停止する。"""
+    if df.empty:
+        return
+    missing = [c for c in key_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"{context} の重複検査に必要な列が不足しています: {missing}")
+    dup = df[df.duplicated(subset=key_cols, keep=False)].copy()
+    if dup.empty:
+        return
+    sample_cols = [c for c in key_cols + ["name", "馬名", "tansho", "fukusho", "odds"] if c in dup.columns]
+    sample = dup[sample_cols].head(10).to_dict("records")
+    raise ValueError(
+        f"{context} で同一キーの重複を検知しました。上書きせず中止します。"
+        f" key_cols={key_cols}"
+        f" sample={sample}"
+    )
+
+
+def _single_value_or_empty(values: pd.Series) -> str:
+    """有効な値が1種類だけなら返し、それ以外は空文字を返す。"""
+    uniq = [str(v) for v in values.dropna().astype(str).unique() if str(v).strip()]
+    return uniq[0] if len(uniq) == 1 else ""
 
 
 def _rank_bucket_value(rank_val: object) -> int:
@@ -953,6 +1018,11 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
             "馬番",
             "レースID",
             "場所",
+            "日付",
+            "開催日",
+            "年月日",
+            "raceday",
+            "date",
             "頭数",
             "人気",
             "単勝オッズ",
@@ -971,6 +1041,11 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
 
         for col in [
             "レースID",
+            "日付",
+            "開催日",
+            "年月日",
+            "raceday",
+            "date",
             "頭数",
             "人気",
             "単勝オッズ",
@@ -994,6 +1069,8 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
 
     try:
         odds_df = load_odds_csv(str(ODDS_CSV), raceday=raceday_str)
+    except ValueError:
+        raise
     except Exception as e:
         print(f"[WARN] オッズCSV読み込みに失敗したため、期待値計算の一部をスキップします: {e}")
         odds_df = pd.DataFrame(columns=["rid_str", "umaban", "tansho"])
@@ -1004,14 +1081,92 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
         odds_use["馬番"] = _normalize_umaban_series(odds_use["umaban"])
         odds_use["単勝オッズ_odds_csv"] = pd.to_numeric(odds_use["tansho"], errors="coerce")
         odds_use = odds_use.dropna(subset=["rid_str", "馬番", "単勝オッズ_odds_csv"])
-        odds_use = odds_use[["rid_str", "馬番", "単勝オッズ_odds_csv"]].drop_duplicates(
-            subset=["rid_str", "馬番"],
-            keep="first",
-        )
+        odds_use = odds_use[["rid_str", "馬番", "単勝オッズ_odds_csv"]].copy()
+        _raise_on_duplicate_odds_keys(odds_use, ["rid_str", "馬番"], "標準オッズCSV")
 
         target = pd.merge(target, odds_use, on=["rid_str", "馬番"], how="left")
         target["単勝オッズ"] = target["単勝オッズ_odds_csv"].combine_first(target["単勝オッズ"])
         target = target.drop(columns=["単勝オッズ_odds_csv"], errors="ignore")
+
+    ozzu_cols = {"date", "place", "race_no", "umaban", "name_norm"}
+    if odds_df is not None and not odds_df.empty and ozzu_cols.issubset(odds_df.columns):
+        odds_value_cols = [c for c in ["tansho", "fukusho"] if c in odds_df.columns]
+        if odds_value_cols:
+            odds_use = odds_df[["date", "place", "race_no", "umaban", "name_norm", *odds_value_cols]].copy()
+            odds_use["date"] = odds_use["date"].map(_extract_yyyymmdd_for_odds_key)
+            odds_use["place"] = odds_use["place"].map(_normalize_place)
+            odds_use["race_no"] = odds_use["race_no"].map(_race_no_to_2digits_for_odds_key)
+            odds_use["馬番"] = _normalize_umaban_series(odds_use["umaban"])
+            odds_use["name_norm"] = odds_use["name_norm"].map(_normalize_horse_name_for_odds_key)
+            if "tansho" in odds_use.columns:
+                odds_use["単勝オッズ_odds_csv"] = pd.to_numeric(odds_use["tansho"], errors="coerce")
+            if "fukusho" in odds_use.columns:
+                odds_use["複勝オッズ_odds_csv"] = pd.to_numeric(odds_use["fukusho"], errors="coerce")
+
+            key_cols = ["date", "place", "race_no", "馬番", "name_norm"]
+            odds_use = odds_use[
+                odds_use["date"].astype(str).str.fullmatch(r"\d{8}", na=False)
+                & odds_use["place"].astype(str).str.strip().ne("")
+                & odds_use["race_no"].astype(str).str.fullmatch(r"\d{2}", na=False)
+                & odds_use["馬番"].notna()
+                & odds_use["name_norm"].astype(str).str.strip().ne("")
+            ].copy()
+            _raise_on_duplicate_odds_keys(odds_use, key_cols, "OZZU変換済みオッズ")
+
+            default_odds_date = _single_value_or_empty(odds_use["date"])
+
+            def _row_date_for_ozzu(row: pd.Series) -> str:
+                for col in ["日付", "開催日", "年月日", "raceday", "date"]:
+                    date_key = _extract_yyyymmdd_for_odds_key(row.get(col))
+                    if date_key:
+                        return date_key
+                return default_odds_date
+
+            target["__odds_date"] = target.apply(_row_date_for_ozzu, axis=1)
+            target["__odds_place"] = target.get("場所", pd.Series("", index=target.index)).map(_normalize_place)
+            target["__odds_race_no"] = target.apply(
+                lambda row: _race_no_from_rid_for_odds_key(row.get("レースID", row.get("rid_str"))),
+                axis=1,
+            )
+            target["__odds_umaban"] = _normalize_umaban_series(target["馬番"])
+            target["__odds_name_norm"] = target["馬名"].map(_normalize_horse_name_for_odds_key)
+
+            odds_merge_cols = key_cols.copy()
+            if "単勝オッズ_odds_csv" in odds_use.columns:
+                odds_merge_cols.append("単勝オッズ_odds_csv")
+            if "複勝オッズ_odds_csv" in odds_use.columns:
+                odds_merge_cols.append("複勝オッズ_odds_csv")
+            odds_merge = odds_use[odds_merge_cols].rename(
+                columns={
+                    "date": "__odds_date",
+                    "place": "__odds_place",
+                    "race_no": "__odds_race_no",
+                    "馬番": "__odds_umaban",
+                    "name_norm": "__odds_name_norm",
+                }
+            )
+            target = pd.merge(
+                target,
+                odds_merge,
+                on=["__odds_date", "__odds_place", "__odds_race_no", "__odds_umaban", "__odds_name_norm"],
+                how="left",
+            )
+            if "単勝オッズ_odds_csv" in target.columns:
+                target["単勝オッズ"] = target["単勝オッズ_odds_csv"].combine_first(target["単勝オッズ"])
+            if "複勝オッズ_odds_csv" in target.columns:
+                target["複勝オッズ"] = target["複勝オッズ_odds_csv"].combine_first(target["複勝オッズ"])
+            target = target.drop(
+                columns=[
+                    "__odds_date",
+                    "__odds_place",
+                    "__odds_race_no",
+                    "__odds_umaban",
+                    "__odds_name_norm",
+                    "単勝オッズ_odds_csv",
+                    "複勝オッズ_odds_csv",
+                ],
+                errors="ignore",
+            )
 
     ozzu_path = _pick_ozzu_csv(str(ODDS_CSV), raceday_str)
     if ozzu_path and os.path.exists(ozzu_path) and "場所" in target.columns:
@@ -1019,10 +1174,8 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
             ozzu_raw = _read_csv_any_encoding(ozzu_path)
             tansho_map = _build_tansho_map_from_ozzu(ozzu_raw)
             fukusho_map = _build_fukusho_map_from_ozzu(ozzu_raw)
-
-            def _race_no_from_rid_for_estimation(rid_val: object) -> str:
-                m = re.search(r"(\d{2})$", str(rid_val))
-                return m.group(1) if m else ""
+            date_candidates = {k[0] for k in list(tansho_map.keys()) + list(fukusho_map.keys()) if k[0]}
+            default_ozzu_date = next(iter(date_candidates)) if len(date_candidates) == 1 else ""
 
             def _umaban_for_estimation(umaban_val: object) -> Optional[int]:
                 umaban_num = pd.to_numeric(pd.Series([umaban_val]), errors="coerce").iloc[0]
@@ -1030,27 +1183,40 @@ def _merge_now_and_odds_for_estimation(target_df: pd.DataFrame, now_df: pd.DataF
                     return None
                 return int(umaban_num)
 
+            def _date_for_estimation(row: pd.Series) -> str:
+                for col in ["日付", "開催日", "年月日", "raceday", "date"]:
+                    date_key = _extract_yyyymmdd_for_odds_key(row.get(col))
+                    if date_key:
+                        return date_key
+                return default_ozzu_date
+
             def _lookup_tansho_by_place(row: pd.Series) -> float:
+                date_key = _date_for_estimation(row)
                 place_norm = _normalize_place(row.get("場所"))
-                race_no = _race_no_from_rid_for_estimation(row.get("レースID", row.get("rid_str")))
+                race_no = _race_no_from_rid_for_odds_key(row.get("レースID", row.get("rid_str")))
                 umaban = _umaban_for_estimation(row.get("馬番"))
-                if not place_norm or not race_no or umaban is None:
+                name_norm = _normalize_horse_name_for_odds_key(row.get("馬名"))
+                if not date_key or not place_norm or not race_no or umaban is None or not name_norm:
                     return np.nan
-                return float(tansho_map.get((place_norm, race_no, int(umaban)), np.nan))
+                return float(tansho_map.get((date_key, place_norm, race_no, int(umaban), name_norm), np.nan))
 
             def _lookup_fukusho_by_place(row: pd.Series) -> float:
+                date_key = _date_for_estimation(row)
                 place_norm = _normalize_place(row.get("場所"))
-                race_no = _race_no_from_rid_for_estimation(row.get("レースID", row.get("rid_str")))
+                race_no = _race_no_from_rid_for_odds_key(row.get("レースID", row.get("rid_str")))
                 umaban = _umaban_for_estimation(row.get("馬番"))
-                if not place_norm or not race_no or umaban is None:
+                name_norm = _normalize_horse_name_for_odds_key(row.get("馬名"))
+                if not date_key or not place_norm or not race_no or umaban is None or not name_norm:
                     return np.nan
-                return float(fukusho_map.get((place_norm, race_no, int(umaban)), np.nan))
+                return float(fukusho_map.get((date_key, place_norm, race_no, int(umaban), name_norm), np.nan))
 
             target["単勝オッズ_ozzu_place"] = target.apply(_lookup_tansho_by_place, axis=1)
             target["単勝オッズ"] = target["単勝オッズ_ozzu_place"].combine_first(target["単勝オッズ"])
             target["複勝オッズ_ozzu_place"] = target.apply(_lookup_fukusho_by_place, axis=1)
             target["複勝オッズ"] = target["複勝オッズ_ozzu_place"].combine_first(target["複勝オッズ"])
             target = target.drop(columns=["単勝オッズ_ozzu_place", "複勝オッズ_ozzu_place"], errors="ignore")
+        except ValueError:
+            raise
         except Exception as e:
             print(f"[WARN] OZZU場所+R番号照合によるオッズ補完に失敗しました: {e}")
 
@@ -1562,22 +1728,18 @@ def _read_csv_any_encoding(path: str) -> pd.DataFrame:
     raise RuntimeError("CSV 読み込みに失敗しました")
 
 
-def _build_tansho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str, int], float]:
+def _build_tansho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str, str, int, str], float]:
     """
     OZZU CSV（racecourse/race/bet_type/combination/odds）から
-    (place_norm, race_no, umaban) -> odds の辞書を作る
+    (date, place_norm, race_no, umaban, name_norm) -> odds の辞書を作る
     """
-    need_cols = {"racecourse", "race", "bet_type", "combination", "odds"}
+    need_cols = {"date", "racecourse", "race", "name", "bet_type", "combination", "odds"}
     if not need_cols.issubset(set(ozzu_raw.columns)):
         missing = need_cols - set(ozzu_raw.columns)
         raise ValueError(f"OZZU CSV に必要列が不足しています: {missing}")
 
     ozzu = ozzu_raw.copy()
     ozzu = ozzu[ozzu["bet_type"].astype(str).str.contains("単勝", na=False)].copy()
-
-    def _to_race_no(x: object) -> str:
-        m = re.search(r"(\d+)", str(x))
-        return m.group(1).zfill(2) if m else ""
 
     def _to_umaban(x: object) -> Optional[int]:
         m = re.search(r"(\d+)", str(x))
@@ -1592,34 +1754,56 @@ def _build_tansho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str, 
         except Exception:
             return None
 
+    ozzu["date"] = ozzu["date"].map(_extract_yyyymmdd_for_odds_key)
     ozzu["place_norm"] = ozzu["racecourse"].map(_normalize_place)
-    ozzu["race_no"] = ozzu["race"].map(_to_race_no)
+    ozzu["race_no"] = ozzu["race"].map(_race_no_to_2digits_for_odds_key)
     ozzu["umaban"] = ozzu["combination"].map(_to_umaban)
+    ozzu["name_norm"] = ozzu["name"].map(_normalize_horse_name_for_odds_key)
     ozzu["tansho"] = ozzu["odds"].map(_to_odds)
 
-    ozzu = ozzu.dropna(subset=["place_norm", "race_no", "umaban", "tansho"])
-    out: Dict[Tuple[str, str, int], float] = {}
-    for p, r, u, o in zip(ozzu["place_norm"], ozzu["race_no"], ozzu["umaban"], ozzu["tansho"]):
-        out[(str(p), str(r), int(u))] = float(o)
+    ozzu = ozzu.dropna(subset=["date", "place_norm", "race_no", "umaban", "name_norm", "tansho"])
+    ozzu = ozzu[
+        ozzu["date"].astype(str).str.fullmatch(r"\d{8}", na=False)
+        & ozzu["place_norm"].astype(str).str.strip().ne("")
+        & ozzu["race_no"].astype(str).str.fullmatch(r"\d{2}", na=False)
+        & ozzu["name_norm"].astype(str).str.strip().ne("")
+    ].copy()
+    base_without_name = ["date", "place_norm", "race_no", "umaban"]
+    bad_name = ozzu.groupby(base_without_name)["name_norm"].nunique(dropna=True).loc[lambda s: s > 1]
+    if not bad_name.empty:
+        sample = ozzu[base_without_name + ["name", "name_norm"]].head(10).to_dict("records")
+        raise ValueError(f"OZZU単勝オッズで同一馬番に複数馬名を検知しました: sample={sample}")
+    key_cols = ["date", "place_norm", "race_no", "umaban", "name_norm"]
+    _raise_on_duplicate_odds_keys(ozzu, key_cols, "OZZU単勝オッズ")
+
+    out: Dict[Tuple[str, str, str, int, str], float] = {}
+    for d, p, r, u, n, o in zip(
+        ozzu["date"],
+        ozzu["place_norm"],
+        ozzu["race_no"],
+        ozzu["umaban"],
+        ozzu["name_norm"],
+        ozzu["tansho"],
+    ):
+        key = (str(d), str(p), str(r), int(u), str(n))
+        if key in out:
+            raise ValueError(f"OZZU単勝オッズに同一キーが複数あります。上書きせず中止します: key={key}")
+        out[key] = float(o)
     return out
 
 
-def _build_fukusho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str, int], float]:
+def _build_fukusho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str, str, int, str], float]:
     """
-    OZZU CSV の複勝オッズから (place_norm, race_no, umaban) -> 複勝オッズ下限 の辞書を作る。
+    OZZU CSV の複勝オッズから (date, place_norm, race_no, umaban, name_norm) -> 複勝オッズ下限 の辞書を作る。
     複勝オッズが「1.3-2.3」のような範囲の場合、期待値は保守的に下限を使う。
     """
-    need_cols = {"racecourse", "race", "bet_type", "combination", "odds"}
+    need_cols = {"date", "racecourse", "race", "name", "bet_type", "combination", "odds"}
     if not need_cols.issubset(set(ozzu_raw.columns)):
         missing = need_cols - set(ozzu_raw.columns)
         raise ValueError(f"OZZU CSV に必要列が不足しています: {missing}")
 
     ozzu = ozzu_raw.copy()
     ozzu = ozzu[ozzu["bet_type"].astype(str).str.contains("複勝", na=False)].copy()
-
-    def _to_race_no(x: object) -> str:
-        m = re.search(r"(\d+)", str(x))
-        return m.group(1).zfill(2) if m else ""
 
     def _to_umaban(x: object) -> Optional[int]:
         m = re.search(r"(\d+)", str(x))
@@ -1635,15 +1819,41 @@ def _build_fukusho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str,
         except Exception:
             return None
 
+    ozzu["date"] = ozzu["date"].map(_extract_yyyymmdd_for_odds_key)
     ozzu["place_norm"] = ozzu["racecourse"].map(_normalize_place)
-    ozzu["race_no"] = ozzu["race"].map(_to_race_no)
+    ozzu["race_no"] = ozzu["race"].map(_race_no_to_2digits_for_odds_key)
     ozzu["umaban"] = ozzu["combination"].map(_to_umaban)
+    ozzu["name_norm"] = ozzu["name"].map(_normalize_horse_name_for_odds_key)
     ozzu["fukusho"] = ozzu["odds"].map(_to_fukusho_lower)
 
-    ozzu = ozzu.dropna(subset=["place_norm", "race_no", "umaban", "fukusho"])
-    out: Dict[Tuple[str, str, int], float] = {}
-    for p, r, u, o in zip(ozzu["place_norm"], ozzu["race_no"], ozzu["umaban"], ozzu["fukusho"]):
-        out[(str(p), str(r), int(u))] = float(o)
+    ozzu = ozzu.dropna(subset=["date", "place_norm", "race_no", "umaban", "name_norm", "fukusho"])
+    ozzu = ozzu[
+        ozzu["date"].astype(str).str.fullmatch(r"\d{8}", na=False)
+        & ozzu["place_norm"].astype(str).str.strip().ne("")
+        & ozzu["race_no"].astype(str).str.fullmatch(r"\d{2}", na=False)
+        & ozzu["name_norm"].astype(str).str.strip().ne("")
+    ].copy()
+    base_without_name = ["date", "place_norm", "race_no", "umaban"]
+    bad_name = ozzu.groupby(base_without_name)["name_norm"].nunique(dropna=True).loc[lambda s: s > 1]
+    if not bad_name.empty:
+        sample = ozzu[base_without_name + ["name", "name_norm"]].head(10).to_dict("records")
+        raise ValueError(f"OZZU複勝オッズで同一馬番に複数馬名を検知しました: sample={sample}")
+    key_cols = ["date", "place_norm", "race_no", "umaban", "name_norm"]
+    _raise_on_duplicate_odds_keys(ozzu, key_cols, "OZZU複勝オッズ")
+
+    out: Dict[Tuple[str, str, str, int, str], float] = {}
+    for d, p, r, u, n, o in zip(
+        ozzu["date"],
+        ozzu["place_norm"],
+        ozzu["race_no"],
+        ozzu["umaban"],
+        ozzu["name_norm"],
+        ozzu["fukusho"],
+    ):
+        key = (str(d), str(p), str(r), int(u), str(n))
+        if key in out:
+            raise ValueError(f"OZZU複勝オッズに同一キーが複数あります。上書きせず中止します: key={key}")
+        out[key] = float(o)
     return out
 
 
@@ -1663,6 +1873,8 @@ def _fill_tansho_odds_to_bet_sheet(out_excel_path: str, raceday_str: Optional[st
     try:
         ozzu_raw = _read_csv_any_encoding(ozzu_path)
         tansho_map = _build_tansho_map_from_ozzu(ozzu_raw)
+    except ValueError:
+        raise
     except Exception as e:
         print(f"[WARN] OZZU CSV から単勝オッズマップ作成に失敗しました: {e}")
         return 0
@@ -1679,6 +1891,8 @@ def _fill_tansho_odds_to_bet_sheet(out_excel_path: str, raceday_str: Optional[st
         return 0
 
     ws = wb[sheet_name]
+    default_ozzu_date_candidates = {k[0] for k in tansho_map.keys() if k[0]}
+    default_ozzu_date = next(iter(default_ozzu_date_candidates)) if len(default_ozzu_date_candidates) == 1 else ""
 
     header_to_col = {}
     for c in range(1, ws.max_column + 1):
@@ -1704,6 +1918,7 @@ def _fill_tansho_odds_to_bet_sheet(out_excel_path: str, raceday_str: Optional[st
     col_rid = header_to_col["レースID"]
     col_umaban1 = header_to_col["1位馬番"]
     col_odds = header_to_col[odds_col_name]
+    date_cols = [header_to_col[c] for c in ["日付", "開催日", "年月日", "raceday", "date"] if c in header_to_col]
 
     def _race_no_from_rid(rid_val: object) -> str:
         m = re.search(r"(\d{2})$", str(rid_val))
@@ -1712,6 +1927,34 @@ def _fill_tansho_odds_to_bet_sheet(out_excel_path: str, raceday_str: Optional[st
     def _to_int_safe(x: object) -> Optional[int]:
         m = re.search(r"(\d+)", str(x))
         return int(m.group(1)) if m else None
+
+    def _rid_key_for_sheet(x: object) -> str:
+        return _normalize_rid_series(pd.Series([x])).iloc[0]
+
+    target_name_map: Dict[Tuple[str, int], str] = {}
+    if TARGET_SHEET in wb.sheetnames:
+        ws_target = wb[TARGET_SHEET]
+        target_header_to_col = {}
+        for c in range(1, ws_target.max_column + 1):
+            v = ws_target.cell(row=1, column=c).value
+            if v is None:
+                continue
+            target_header_to_col[str(v).strip()] = c
+
+        target_rid_col = target_header_to_col.get("レースID") or target_header_to_col.get("rid_str")
+        target_umaban_col = target_header_to_col.get("馬番")
+        target_name_col = target_header_to_col.get("馬名")
+        if target_rid_col and target_umaban_col and target_name_col:
+            for row_idx in range(2, ws_target.max_row + 1):
+                rid_key = _rid_key_for_sheet(ws_target.cell(row=row_idx, column=target_rid_col).value)
+                umaban = _to_int_safe(ws_target.cell(row=row_idx, column=target_umaban_col).value)
+                name_norm = _normalize_horse_name_for_odds_key(ws_target.cell(row=row_idx, column=target_name_col).value)
+                if not rid_key or umaban is None or not name_norm:
+                    continue
+                key = (rid_key, int(umaban))
+                if key in target_name_map and target_name_map[key] != name_norm:
+                    raise ValueError(f"TARGETシートで同一レースID・馬番に複数馬名を検知しました: key={key}")
+                target_name_map[key] = name_norm
 
     filled = 0
     total = 0
@@ -1729,10 +1972,19 @@ def _fill_tansho_odds_to_bet_sheet(out_excel_path: str, raceday_str: Optional[st
         place_norm = _normalize_place(place)
         race_no = _race_no_from_rid(rid)
         u1 = _to_int_safe(umaban1)
-        if not place_norm or not race_no or u1 is None:
+        rid_key = _rid_key_for_sheet(rid)
+        name_norm = target_name_map.get((rid_key, int(u1))) if u1 is not None else ""
+        date_key = ""
+        for date_col in date_cols:
+            date_key = _extract_yyyymmdd_for_odds_key(ws.cell(row=r, column=date_col).value)
+            if date_key:
+                break
+        if not date_key:
+            date_key = default_ozzu_date
+        if not date_key or not place_norm or not race_no or u1 is None or not name_norm:
             continue
 
-        odds_val = tansho_map.get((place_norm, race_no, int(u1)))
+        odds_val = tansho_map.get((date_key, place_norm, race_no, int(u1), name_norm))
         if odds_val is None:
             continue
 
