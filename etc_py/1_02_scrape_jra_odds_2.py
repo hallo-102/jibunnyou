@@ -135,11 +135,17 @@ def _page_date_status(page, target_date: str, context: str) -> Optional[bool]:
         primary_dates.extend(_date_candidates_from_text(text, base_date=target_date))
     primary_dates = list(dict.fromkeys(primary_dates))
 
-    if target_date in primary_dates:
-        return True
-    if primary_dates:
+    if len(primary_dates) == 1:
+        if primary_dates[0] == target_date:
+            return True
         print(f"[WARN] {context}: ページ開催日が実行日と違うためスキップします / page_dates={primary_dates} / target={target_date}")
         return False
+    if len(primary_dates) > 1:
+        print(
+            f"[WARN] {context}: 見出し・URLなどから複数日付が見つかり、開催日を確定できないためスキップします "
+            f"/ page_dates={primary_dates} / target={target_date}"
+        )
+        return None
 
     body_dates: List[str] = []
     try:
@@ -310,7 +316,7 @@ def scrape_odds(headless: bool = HEADLESS, out_dir: str = r"C:\\Users\\okino\\On
                         page.wait_for_selector("table.tanpuku td.num", timeout=10_000)
 
                         detail_date_status = _page_date_status(page, DATE_STR, f"{place_label} {race_lbl} 単勝複勝ページ")
-                        if detail_date_status is False:
+                        if detail_date_status is not True:
                             page.go_back()
                             page.wait_for_load_state("domcontentloaded")
                             continue
@@ -333,7 +339,7 @@ def scrape_odds(headless: bool = HEADLESS, out_dir: str = r"C:\\Users\\okino\\On
                         page.wait_for_selector("ul.fuku3_list", timeout=10_000)
 
                         detail_date_status = _page_date_status(page, DATE_STR, f"{place_label} {race_lbl} 3連複ページ")
-                        if detail_date_status is False:
+                        if detail_date_status is not True:
                             page.go_back()
                             page.wait_for_load_state("domcontentloaded")
                             continue
