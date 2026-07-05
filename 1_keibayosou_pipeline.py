@@ -1572,7 +1572,7 @@ def run_pipeline(
 
     # 除外後に空になった場合
     if merged.empty or feat_df.empty:
-        print("[WARN] 過去走不足レース除外後、予想対象がありませんでした")
+        print("[WARN] 予想対象外レース除外後、予想対象がありませんでした")
         out_df = merged.copy()
 
         # score系の列が無いと後続や出力で困るので、念のため空列を作る

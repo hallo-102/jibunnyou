@@ -1214,6 +1214,53 @@ def _ensure_cols(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     return df
 
 
+def _exclude_obstacle_races_from_prediction(
+    merged: pd.DataFrame,
+    feat_df: pd.DataFrame,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """レース名に「障害」を含むレースを予想対象外にする。"""
+    if merged is None or merged.empty:
+        return merged, feat_df
+
+    race_name_col = _pick_col(merged, ["レース名", "race_name", "race_title"])
+    if race_name_col is None:
+        print("[WARN] レース名列が無いため、障害レース除外をスキップします")
+        return merged, feat_df
+
+    work = merged.copy()
+    if "rid_str" not in work.columns:
+        if "レースID" in work.columns:
+            work["rid_str"] = work["レースID"]
+        else:
+            print("[WARN] rid_str/レースID 列が無いため、障害レース除外をスキップします")
+            return merged, feat_df
+
+    work["rid_str"] = _normalize_rid_series(work["rid_str"])
+    obstacle_mask = work[race_name_col].astype(str).str.contains("障害", na=False)
+    exclude_rids = work.loc[obstacle_mask, "rid_str"].astype(str).dropna().unique().tolist()
+    if not exclude_rids:
+        return merged, feat_df
+
+    preview = (
+        work.loc[work["rid_str"].astype(str).isin(exclude_rids), ["rid_str", race_name_col]]
+        .drop_duplicates()
+        .sort_values(["rid_str"], kind="mergesort")
+        .head(10)
+    )
+    print(f"[INFO] 障害レースを予想対象外にします: {len(exclude_rids)}レース")
+    for _, row in preview.iterrows():
+        print(f"[INFO] 除外 rid={row['rid_str']} レース名={row[race_name_col]}")
+
+    filtered_merged = work.loc[~work["rid_str"].astype(str).isin(exclude_rids)].copy()
+    if feat_df is None or feat_df.empty or "rid_str" not in feat_df.columns:
+        return filtered_merged, feat_df
+
+    filtered_feat = feat_df.copy()
+    filtered_feat["rid_str"] = _normalize_rid_series(filtered_feat["rid_str"])
+    filtered_feat = filtered_feat.loc[~filtered_feat["rid_str"].astype(str).isin(exclude_rids)].copy()
+    return filtered_merged, filtered_feat
+
+
 def build_features_from_excel(
     src_excel_path: str,
     levels_df: Optional[pd.DataFrame] = None,
@@ -1315,5 +1362,6 @@ def build_features_from_excel(
             feat[col] = pd.to_numeric(merged[col], errors="coerce")
 
     feat = _ensure_cols(feat, FEAT_COLS)
+    merged, feat = _exclude_obstacle_races_from_prediction(merged, feat)
 
     return merged, feat
