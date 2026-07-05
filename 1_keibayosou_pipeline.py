@@ -306,10 +306,16 @@ README_SHEET = "README"
 BET_RANK_README_START = "【買い目_レース別1行 ランク条件】"
 BET_RANK_README_END = "【買い目_レース別1行 ランク条件ここまで】"
 S_RANK_SCORE_MIN = 64.0
-S_RANK_RATING4_AVG_MIN = 400.0
+# Sランク用のrating条件は、廃止済みの rating4平均 ではなく、
+# race_levels.xlsx のratingsシートから作られる「マスタrating百分位」を使う。
+# TARGETシートでは 0〜100 に正規化されているため、75以上を「上位おおむね25%」の目安とする。
+S_RANK_MASTER_RATING_FIELD_PERCENTILE_MIN = 75.0
 S_RANK_RECENT3_TIME_IDX_MIN = 80.0
 S_RANK_EXTRA_PENALTY_MAX = 1.25
-RATING4_AVG_COL_CANDIDATES = ["rating4平均", "rating4_avg", "rating4_mean", "rating4"]
+MASTER_RATING_FIELD_PERCENTILE_COL_CANDIDATES = [
+    "マスタrating百分位",
+    "master_rating_field_percentile",
+]
 RECENT3_TIME_IDX_COL_CANDIDATES = ["近3走タイム指数", "近3走平均タイム指数", "recent3_time_idx", "recent3_time_index"]
 EXTRA_PENALTY_COL_CANDIDATES = ["extra_penalty", "追加ペナルティ", "補正ペナルティ"]
 
@@ -673,7 +679,10 @@ def _horse_metric_map_from_prediction_df(pred_df: Optional[pd.DataFrame]) -> Dic
         "popularity": _pick_popularity_col_for_roi(pred),
         "score": _pick_first_existing_col(pred, ["score"]),
         "extra_penalty": _pick_first_existing_col(pred, EXTRA_PENALTY_COL_CANDIDATES),
-        "rating4_avg": _pick_first_existing_col(pred, RATING4_AVG_COL_CANDIDATES),
+        "master_rating_field_percentile": _pick_first_existing_col(
+            pred,
+            MASTER_RATING_FIELD_PERCENTILE_COL_CANDIDATES,
+        ),
         "recent3_time_idx": _pick_first_existing_col(pred, RECENT3_TIME_IDX_COL_CANDIDATES),
     }
     if not race_cols or umaban_col is None or not any(metric_cols.values()):
@@ -703,7 +712,9 @@ def _horse_metric_map_from_prediction_df(pred_df: Optional[pd.DataFrame]) -> Dic
             "popularity": _to_float_safe(r.get("_popularity_for_roi")),
             "score": _to_float_safe(r.get("_score_for_roi")),
             "extra_penalty": _to_float_safe(r.get("_extra_penalty_for_roi")),
-            "rating4_avg": _to_float_safe(r.get("_rating4_avg_for_roi")),
+            "master_rating_field_percentile": _to_float_safe(
+                r.get("_master_rating_field_percentile_for_roi")
+            ),
             "recent3_time_idx": _to_float_safe(r.get("_recent3_time_idx_for_roi")),
         }
         for race_key in r["_race_keys_for_roi"]:
@@ -741,11 +752,28 @@ def _format_metric_value(value: Optional[float]) -> str:
     return "不明" if value is None else f"{value:.2f}"
 
 
+def _to_percent_0_100(value: Optional[float]) -> Optional[float]:
+    """
+    百分位を 0〜100 の尺度へ統一する。
+
+    - TARGETシートから読む場合: 0〜100
+    - 生の特徴量DataFrameから読む場合: 0〜1
+
+    のどちらでもSランク判定が同じ意味になるようにする。
+    """
+    value_float = _to_float_safe(value)
+    if value_float is None:
+        return None
+    if 0.0 <= value_float <= 1.0:
+        return value_float * 100.0
+    return value_float
+
+
 def _judge_bet_rank(
     score1: Optional[float],
     gap12: Optional[float],
     dango_2_5: Optional[float],
-    rank1_rating4_avg: Optional[float],
+    rank1_master_rating_field_percentile: Optional[float],
     rank1_recent3_time_idx: Optional[float],
     rank1_extra_penalty: Optional[float],
     rank3_popularity: Optional[float],
@@ -756,10 +784,15 @@ def _judge_bet_rank(
     買い目_レース別1行のランク・判定・理由を決める。
 
     ランキング1位を軸にした3連複向けに、Sは1位馬の指定条件で判定する。
+    廃止済みの rating4平均 は使わず、現行特徴量のマスタrating百分位を利用する。
     A/Bは従来どおりscore1と2位との差を使い、補助指標は理由欄に残す。
     """
+    rank1_master_rating_field_percentile = _to_percent_0_100(
+        rank1_master_rating_field_percentile
+    )
+
     rank1_detail = (
-        f"1位rating4平均={_format_metric_value(rank1_rating4_avg)}"
+        f"1位マスタrating百分位={_format_metric_value(rank1_master_rating_field_percentile)}"
         f" / 1位近3走タイム指数={_format_metric_value(rank1_recent3_time_idx)}"
         f" / 1位extra_penalty={_format_metric_value(rank1_extra_penalty)}"
     )
@@ -777,8 +810,8 @@ def _judge_bet_rank(
     s_rank_ok = (
         score1 is not None
         and score1 >= S_RANK_SCORE_MIN
-        and rank1_rating4_avg is not None
-        and rank1_rating4_avg >= S_RANK_RATING4_AVG_MIN
+        and rank1_master_rating_field_percentile is not None
+        and rank1_master_rating_field_percentile >= S_RANK_MASTER_RATING_FIELD_PERCENTILE_MIN
         and rank1_recent3_time_idx is not None
         and rank1_recent3_time_idx >= S_RANK_RECENT3_TIME_IDX_MIN
         and rank1_extra_penalty is not None
@@ -788,7 +821,7 @@ def _judge_bet_rank(
         return (
             "S",
             "1位軸3連複の推奨レース",
-            "S条件一致（ランキング1位: score>=64 かつ rating4平均>=400 "
+            "S条件一致（ランキング1位: score>=64 かつ マスタrating百分位>=75 "
             f"かつ 近3走タイム指数>=80 かつ extra_penalty<=1.25）。{base_detail} / {rank1_detail}、補助情報: {rank3_detail}",
         )
 
@@ -992,12 +1025,12 @@ def _bet_rank_readme_rows() -> list[list[object]]:
         ["対象シート", BET_SHEET],
         ["対象列", "R列: ランク(S/A/B)"],
         ["目的", "ランキング1位を軸にした3連複を買うレース選択の目安"],
-        ["前提", "Sはランキング1位馬のscore・rating4平均・近3走タイム指数・extra_penaltyで判定"],
+        ["前提", "Sはランキング1位馬のscore・マスタrating百分位・近3走タイム指数・extra_penaltyで判定"],
         ["", ""],
         ["ランク", "条件", "使い方", "考え方"],
         [
             "S",
-            "ランキング1位の score >= 64 かつ rating4平均 >= 400 かつ 近3走タイム指数 >= 80 かつ extra_penalty <= 1.25",
+            "ランキング1位の score >= 64 かつ マスタrating百分位 >= 75 かつ 近3走タイム指数 >= 80 かつ extra_penalty <= 1.25",
             "ランキング1位を軸にした3連複の主候補",
             "1位馬の絶対評価・近走時計・リスクの条件がそろっている状態",
         ],
@@ -1020,7 +1053,7 @@ def _bet_rank_readme_rows() -> list[list[object]]:
             "ランキング1位を軸にする根拠が不足している状態",
         ],
         ["", ""],
-        ["補足", "1位馬のrating4平均・近3走タイム指数・extra_penaltyと、3位馬の人気・score・extra_penaltyは理由欄に残す"],
+        ["補足", "1位馬のマスタrating百分位・近3走タイム指数・extra_penaltyと、3位馬の人気・score・extra_penaltyは理由欄に残す"],
         ["注意", "結果後にしか分からない着順・払戻はランク判定に使わない"],
         [BET_RANK_README_END, ""],
     ]
@@ -1311,13 +1344,13 @@ def _build_bet_sheet(
                         top_horse_name_norm,
                     )
 
-        # 1位馬のrating4平均・近3走タイム指数・extra_penaltyをS判定に使う。
+        # 1位馬のマスタrating百分位・近3走タイム指数・extra_penaltyをS判定に使う。
         rank1_target_metrics = _horse_metrics_for_race_keys(target_metric_map, race_key_sources, horses6[0])
         rank1_now_metrics = _horse_metrics_for_race_keys(now_metric_map, race_key_sources, horses6[0])
-        rank1_rating4_avg = _first_float(
-            _metric_from_row(top1_row, RATING4_AVG_COL_CANDIDATES),
-            rank1_target_metrics.get("rating4_avg"),
-            rank1_now_metrics.get("rating4_avg"),
+        rank1_master_rating_field_percentile = _first_float(
+            _metric_from_row(top1_row, MASTER_RATING_FIELD_PERCENTILE_COL_CANDIDATES),
+            rank1_target_metrics.get("master_rating_field_percentile"),
+            rank1_now_metrics.get("master_rating_field_percentile"),
         )
         rank1_recent3_time_idx = _first_float(
             _metric_from_row(top1_row, RECENT3_TIME_IDX_COL_CANDIDATES),
@@ -1346,7 +1379,7 @@ def _build_bet_sheet(
             score1=score1,
             gap12=gap12,
             dango_2_5=dango_2_5,
-            rank1_rating4_avg=rank1_rating4_avg,
+            rank1_master_rating_field_percentile=rank1_master_rating_field_percentile,
             rank1_recent3_time_idx=rank1_recent3_time_idx,
             rank1_extra_penalty=rank1_extra_penalty,
             rank3_popularity=rank3_popularity,
