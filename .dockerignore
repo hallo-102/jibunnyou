@@ -1,0 +1,16 @@
+.git
+.gitignore
+!.gitignore
+.env
+.env.*
+!.env.example
+.venv
+**/.pytest_cache
+**/__pycache__
+**/*.py[cod]
+**/node_modules
+**/.next
+data
+reports
+obsidian
+errshot_*

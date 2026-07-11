@@ -9,6 +9,7 @@ env/
 
 .env
 .env.*
+!.env.example
 
 data/
 config/
@@ -21,6 +22,8 @@ races_review/
 scripts/
 src/
 tests/
+!backend/tests/
+!backend/tests/**/*.py
 tokutyouryou_keisann/*/
 yosou_py/
 yosou_py_backup_20260412/
@@ -37,6 +40,8 @@ config/credentials.ini
 node_modules/
 **/node_modules/
 .pnpm-store/
+.next/
+**/.next/
 
 # reports配下のnode_modulesを明示的に除外
 reports/node_modules/
@@ -45,6 +50,8 @@ reports/node_modules/
 docs/auto_backtest_design_spec.md
 reports/auto_backtest_runs/
 reports/backtest_history.jsonl
+reports/*.png
+.backups/
 
 # Python
 __pycache__/

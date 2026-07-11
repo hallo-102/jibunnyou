@@ -8,3 +8,4 @@
 - 会話ログはObsidianで読めるMarkdownとして `C:\Users\okino\OneDrive\ドキュメント\Obsidian Vault\CODEX_YYYYMMDD.md` に追記すること。
 - 同じ日付のログファイルがある場合は新規作成せず、末尾へ追記すること。
 - 会話ログには、ユーザーの質問、回答要約、変更ファイル、検証結果を簡潔に残すこと。
+- `C:\Users\okino\OneDrive\ドキュメント\Obsidian Vault\10_競馬予想\競馬予想AI × Codex App Server 統合アプリ` 配下の設計仕様書は、ユーザーから仕様変更の依頼があった場合だけ更新すること。通常の不具合修正、リファクタリング、運用対応では書き換えないこと。

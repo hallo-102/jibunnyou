@@ -1,0 +1,27 @@
+{
+  "name": "keiba-ai-studio-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0 --port 3000",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0 --port 3000",
+    "lint": "next lint",
+    "test:ui": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "0.468.0",
+    "next": "15.5.20",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "typescript": "5.7.2"
+  },
+  "overrides": {
+    "postcss": "8.5.16"
+  }
+}
