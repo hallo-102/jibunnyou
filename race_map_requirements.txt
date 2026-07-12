@@ -1,0 +1,6 @@
+# 1.50以降は既存バックエンドのStarlette固定版と競合するため、互換範囲を固定します。
+streamlit>=1.40,<1.50
+pandas>=2.0,<3
+openpyxl>=3.1,<4
+matplotlib>=3.8,<4
+PyYAML>=6,<7
