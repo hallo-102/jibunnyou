@@ -99,13 +99,13 @@ SUCCESS_REPORT = EXCEL_DIR / "success_report.xlsx"
 # 既存 pipeline 互換設定
 # ================================================================
 # 1_keibayosou_pipeline.py が import しているため必須
-DL_PROB_BLEND = 0.35
+DL_PROB_BLEND = 0.00
 DL_RANK_BLEND = 0.00
-DL_SCORE_BONUS = 10.0
+DL_SCORE_BONUS = 0.0
 
 # 互換用で残しておく
-USE_DL_PROB = True
-USE_DL_RANK = True
+USE_DL_PROB = False
+USE_DL_RANK = False
 
 
 # ================================================================
@@ -131,7 +131,7 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "fast_score": 0.5,
     "avg_score": 0.8,
     "leg_type_suitability": 0.6,
-    "style_pressure_fit": 0.8,
+    "style_pressure_fit": 0.0,
     "style_confidence": 0.2,
     "running_style_code": 0.0,
     "running_style_confidence": 0.0,
@@ -141,8 +141,8 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "local_small_course_front_bonus": 0.0,
     "long_straight_late_bonus": 0.0,
     "lap_match_bonus": 0.7,
-    "ta_spkm_best": 0.5,
-    "ta_spkm_avg3": -0.3,
+    "ta_spkm_best": 0.0,
+    "ta_spkm_avg3": 0.0,
     "ta_n": 0.2,
     "rating_now": 1.2,
     "rating_vs_field_mean": 0.8,
@@ -152,7 +152,7 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "master_recent_rating": 0.004,
     "master_rating_confidence": 0.8,
     "master_recent_start_count_180d": 0.04,
-    "master_rating_volatility": -0.01,
+    "master_rating_volatility": 0.0,
     "master_rating_vs_field_mean": 0.03,
     "master_recent_rating_vs_field_mean": 0.04,
     "master_rating_field_percentile": 0.8,
@@ -161,18 +161,38 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "past_racelevel_top5_avg3": 0.4,
     "past_racelevel_top5_best": 0.6,
     # ここから追加
-    "cond_match_count": 0.2,
-    "cond_avg_last3f": 0.4,
-    "cond_avg_time_idx": 0.3,
-    "cond_pace_fast_last3f": 0.2,
-    "cond_pace_slow_last3f": 0.1,
-    "last3f_place_surface_diff": 0.5,
-    "last3f_dist_diff": 0.4,
-    "last3f_class_diff": 0.5,
-    "last3f_context_value": 0.8,
-    "time_idx_context_value": 0.6,
+    "cond_match_count": 0.0,
+    "cond_avg_last3f": 0.0,
+    "cond_avg_time_idx": 0.0,
+    "cond_pace_fast_last3f": 0.0,
+    "cond_pace_slow_last3f": 0.0,
+    "last3f_place_surface_diff": 0.0,
+    "last3f_dist_diff": 0.0,
+    "last3f_class_diff": 0.0,
+    "last3f_context_value": 0.0,
+    "time_idx_context_value": 0.0,
     # 既存
-    "dl_rank_score": -1.0,
+    "dl_rank_score": 0.0,
+}
+
+# ランキングから完全に除外する特徴量。
+# 日付付き外部重みファイルを読み込んだ場合も、これらは必ず0へ戻す。
+DISABLED_RANKING_FEATURES = {
+    "style_pressure_fit",
+    "ta_spkm_best",
+    "ta_spkm_avg3",
+    "master_rating_volatility",
+    "cond_match_count",
+    "cond_avg_last3f",
+    "cond_avg_time_idx",
+    "cond_pace_fast_last3f",
+    "cond_pace_slow_last3f",
+    "last3f_place_surface_diff",
+    "last3f_dist_diff",
+    "last3f_class_diff",
+    "last3f_context_value",
+    "time_idx_context_value",
+    "dl_rank_score",
 }
 
 FEATURE_WEIGHTS_SAPPORO = FEATURE_WEIGHTS_BASE
@@ -538,6 +558,9 @@ def _enforce_empirical_weight_signs(
                 continue
             if (val > 0 and expected_sign < 0) or (val < 0 and expected_sign > 0):
                 new_weights[feat] = abs(val) * expected_sign
+        # 無効化対象は、外部最適化済み重みの値にかかわらずランキングへ加点しない。
+        for feat in DISABLED_RANKING_FEATURES:
+            new_weights[feat] = 0.0
         fixed[key] = new_weights
     return fixed
 

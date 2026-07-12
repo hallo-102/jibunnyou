@@ -938,31 +938,15 @@ def add_estimated_in3_rate(
     work["score帯馬券内率"] = work["score帯"].map(lambda x: score_map.get(str(x), DEFAULT_SCORE_IN3_RATE["50未満"]))
     work["基本馬券内率"] = (work["順位別馬券内率"] * 0.6 + work["score帯馬券内率"] * 0.4).round(2)
 
-    score_sorted = work.sort_values(["rid_str", "score", "馬番"], ascending=[True, False, True], kind="mergesort")
-    top_score_map: Dict[str, List[float]] = {}
-    for rid, sub in score_sorted.groupby("rid_str", sort=False):
-        vals = pd.to_numeric(sub["score"], errors="coerce").dropna().head(2).astype(float).tolist()
-        top_score_map[str(rid)] = vals
-
-    def _gap12(rid: object) -> float:
-        vals = top_score_map.get(str(rid), [])
-        if len(vals) < 2:
-            return 0.0
-        return round(float(vals[0] - vals[1]), 2)
-
-    work["gap12"] = work["rid_str"].map(_gap12)
-    rank_num = pd.to_numeric(work["予想順位"], errors="coerce")
-    gap = pd.to_numeric(work["gap12"], errors="coerce").fillna(0.0)
-    score_gap_corr = pd.Series(0.0, index=work.index)
-    score_gap_corr = score_gap_corr.mask((rank_num == 1) & (gap >= 8.0), 5.0)
-    score_gap_corr = score_gap_corr.mask((rank_num == 1) & (gap >= 5.0) & (gap < 8.0), 3.0)
-    score_gap_corr = score_gap_corr.mask((rank_num == 1) & (gap < 2.0), -3.0)
-    work["score差補正"] = score_gap_corr.astype(float)
+    # score差は参考列としても補正に使わず、推定馬券内率への影響を0にする。
+    work["score差補正"] = 0.0
 
     work["頭数補正係数"] = _field_size_factor(work["頭数"]).round(3)
-    work["条件適性補正"] = _condition_correction(work).round(2)
+    # 条件一致系はランキングと推定馬券内率の双方で無効化する。
+    work["条件適性補正"] = 0.0
     work["オッズ補正"] = _odds_correction(work).round(2)
-    work["穴馬救済補正"] = _hole_rescue_correction(work).round(2)
+    # 穴馬救済による人気薄の持ち上げを停止する。
+    work["穴馬救済補正"] = 0.0
     work["危険馬補正"] = _danger_correction(work).round(2)
 
     additive_rate = (

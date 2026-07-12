@@ -190,6 +190,21 @@ OPTIMIZER_FIXED_ZERO_FEATURES = {
     "pace_adjusted_course_style_fit",
     "local_small_course_front_bonus",
     "long_straight_late_bonus",
+    "style_pressure_fit",
+    "ta_spkm_best",
+    "ta_spkm_avg3",
+    "master_rating_volatility",
+    "cond_match_count",
+    "cond_avg_last3f",
+    "cond_avg_time_idx",
+    "cond_pace_fast_last3f",
+    "cond_pace_slow_last3f",
+    "last3f_place_surface_diff",
+    "last3f_dist_diff",
+    "last3f_class_diff",
+    "last3f_context_value",
+    "time_idx_context_value",
+    "dl_rank_score",
 }
 
 # 本番側 1_keibayosou_config.py の FEAT_COLS と揃える
