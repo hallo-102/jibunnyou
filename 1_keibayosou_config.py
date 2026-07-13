@@ -117,9 +117,9 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "avg_pop": -0.3,
     "dist_diff": -0.2,
     "days_off": -0.1,
-    "avg_last3f": 0.4,
+    "avg_last3f": -0.4,
     "avg_margin": -0.3,
-    "avg_time_idx": -0.2,
+    "avg_time_idx": 0.2,
     "recent3_finish": -0.4,
     "recent3_pop": -0.2,
     "recent3_last3f": -0.3,
@@ -143,19 +143,19 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "lap_match_bonus": 0.7,
     "ta_spkm_best": 0.0,
     "ta_spkm_avg3": 0.0,
-    "ta_n": 0.2,
-    "rating_now": 1.2,
-    "rating_vs_field_mean": 0.8,
-    "rating_field_percentile": 0.5,
-    "master_rating": 0.003,
-    "master_start_count": 0.02,
-    "master_recent_rating": 0.004,
-    "master_rating_confidence": 0.8,
-    "master_recent_start_count_180d": 0.04,
+    "ta_n": 0.0,
+    "rating_now": 0.0,
+    "rating_vs_field_mean": 0.0,
+    "rating_field_percentile": 0.0,
+    "master_rating": 0.0,
+    "master_start_count": 0.0,
+    "master_recent_rating": 0.0,
+    "master_rating_confidence": 0.0,
+    "master_recent_start_count_180d": 0.0,
     "master_rating_volatility": 0.0,
-    "master_rating_vs_field_mean": 0.03,
-    "master_recent_rating_vs_field_mean": 0.04,
-    "master_rating_field_percentile": 0.8,
+    "master_rating_vs_field_mean": 0.0,
+    "master_recent_rating_vs_field_mean": 0.0,
+    "master_rating_field_percentile": 0.0,
     "master_recent_rating_field_percentile": 1.0,
     "master_rating_confidence_adjusted": 0.04,
     "past_racelevel_top5_avg3": 0.4,
@@ -181,7 +181,18 @@ DISABLED_RANKING_FEATURES = {
     "style_pressure_fit",
     "ta_spkm_best",
     "ta_spkm_avg3",
+    "rating_now",
+    "rating_vs_field_mean",
+    "rating_field_percentile",
+    "master_rating",
+    "master_start_count",
+    "master_recent_rating",
+    "master_rating_confidence",
+    "master_recent_start_count_180d",
     "master_rating_volatility",
+    "master_rating_vs_field_mean",
+    "master_recent_rating_vs_field_mean",
+    "master_rating_field_percentile",
     "cond_match_count",
     "cond_avg_last3f",
     "cond_avg_time_idx",
@@ -226,6 +237,8 @@ FEATURE_WEIGHTS_BY_PLACE_SURFACE: Dict[Tuple[str, str], Dict[str, float]] = {}
 # data/output/current_weight_backtest/feature_diagnostics_current_weight_backtest.xlsx
 # の weight_corr_mismatch シートで確認した corr_top3 の向きを採用する。
 EMPIRICAL_WEIGHT_SIGN_GUARD: Dict[str, int] = {
+    "avg_last3f": -1,
+    "avg_time_idx": 1,
     "avg_pop": -1,
     "avg_score": 1,
     "rating_field_percentile": 1,
@@ -323,12 +336,12 @@ FEAT_COLS = [
 ]
 
 # 人気馬リスク補正係数
-ALPHA = 20.0
+ALPHA = 10.0
 
 # ================================================================
 # 条件付きペナルティ
 # ================================================================
-EXTRA_ALPHA = 10.0
+EXTRA_ALPHA = 5.0
 
 PEN_FAV_POP_TH = 3.0
 PEN_FAV_POP_K = 0.6
@@ -626,3 +639,64 @@ try:
     FEATURE_WEIGHTS_BY_PLACE_SURFACE = _enforce_empirical_weight_signs(FEATURE_WEIGHTS_BY_PLACE_SURFACE)
 except Exception as e:
     print(f"[WARN] 外部重み読込時にエラーが発生しました: {e}")
+
+
+def print_active_feature_weights() -> None:
+    """ランキング計算で使用する最終重みを表示する。"""
+
+    check_features = [
+        "avg_finish",
+        "avg_pop",
+        "dist_diff",
+        "days_off",
+        "avg_last3f",
+        "avg_margin",
+        "avg_time_idx",
+        "recent3_finish",
+        "recent3_pop",
+        "recent3_last3f",
+        "recent3_time_idx",
+        "ta_n",
+        "rating_now",
+        "rating_vs_field_mean",
+        "rating_field_percentile",
+        "master_rating",
+        "master_start_count",
+        "master_recent_rating",
+        "master_rating_confidence",
+        "master_recent_start_count_180d",
+        "master_rating_volatility",
+        "master_rating_vs_field_mean",
+        "master_recent_rating_vs_field_mean",
+        "master_rating_field_percentile",
+        "master_recent_rating_field_percentile",
+        "master_rating_confidence_adjusted",
+        "style_pressure_fit",
+        "ta_spkm_best",
+        "ta_spkm_avg3",
+        "cond_match_count",
+        "cond_avg_last3f",
+        "cond_avg_time_idx",
+        "cond_pace_fast_last3f",
+        "cond_pace_slow_last3f",
+        "dl_rank_score",
+    ]
+
+    print("[INFO] ===== 最終特徴量重み =====")
+
+    for place, weights in FEATURE_WEIGHTS.items():
+        print(f"[INFO] 対象={place}")
+
+        for feature in check_features:
+            weight = float(weights.get(feature, 0.0))
+            print(f"[INFO]   {feature} = {weight}")
+
+    print(f"[INFO] ALPHA = {ALPHA}")
+    print(f"[INFO] EXTRA_ALPHA = {EXTRA_ALPHA}")
+    print(f"[INFO] DL_PROB_BLEND = {DL_PROB_BLEND}")
+    print(f"[INFO] DL_RANK_BLEND = {DL_RANK_BLEND}")
+    print(f"[INFO] DL_SCORE_BONUS = {DL_SCORE_BONUS}")
+
+
+if __name__ == "__main__":
+    print_active_feature_weights()
