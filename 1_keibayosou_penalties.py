@@ -150,7 +150,62 @@ def calc_rest_dist_risk(row: pd.Series) -> float:
 # ================================================================
 # 条件付きペナルティ（extra_penalty）
 # ================================================================
-def calc_extra_penalty(row: pd.Series, rest_dist_risk: Optional[float] = None) -> float:
+def calc_extra_penalty_components(
+    row: pd.Series,
+    rest_dist_risk: Optional[float] = None,
+) -> dict[str, float]:
+    """extra_penaltyを構成する5成分を、個別比較できる形で返す。"""
+    avg_pop = _first_present_float(row, ["avg_pop", "f_pop_mean"], default=None)
+    avg_finish = _first_present_float(row, ["avg_finish", "f_finish_mean"], default=None)
+    ta_n = _first_present_float(row, ["ta_n", "f_race_count"], default=None)
+    avg_margin = _safe_float(row.get("avg_margin"), default=None)
+    win_rate = _first_present_float(row, ["win_rate", "f_win_rate"], default=None)
+
+    components = {
+        "popular_underperformer": 0.0,
+        "good_loser": 0.0,
+        "ta_n": 0.0,
+        "close_loss": 0.0,
+        "rest_distance": 0.0,
+    }
+
+    if avg_pop is not None:
+        cond_win = (win_rate is None) or (float(win_rate) <= float(PEN_FAV_POP_APPLY_WINRATE_MAX))
+        if cond_win and float(avg_pop) <= float(PEN_FAV_POP_TH):
+            components["popular_underperformer"] = (
+                float(PEN_FAV_POP_TH) - float(avg_pop)
+            ) * float(PEN_FAV_POP_K)
+
+    if avg_finish is not None:
+        cond_win = (win_rate is None) or (float(win_rate) <= float(PEN_GOOD_LOSER_APPLY_WINRATE_MAX))
+        if cond_win and float(PEN_GOOD_LOSER_L) <= float(avg_finish) <= float(PEN_GOOD_LOSER_H):
+            center = (float(PEN_GOOD_LOSER_L) + float(PEN_GOOD_LOSER_H)) / 2.0
+            width = (float(PEN_GOOD_LOSER_H) - float(PEN_GOOD_LOSER_L)) / 2.0
+            if width > 0:
+                closeness = 1.0 - min(1.0, abs(float(avg_finish) - center) / width)
+                components["good_loser"] = max(0.0, float(closeness)) * float(PEN_GOOD_LOSER_K)
+
+    if ta_n is not None and float(ta_n) > float(PEN_TA_N_CAP):
+        components["ta_n"] = (float(ta_n) - float(PEN_TA_N_CAP)) * float(PEN_TA_N_K)
+
+    if avg_finish is not None and avg_margin is not None:
+        cond_win = (win_rate is None) or (float(win_rate) <= float(PEN_CLOSE_LOSS_APPLY_WINRATE_MAX))
+        if cond_win and float(avg_finish) >= float(PEN_CLOSE_LOSS_FINISH_TH) and (
+            float(avg_margin) <= float(PEN_CLOSE_LOSS_MARGIN_TH)
+        ):
+            components["close_loss"] = float(PEN_CLOSE_LOSS_K)
+
+    if rest_dist_risk is None:
+        rest_dist_risk = calc_rest_dist_risk(row)
+    components["rest_distance"] = max(0.0, float(rest_dist_risk))
+    return components
+
+
+def calc_extra_penalty(
+    row: pd.Series,
+    rest_dist_risk: Optional[float] = None,
+    disabled_components: Optional[set[str]] = None,
+) -> float:
     """
     extra_penalty を計算します（0以上）。
 
@@ -165,61 +220,6 @@ def calc_extra_penalty(row: pd.Series, rest_dist_risk: Optional[float] = None) -
     rest_dist_risk を外から渡すと、二重計算を避けられます。
     （pipeline側で先に calc_rest_dist_risk を計算して渡す想定）
     """
-    avg_pop = _first_present_float(row, ["avg_pop", "f_pop_mean"], default=None)
-    avg_finish = _first_present_float(row, ["avg_finish", "f_finish_mean"], default=None)
-    ta_n = _first_present_float(row, ["ta_n", "f_race_count"], default=None)
-    avg_margin = _safe_float(row.get("avg_margin"), default=None)
-    win_rate = _first_present_float(row, ["win_rate", "f_win_rate"], default=None)
-
-    p = 0.0
-
-    # -------------------------
-    # A-1) 人気常連（人気のわりに勝てない）
-    # avg_pop が小さいほど人気
-    # 「勝率が低いときだけ」発動
-    # -------------------------
-    if avg_pop is not None:
-        cond_win = (win_rate is None) or (float(win_rate) <= float(PEN_FAV_POP_APPLY_WINRATE_MAX))
-        if cond_win and (float(avg_pop) <= float(PEN_FAV_POP_TH)):
-            p += (float(PEN_FAV_POP_TH) - float(avg_pop)) * float(PEN_FAV_POP_K)
-
-    # -------------------------
-    # A-2) 善戦マン（3.5〜6.5着あたりに偏る）
-    # 「勝率が低いときだけ」発動
-    # -------------------------
-    if avg_finish is not None:
-        cond_win = (win_rate is None) or (float(win_rate) <= float(PEN_GOOD_LOSER_APPLY_WINRATE_MAX))
-        if cond_win and (float(PEN_GOOD_LOSER_L) <= float(avg_finish) <= float(PEN_GOOD_LOSER_H)):
-            center = (float(PEN_GOOD_LOSER_L) + float(PEN_GOOD_LOSER_H)) / 2.0
-            width = (float(PEN_GOOD_LOSER_H) - float(PEN_GOOD_LOSER_L)) / 2.0
-            if width > 0:
-                closeness = 1.0 - min(1.0, abs(float(avg_finish) - center) / width)  # 0〜1
-                if closeness < 0.0:
-                    closeness = 0.0
-                p += float(closeness) * float(PEN_GOOD_LOSER_K)
-
-    # -------------------------
-    # A-3) ベテラン過大評価（走りすぎ）
-    # -------------------------
-    if ta_n is not None and float(ta_n) > float(PEN_TA_N_CAP):
-        p += (float(ta_n) - float(PEN_TA_N_CAP)) * float(PEN_TA_N_K)
-
-    # -------------------------
-    # A-4) 惜敗マン（着順は悪いのに着差が小さい）
-    # 「勝率が低いときだけ」発動
-    # -------------------------
-    if avg_finish is not None and avg_margin is not None:
-        cond_win = (win_rate is None) or (float(win_rate) <= float(PEN_CLOSE_LOSS_APPLY_WINRATE_MAX))
-        if cond_win and (float(avg_finish) >= float(PEN_CLOSE_LOSS_FINISH_TH)) and (
-            float(avg_margin) <= float(PEN_CLOSE_LOSS_MARGIN_TH)
-        ):
-            p += float(PEN_CLOSE_LOSS_K)
-
-    # -------------------------
-    # 追加：休養×距離差リスク（掛け算）
-    # -------------------------
-    if rest_dist_risk is None:
-        rest_dist_risk = calc_rest_dist_risk(row)
-    p += float(rest_dist_risk)
-
-    return float(max(0.0, p))
+    components = calc_extra_penalty_components(row, rest_dist_risk=rest_dist_risk)
+    disabled = disabled_components or set()
+    return float(sum(value for name, value in components.items() if name not in disabled))

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 import importlib.util  # best_feature_weights_YYYYMMDD.py 動的読込用
@@ -24,6 +25,9 @@ import importlib.util  # best_feature_weights_YYYYMMDD.py 動的読込用
 
 TARGET_SHEET = "TARGET"           # 特徴量を出力するシート名
 NOW_SHEET = "今走レース情報"      # 今走用シート名
+FEATURE_HEALTH_SHEET = "特徴量健康診断"
+FEATURE_CORRELATION_SHEET = "特徴量相関"
+FEATURE_CONTRIBUTION_SHEET = "特徴量スコア寄与"
 
 # horses シート名（1_keibayosou_features.py が参照）
 HORSES_SHEET = "horses"
@@ -160,6 +164,50 @@ FEATURE_WEIGHTS_BASE: Dict[str, float] = {
     "master_rating_confidence_adjusted": 0.04,
     "past_racelevel_top5_avg3": 0.4,
     "past_racelevel_top5_best": 0.6,
+    # Phase 5〜9: 算出を先に検証し、採用判定までは従来順位へ影響させない。
+    "early_position_rate": 0.0,
+    "final_corner_position_rate": 0.0,
+    "position_gain_rate": 0.0,
+    "front_run_rate": 0.0,
+    "middle_run_rate": 0.0,
+    "late_run_rate": 0.0,
+    "escape_run_rate": 0.0,
+    "style_change_rate": 0.0,
+    "delay_rate": 0.0,
+    "escape_candidate_count": 0.0,
+    "front_candidate_count": 0.0,
+    "stalker_candidate_count": 0.0,
+    "closer_candidate_count": 0.0,
+    "front_style_ratio": 0.0,
+    "known_style_ratio": 0.0,
+    "front_pressure": 0.0,
+    "inferred_pace_code": 0.0,
+    "pace_reliability": 0.0,
+    "distance_change_signed": 0.0,
+    "distance_extension": 0.0,
+    "distance_shortening": 0.0,
+    "distance_exact_top3_rate": 0.0,
+    "distance_range_top3_rate": 0.0,
+    "distance_time_idx": 0.0,
+    "recent_distance_time_idx": 0.0,
+    "condition_match_reliability": 0.0,
+    "distance_range_reliability": 0.0,
+    "good_track_time_idx": 0.0,
+    "bad_track_time_idx": 0.0,
+    "bad_track_top3_rate": 0.0,
+    "bad_track_count": 0.0,
+    "track_condition_time_idx_diff": 0.0,
+    "bad_track_reliability": 0.0,
+    "current_track_is_bad": 0.0,
+    "track_condition_fit": 0.0,
+    "recent_delay_flag": 0.0,
+    "trouble_rate": 0.0,
+    "recent_trouble_flag": 0.0,
+    "recent_time_idx_maintained": 0.0,
+    "recent_margin_improvement": 0.0,
+    "condition_change_score": 0.0,
+    "rebound_score_base": 0.0,
+    "rebound_score": 0.0,
     # ここから追加
     "cond_match_count": 0.0,
     "cond_avg_last3f": 0.0,
@@ -320,6 +368,49 @@ FEAT_COLS = [
     "master_rating_confidence_adjusted",
     "past_racelevel_top5_avg3",
     "past_racelevel_top5_best",
+    "early_position_rate",
+    "final_corner_position_rate",
+    "position_gain_rate",
+    "front_run_rate",
+    "middle_run_rate",
+    "late_run_rate",
+    "escape_run_rate",
+    "style_change_rate",
+    "delay_rate",
+    "escape_candidate_count",
+    "front_candidate_count",
+    "stalker_candidate_count",
+    "closer_candidate_count",
+    "front_style_ratio",
+    "known_style_ratio",
+    "front_pressure",
+    "inferred_pace_code",
+    "pace_reliability",
+    "distance_change_signed",
+    "distance_extension",
+    "distance_shortening",
+    "distance_exact_top3_rate",
+    "distance_range_top3_rate",
+    "distance_time_idx",
+    "recent_distance_time_idx",
+    "condition_match_reliability",
+    "distance_range_reliability",
+    "good_track_time_idx",
+    "bad_track_time_idx",
+    "bad_track_top3_rate",
+    "bad_track_count",
+    "track_condition_time_idx_diff",
+    "bad_track_reliability",
+    "current_track_is_bad",
+    "track_condition_fit",
+    "recent_delay_flag",
+    "trouble_rate",
+    "recent_trouble_flag",
+    "recent_time_idx_maintained",
+    "recent_margin_improvement",
+    "condition_change_score",
+    "rebound_score_base",
+    "rebound_score",
     # ここから追加
     "cond_match_count",
     "cond_avg_last3f",
@@ -334,6 +425,66 @@ FEAT_COLS = [
     # 既存
     "dl_rank_score",
 ]
+
+# Phase 3・4・10: レース内尺度統一後に5ブロックへまとめる候補モデル。
+# Phase 11 の未来期間ゲート通過後は five_block を本番既定値とし、環境変数で旧モデルへ戻せる。
+SCORING_MODEL_VERSION = os.getenv("KEIBA_SCORING_MODEL_VERSION", "five_block").strip().lower()
+
+LOWER_IS_BETTER_FEATURES = {
+    "avg_finish",
+    "avg_pop",
+    "dist_diff",
+    "avg_last3f",
+    "avg_margin",
+    "recent3_finish",
+    "recent3_pop",
+    "recent3_last3f",
+    "early_position_rate",
+    "final_corner_position_rate",
+    "style_change_rate",
+}
+
+SCORING_FEATURE_BLOCKS: Dict[str, list[str]] = {
+    "ability": [
+        "recent3_time_idx",
+        "master_recent_rating_field_percentile",
+        "master_rating_confidence_adjusted",
+        "past_racelevel_top5_avg3",
+        "past_racelevel_top5_best",
+    ],
+    "condition": [
+        "distance_exact_top3_rate",
+        "distance_range_top3_rate",
+        "distance_time_idx",
+        "recent_distance_time_idx",
+        "condition_match_reliability",
+        "track_condition_fit",
+        "bad_track_reliability",
+    ],
+    "pace_style": [
+        "style_pressure_fit",
+        "course_style_fit",
+        "pace_adjusted_course_style_fit",
+        "position_gain_rate",
+        "running_style_confidence",
+        "pace_reliability",
+    ],
+    "recent_form": [
+        "recent_finish_trend",
+        "recent_time_idx_trend",
+        "recent_time_idx_maintained",
+        "recent_margin_improvement",
+        "rebound_score",
+    ],
+}
+
+SCORING_BLOCK_WEIGHTS = {
+    "ability": 0.35,
+    "condition": 0.25,
+    "pace_style": 0.22,
+    "recent_form": 0.18,
+    "risk": 0.15,
+}
 
 # 人気馬リスク補正係数
 ALPHA = 10.0
@@ -423,6 +574,49 @@ JAPANESE_FEATURE_NAMES: Dict[str, str] = {
     "master_rating_confidence_adjusted": "マスタ信頼度補正rating差",
     "past_racelevel_top5_avg3": "過去レベル平均",
     "past_racelevel_top5_best": "過去レベル最高",
+    "early_position_rate": "序盤位置率",
+    "final_corner_position_rate": "4角位置率",
+    "position_gain_rate": "位置上昇率",
+    "front_run_rate": "前方走率",
+    "middle_run_rate": "中団走率",
+    "late_run_rate": "後方走率",
+    "escape_run_rate": "逃げ率",
+    "style_change_rate": "脚質変化率",
+    "delay_rate": "出遅れ率",
+    "escape_candidate_count": "逃げ候補数",
+    "front_candidate_count": "先行候補数",
+    "stalker_candidate_count": "差し候補数",
+    "closer_candidate_count": "追込候補数",
+    "front_style_ratio": "前方型割合",
+    "known_style_ratio": "脚質判明率",
+    "front_pressure": "先行圧",
+    "inferred_pace_code": "想定ペースコード",
+    "pace_reliability": "展開信頼度",
+    "distance_change_signed": "距離変更符号付き",
+    "distance_extension": "距離延長",
+    "distance_shortening": "距離短縮",
+    "distance_exact_top3_rate": "同距離馬券内率",
+    "distance_range_top3_rate": "近似距離馬券内率",
+    "distance_time_idx": "距離適性タイム指数",
+    "recent_distance_time_idx": "近走距離適性タイム指数",
+    "condition_match_reliability": "完全条件一致信頼度",
+    "distance_range_reliability": "近似距離信頼度",
+    "good_track_time_idx": "良馬場タイム指数",
+    "bad_track_time_idx": "道悪タイム指数",
+    "bad_track_top3_rate": "道悪馬券内率",
+    "bad_track_count": "道悪経験数",
+    "track_condition_time_idx_diff": "道悪良馬場指数差",
+    "bad_track_reliability": "道悪適性信頼度",
+    "current_track_is_bad": "今回道悪フラグ",
+    "track_condition_fit": "今回馬場適性",
+    "recent_delay_flag": "前走出遅れフラグ",
+    "trouble_rate": "不利率",
+    "recent_trouble_flag": "前走不利フラグ",
+    "recent_time_idx_maintained": "近走タイム指数維持度",
+    "recent_margin_improvement": "近走着差改善度",
+    "condition_change_score": "条件替わり改善度",
+    "rebound_score_base": "巻き返し基礎点",
+    "rebound_score": "巻き返しスコア",
     # ここから追加
     "cond_match_count": "条件一致レース数",
     "cond_avg_last3f": "条件一致平均上がり3F",
@@ -438,6 +632,17 @@ JAPANESE_FEATURE_NAMES: Dict[str, str] = {
     "dl_rank_score": "DL順位スコア",
     "delay_rate": "出遅れ率",
     "rest_dist_risk": "休養×距離差リスク",
+    "ability_score": "能力スコア",
+    "condition_score": "条件適性スコア",
+    "pace_style_score": "展開適性スコア",
+    "recent_form_score": "近走状態スコア",
+    "risk_score": "リスクスコア",
+    "five_block_raw_score": "5ブロック最終生スコア",
+    "five_block_score": "5ブロック最終スコア",
+    "five_block_rank": "5ブロック予想順位",
+    "main_positive_reasons": "主な加点理由",
+    "main_negative_reasons": "主な減点理由",
+    "data_confidence": "データ信頼度",
 }
 
 DELAY_KEYWORDS = [

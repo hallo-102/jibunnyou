@@ -52,6 +52,7 @@ def _register_renamed_keibayosou_modules() -> None:
         ("keibayosou_features", "1_keibayosou_features"),
         ("keibayosou_penalties", "1_keibayosou_penalties"),
         ("keibayosou_pipeline", "1_keibayosou_pipeline"),
+        ("keibayosou_pace", "1_keibayosou_pace"),
     ]
     for old_name, new_name in module_aliases:
         if old_name not in sys.modules:
@@ -63,6 +64,7 @@ _register_renamed_keibayosou_modules()
 from keibayosou_config import BASE_DIR, HORSE_RESULTS_DIR, RACE_LEVEL_XLSX, BASE_TIME_XLSX, ODDS_CSV
 from keibayosou_loaders import load_odds_csv
 from keibayosou_pipeline import append_roi_focus_bet_sheet_to_excel, run_pipeline
+from keibayosou_pace import append_pace_prediction_sheet_to_excel
 from keibayosou_utils import _normalize_place
 
 
@@ -74,6 +76,7 @@ TRAIN_XLSX = BASE_DIR / "data" / "master" / "racedata_results.xlsx"
 OZZU_SCRAPER_SCRIPT = BASE_DIR / "etc_py" / "1_02_scrape_jra_odds_2.py"
 NOW_SHEET = "今走レース情報"
 TARGET_SHEET = "TARGET"
+README_SHEET = "README"
 EST_IN3_SHEET = "推定馬券内率"
 VALUE_HORSE_SHEET = "妙味あり馬"
 DANGER_HORSE_SHEET = "危険馬"
@@ -84,6 +87,14 @@ ROI_FOCUS_BET_SHEET = "回収率重視_買い目候補"
 RACE_ID_FORMAT_SHEETS = [BET_SHEET, ROI_FOCUS_BET_SHEET, DANGER_HORSE_SHEET]
 AXIS_UMABAN_COLUMN = "軸馬番"
 OLD_AXIS_BET_COLUMNS = ["1頭軸_馬番", "1頭軸_相手", "1頭軸_金額", "保険BOX_馬番", "保険BOX_金額"]
+RANK1_JUDGMENT_COLUMN_INDEX = 23  # W列
+RANK1_JUDGMENT_COLUMN_NAME = "1位判定"
+RANK1_JUDGMENT_README_START = "【買い目_レース別1行 1位判定条件】"
+RANK1_JUDGMENT_README_END = "【買い目_レース別1行 1位判定条件ここまで】"
+RANK1_EXCLUSION_COLUMN_INDEX = 24  # X列
+RANK1_EXCLUSION_COLUMN_NAME = "対象外(1位)"
+RANK1_EXCLUSION_README_START = "【買い目_レース別1行 対象外(1位)条件】"
+RANK1_EXCLUSION_README_END = "【買い目_レース別1行 対象外(1位)条件ここまで】"
 
 
 # ============================================================
@@ -138,9 +149,13 @@ EST_IN3_RESULT_COLS = [
     "オッズ帯基準馬券内率",
     "オッズ帯補正係数",
     "推定馬券内率_オッズ補正後",
+    "model_in3_probability",
+    "market_blended_in3_probability",
     "市場評価オッズ種別",
     "市場馬券内率",
     "期待値_補正前",
+    "期待値_市場補正後",
+    "expected_value",
     "期待値",
     "妙味判定",
 ]
@@ -949,15 +964,15 @@ def add_estimated_in3_rate(
     work["穴馬救済補正"] = 0.0
     work["危険馬補正"] = _danger_correction(work).round(2)
 
-    additive_rate = (
+    # 純粋モデル確率には人気・オッズを混ぜない。
+    model_additive_rate = (
         work["基本馬券内率"]
         + work["score差補正"]
         + work["条件適性補正"]
-        + work["オッズ補正"]
         + work["穴馬救済補正"]
         + work["危険馬補正"]
     )
-    work["補正後馬券内率"] = (additive_rate.clip(lower=0.1) * work["頭数補正係数"]).round(2)
+    work["補正後馬券内率"] = (model_additive_rate.clip(lower=0.1) * work["頭数補正係数"]).round(2)
 
     race_sum = work.groupby("rid_str")["補正後馬券内率"].transform("sum")
     work["レース内調整係数"] = np.where(race_sum > 0, 300.0 / race_sum, 1.0)
@@ -974,11 +989,17 @@ def add_estimated_in3_rate(
     work["オッズ帯基準馬券内率"] = market_odds.apply(get_fukusho_odds_base_in3_rate)
     work["オッズ帯補正係数"] = market_odds.apply(get_odds_blend_weight).round(2)
     work["推定馬券内率_オッズ補正後"] = work.apply(adjust_in3_rate_by_fukusho_odds, axis=1)
-    work["期待値_補正前"] = ((work["推定馬券内率_補正前"] / 100.0) * market_odds).round(2)
-    work["期待値"] = ((work["推定馬券内率_オッズ補正後"] / 100.0) * market_odds).round(2)
+    work["model_in3_probability"] = work["推定馬券内率_補正前"]
+    work["market_blended_in3_probability"] = work["推定馬券内率_オッズ補正後"]
+    work["expected_value"] = ((work["model_in3_probability"] / 100.0) * market_odds).round(2)
+    work["期待値_補正前"] = work["expected_value"]
+    work["期待値_市場補正後"] = (
+        (work["market_blended_in3_probability"] / 100.0) * market_odds
+    ).round(2)
+    work["期待値"] = work["expected_value"]
 
     ev = pd.to_numeric(work["期待値"], errors="coerce")
-    est = pd.to_numeric(work["推定馬券内率_オッズ補正後"], errors="coerce")
+    est = pd.to_numeric(work["model_in3_probability"], errors="coerce")
     work["妙味判定"] = "オッズ未取得"
     work["妙味判定"] = work["妙味判定"].mask(ev.notna() & (est >= 45.0) & (ev < 1.0), "来そうだが妙味なし")
     work["妙味判定"] = work["妙味判定"].mask(ev.notna() & (ev < 0.95), "妙味なし")
@@ -1651,6 +1672,295 @@ def _fill_axis_umaban_to_bet_sheet(out_excel_path: str) -> int:
     return filled
 
 
+def _to_optional_float(value: object) -> Optional[float]:
+    """Excel由来の値を数値化し、変換できない場合はNoneを返す。"""
+    converted = _coerce_float_series(pd.Series([value])).iloc[0]
+    return None if pd.isna(converted) else float(converted)
+
+
+def _is_rank1_judgment_target(
+    popularity: object,
+    win_odds: object,
+    avg_finish: object,
+    recent3_finish: object,
+    leg_type_suitability: object,
+    style_confidence: object,
+    recent_finish_trend: object,
+    recent_rating_percentile: object,
+    avg_score: object,
+) -> bool:
+    """最終ランキング1位馬が、1位判定条件11個のうち1個以上に該当するか判定する。"""
+    popularity_num = _to_optional_float(popularity)
+    win_odds_num = _to_optional_float(win_odds)
+    avg_finish_num = _to_optional_float(avg_finish)
+    recent3_finish_num = _to_optional_float(recent3_finish)
+    leg_type_suitability_num = _to_optional_float(leg_type_suitability)
+    style_confidence_num = _to_optional_float(style_confidence)
+    recent_finish_trend_num = _to_optional_float(recent_finish_trend)
+    recent_rating_percentile_num = _to_optional_float(recent_rating_percentile)
+    avg_score_num = _to_optional_float(avg_score)
+
+    matched_conditions = [
+        avg_finish_num is not None
+        and avg_finish_num <= 13.77
+        and leg_type_suitability_num is not None
+        and leg_type_suitability_num >= 100.0,
+        popularity_num is not None
+        and popularity_num == 1.0
+        and avg_finish_num is not None
+        and avg_finish_num <= 13.77,
+        avg_finish_num is not None and avg_finish_num <= 8.84,
+        recent3_finish_num is not None and recent3_finish_num <= 6.17,
+        win_odds_num is not None and win_odds_num <= 1.92,
+        popularity_num is not None
+        and popularity_num == 1.0
+        and style_confidence_num is not None
+        and style_confidence_num >= 70.94,
+        recent_finish_trend_num is not None
+        and recent_finish_trend_num >= 65.78
+        and recent_rating_percentile_num is not None
+        and recent_rating_percentile_num >= 89.41,
+        avg_score_num is not None
+        and avg_score_num >= 78.35
+        and style_confidence_num is not None
+        and style_confidence_num >= 70.94,
+        avg_finish_num is not None and avg_finish_num <= 11.39,
+        recent3_finish_num is not None and recent3_finish_num <= 9.45,
+        recent3_finish_num is not None and recent3_finish_num <= 11.68,
+    ]
+    return any(matched_conditions)
+
+
+def _is_rank1_exclusion_target(
+    popularity: object,
+    win_odds: object,
+    recent3_finish: object,
+    recent_time_idx_trend: object,
+    recent_finish_trend: object,
+) -> bool:
+    """従来の対象外条件5個のうち2個以上に該当するか判定する。"""
+    popularity_num = _to_optional_float(popularity)
+    win_odds_num = _to_optional_float(win_odds)
+    recent3_finish_num = _to_optional_float(recent3_finish)
+    recent_time_idx_trend_num = _to_optional_float(recent_time_idx_trend)
+    recent_finish_trend_num = _to_optional_float(recent_finish_trend)
+
+    matched_conditions = [
+        popularity_num is not None and popularity_num >= 6.0,
+        win_odds_num is not None and win_odds_num >= 15.9,
+        recent3_finish_num is not None and recent3_finish_num >= 41.46,
+        recent_time_idx_trend_num is not None and recent_time_idx_trend_num <= 34.63,
+        recent_finish_trend_num is not None and recent_finish_trend_num <= 38.68,
+    ]
+    return sum(matched_conditions) >= 2
+
+
+def _rank1_judgment_readme_rows() -> List[List[object]]:
+    """READMEシートへ追記する、最終ランキング1位馬の判定条件を返す。"""
+    return [
+        [RANK1_JUDGMENT_README_START, ""],
+        ["対象シート", BET_SHEET],
+        ["対象列", "W列: 1位判定"],
+        ["判定対象", "各レースの最終ランキング予想1位馬"],
+        ["表示ルール", "次の11条件のうち1個以上に該当した場合、対象レース行へ「〇」と表示"],
+        ["条件1", "平均着順が13.77以下、かつ脚質適性が100"],
+        ["条件2", "1番人気、かつ平均着順が13.77以下"],
+        ["条件3", "平均着順が8.84以下"],
+        ["条件4", "近3走平均着順が6.17以下"],
+        ["条件5", "単勝オッズが1.92倍以下"],
+        ["条件6", "1番人気、かつ脚質安定度が70.94以上"],
+        ["条件7", "近走着順上昇度が65.78以上、かつマスタ近走rating百分位が89.41以上"],
+        ["条件8", "平均指数が78.35以上、かつ脚質安定度が70.94以上"],
+        ["条件9", "平均着順が11.39以下"],
+        ["条件10", "近3走平均着順が9.45以下"],
+        ["条件11", "近3走平均着順が11.68以下"],
+        ["欠損値", "値を取得できない条件は不成立として数える"],
+        [RANK1_JUDGMENT_README_END, ""],
+    ]
+
+
+def _rank1_exclusion_readme_rows() -> List[List[object]]:
+    """READMEシートへ追記する、最終ランキング1位馬の対象外条件を返す。"""
+    return [
+        [RANK1_EXCLUSION_README_START, ""],
+        ["対象シート", BET_SHEET],
+        ["対象列", "X列: 対象外(1位)"],
+        ["判定対象", "各レースの最終ランキング予想1位馬"],
+        ["表示ルール", "条件A～Eのうち2個以上に該当した場合、対象レース行へ「対象外」と表示"],
+        ["条件A", "6番人気以降（人気の数値が6以上）"],
+        ["条件B", "単勝オッズが15.9倍以上"],
+        ["条件C", "近3走平均着順が41.46以上"],
+        ["条件D", "近走タイム上昇度が34.63以下"],
+        ["条件E", "近走着順上昇度が38.68以下"],
+        ["欠損値", "値を取得できない条件は不成立として数える"],
+        [RANK1_EXCLUSION_README_END, ""],
+    ]
+
+
+def _write_rank1_judgment_to_bet_sheet(out_excel_path: str) -> int:
+    """最終ランキング1位馬を判定し、買い目シートW・X列とREADMEへ反映する。"""
+    if not os.path.exists(out_excel_path):
+        print(f"[WARN] 出力Excelが見つからないため、1位判定をスキップ: {out_excel_path}")
+        return 0
+
+    try:
+        with pd.ExcelFile(out_excel_path, engine="openpyxl") as xls:
+            if BET_SHEET not in xls.sheet_names:
+                print(f"[WARN] '{BET_SHEET}' シートが無いため、1位判定をスキップします")
+                return 0
+            if TARGET_SHEET not in xls.sheet_names:
+                print(f"[WARN] '{TARGET_SHEET}' シートが無いため、1位判定をスキップします")
+                return 0
+
+            bet_df = pd.read_excel(out_excel_path, sheet_name=BET_SHEET, engine="openpyxl")
+            target_df = pd.read_excel(out_excel_path, sheet_name=TARGET_SHEET, engine="openpyxl")
+    except Exception as e:
+        print(f"[WARN] 1位判定用Excelの読み込みに失敗しました: {e}")
+        return 0
+
+    bet_race_col = _pick_col(bet_df, ["レースID", "rid_str", "race_id"])
+    bet_top1_col = _pick_col(bet_df, ["1位馬番"])
+    avg_finish_col = _pick_col(target_df, ["平均着順", "avg_finish"])
+    recent3_finish_col = _pick_col(target_df, ["近3走平均着順", "recent3_finish"])
+    leg_type_suitability_col = _pick_col(target_df, ["脚質適性", "leg_type_suitability"])
+    style_confidence_col = _pick_col(target_df, ["脚質安定度", "style_confidence"])
+    recent_time_idx_trend_col = _pick_col(target_df, ["近走タイム上昇度", "recent_time_idx_trend"])
+    recent_finish_trend_col = _pick_col(target_df, ["近走着順上昇度", "recent_finish_trend"])
+    recent_rating_percentile_col = _pick_col(
+        target_df,
+        ["マスタ近走rating百分位", "近走rating百分位", "master_recent_rating_field_percentile"],
+    )
+    avg_score_col = _pick_col(target_df, ["平均指数", "avg_score"])
+
+    required_cols = {
+        "買い目レースID": bet_race_col,
+        "1位馬番": bet_top1_col,
+        "平均着順": avg_finish_col,
+        "近3走平均着順": recent3_finish_col,
+        "脚質適性": leg_type_suitability_col,
+        "脚質安定度": style_confidence_col,
+        "近走タイム上昇度": recent_time_idx_trend_col,
+        "近走着順上昇度": recent_finish_trend_col,
+        "マスタ近走rating百分位": recent_rating_percentile_col,
+        "平均指数": avg_score_col,
+    }
+    missing_cols = [label for label, col in required_cols.items() if col is None]
+    if missing_cols:
+        print(f"[WARN] 1位判定に必要な列がありません: {missing_cols}")
+        return 0
+
+    target = _canonical_prediction_frame(target_df)
+    target["__rank1_judgment_rid"] = _normalize_rid_series(target["rid_str"])
+    target["__rank1_judgment_umaban"] = _normalize_umaban_series(target["馬番"])
+
+    bet_race_keys = _normalize_rid_series(bet_df[bet_race_col])
+    bet_top1_numbers = _normalize_umaban_series(bet_df[bet_top1_col])
+    bet_odds_col = _pick_col(bet_df, ["単勝オッズ_1位"])
+    judgment_flags: List[bool] = []
+    exclusion_flags: List[bool] = []
+
+    for row_pos in range(len(bet_df)):
+        race_key = str(bet_race_keys.iloc[row_pos])
+        top1_number = bet_top1_numbers.iloc[row_pos]
+        matched = target[
+            target["__rank1_judgment_rid"].eq(race_key)
+            & target["__rank1_judgment_umaban"].eq(top1_number)
+        ]
+        if matched.empty:
+            judgment_flags.append(False)
+            exclusion_flags.append(False)
+            continue
+
+        rank1 = matched.iloc[0]
+        bet_win_odds = bet_df.iloc[row_pos].get(bet_odds_col) if bet_odds_col is not None else None
+        win_odds = bet_win_odds if _to_optional_float(bet_win_odds) is not None else rank1.get("単勝オッズ")
+        judgment_flags.append(
+            _is_rank1_judgment_target(
+                popularity=rank1.get("人気"),
+                win_odds=win_odds,
+                avg_finish=rank1.get(avg_finish_col),
+                recent3_finish=rank1.get(recent3_finish_col),
+                leg_type_suitability=rank1.get(leg_type_suitability_col),
+                style_confidence=rank1.get(style_confidence_col),
+                recent_finish_trend=rank1.get(recent_finish_trend_col),
+                recent_rating_percentile=rank1.get(recent_rating_percentile_col),
+                avg_score=rank1.get(avg_score_col),
+            )
+        )
+        exclusion_flags.append(
+            _is_rank1_exclusion_target(
+                popularity=rank1.get("人気"),
+                win_odds=win_odds,
+                recent3_finish=rank1.get(recent3_finish_col),
+                recent_time_idx_trend=rank1.get(recent_time_idx_trend_col),
+                recent_finish_trend=rank1.get(recent_finish_trend_col),
+            )
+        )
+
+    wb = None
+    try:
+        wb = load_workbook(out_excel_path)
+        bet_ws = wb[BET_SHEET]
+        bet_ws.cell(row=1, column=RANK1_JUDGMENT_COLUMN_INDEX).value = RANK1_JUDGMENT_COLUMN_NAME
+        for row_idx in range(2, bet_ws.max_row + 1):
+            bet_ws.cell(row=row_idx, column=RANK1_JUDGMENT_COLUMN_INDEX).value = None
+        for row_pos, is_target in enumerate(judgment_flags, start=2):
+            bet_ws.cell(row=row_pos, column=RANK1_JUDGMENT_COLUMN_INDEX).value = "〇" if is_target else None
+        bet_ws.column_dimensions["W"].width = 14
+        bet_ws.cell(row=1, column=RANK1_EXCLUSION_COLUMN_INDEX).value = RANK1_EXCLUSION_COLUMN_NAME
+        for row_idx in range(2, bet_ws.max_row + 1):
+            bet_ws.cell(row=row_idx, column=RANK1_EXCLUSION_COLUMN_INDEX).value = None
+        for row_pos, is_excluded in enumerate(exclusion_flags, start=2):
+            bet_ws.cell(row=row_pos, column=RANK1_EXCLUSION_COLUMN_INDEX).value = "対象外" if is_excluded else None
+        bet_ws.column_dimensions["X"].width = 14
+
+        readme_ws = wb[README_SHEET] if README_SHEET in wb.sheetnames else wb.create_sheet(README_SHEET)
+        readme_start_values = {RANK1_JUDGMENT_README_START, RANK1_EXCLUSION_README_START}
+        readme_end_values = {RANK1_JUDGMENT_README_END, RANK1_EXCLUSION_README_END}
+        start_row = None
+        delete_ranges: List[Tuple[int, int]] = []
+        for row_idx in range(1, readme_ws.max_row + 1):
+            value = readme_ws.cell(row=row_idx, column=1).value
+            if value in readme_start_values:
+                start_row = row_idx
+            if start_row is not None and value in readme_end_values:
+                delete_ranges.append((start_row, row_idx))
+                start_row = None
+        for delete_start, delete_end in reversed(delete_ranges):
+            readme_ws.delete_rows(delete_start, delete_end - delete_start + 1)
+
+        has_readme_content = any(
+            readme_ws.cell(row=row_idx, column=col_idx).value not in (None, "")
+            for row_idx in range(1, readme_ws.max_row + 1)
+            for col_idx in range(1, readme_ws.max_column + 1)
+        )
+        write_row = readme_ws.max_row + 2 if has_readme_content else 1
+        readme_rows = _rank1_judgment_readme_rows() + [["", ""]] + _rank1_exclusion_readme_rows()
+        for row_values in readme_rows:
+            for col_idx, value in enumerate(row_values, start=1):
+                readme_ws.cell(row=write_row, column=col_idx).value = value
+            write_row += 1
+
+        wb.save(out_excel_path)
+    except PermissionError:
+        print(f"[WARN] 出力Excelが開かれている可能性があります。Excelを閉じてから再実行してください: {out_excel_path}")
+        return 0
+    except Exception as e:
+        print(f"[WARN] 1位判定のExcel書き戻しに失敗しました: {e}")
+        return 0
+    finally:
+        if wb is not None:
+            wb.close()
+
+    target_count = int(sum(judgment_flags))
+    excluded_count = int(sum(exclusion_flags))
+    print(
+        f"[INFO] 1位判定反映完了: 〇={target_count}/{len(judgment_flags)}レース, "
+        f"対象外={excluded_count}/{len(exclusion_flags)}レース -> {out_excel_path}"
+    )
+    return target_count
+
+
 # ============================================================
 # OZZU単勝オッズ反映
 # ============================================================
@@ -1752,11 +2062,8 @@ def _build_tansho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str, 
         & ozzu["race_no"].astype(str).str.fullmatch(r"\d{2}", na=False)
         & ozzu["name_norm"].astype(str).str.strip().ne("")
     ].copy()
-    base_without_name = ["date", "place_norm", "race_no", "umaban"]
-    bad_name = ozzu.groupby(base_without_name)["name_norm"].nunique(dropna=True).loc[lambda s: s > 1]
-    if not bad_name.empty:
-        sample = ozzu[base_without_name + ["name", "name_norm"]].head(10).to_dict("records")
-        raise ValueError(f"OZZU単勝オッズで同一馬番に複数馬名を検知しました: sample={sample}")
+    # 過去CSVに別レース由来の同一馬番が混在していても、馬名を含む
+    # 照合キーで安全に分離できる。馬名まで同じ重複だけを下で検査する。
     key_cols = ["date", "place_norm", "race_no", "umaban", "name_norm"]
     _raise_on_duplicate_odds_keys(ozzu, key_cols, "OZZU単勝オッズ")
 
@@ -1817,11 +2124,7 @@ def _build_fukusho_map_from_ozzu(ozzu_raw: pd.DataFrame) -> Dict[Tuple[str, str,
         & ozzu["race_no"].astype(str).str.fullmatch(r"\d{2}", na=False)
         & ozzu["name_norm"].astype(str).str.strip().ne("")
     ].copy()
-    base_without_name = ["date", "place_norm", "race_no", "umaban"]
-    bad_name = ozzu.groupby(base_without_name)["name_norm"].nunique(dropna=True).loc[lambda s: s > 1]
-    if not bad_name.empty:
-        sample = ozzu[base_without_name + ["name", "name_norm"]].head(10).to_dict("records")
-        raise ValueError(f"OZZU複勝オッズで同一馬番に複数馬名を検知しました: sample={sample}")
+    # 複勝も単勝と同様に、馬名を含むキーで混在データを分離する。
     key_cols = ["date", "place_norm", "race_no", "umaban", "name_norm"]
     _raise_on_duplicate_odds_keys(ozzu, key_cols, "OZZU複勝オッズ")
 
@@ -2426,7 +2729,10 @@ def main() -> None:
     _add_estimated_in3_rate_to_excel(actual_final_out, raceday_str)
     _fill_axis_umaban_to_bet_sheet(actual_final_out)
     append_roi_focus_bet_sheet_to_excel(actual_final_out)
+    _write_rank1_judgment_to_bet_sheet(actual_final_out)
     _format_race_id_column_to_integer(actual_final_out)
+    pace_race_count = append_pace_prediction_sheet_to_excel(actual_final_out)
+    print(f"[INFO] ペース予想シートを作成しました: {pace_race_count}レース")
 
     print("[INFO] ===== すべて完了しました =====")
     print(f"[INFO] 最終出力: {actual_final_out}")

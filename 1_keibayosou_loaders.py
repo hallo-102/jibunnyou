@@ -435,7 +435,10 @@ def _convert_ozzu_to_odds(df: pd.DataFrame, raceday: Optional[str] = None) -> pd
 
     _raise_on_duplicate_keys(
         d,
-        ["date", "place", "race_no", "umaban", "bet_type"],
+        # 過去のOZZU CSVには、同一日・場・R・馬番へ別レースの馬名が
+        # 混在したファイルがある。後段の照合は馬名もキーに使うため、
+        # 馬名まで同一なのに重複する場合だけ矛盾として停止する。
+        ["date", "place", "race_no", "umaban", "bet_type", "name_norm"],
         "OZZU CSV",
         horse_name_col="name",
     )

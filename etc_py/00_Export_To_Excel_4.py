@@ -7,6 +7,9 @@
 #  (4) start_time（発走時刻）を抽出して races / race_levels に追加
 #  (5) place（開催場）を正しく抽出（"09:50発走" を place にしない）
 #  (6) PermissionError対策：Excelがロックされていても一時コピーで読み込む
+#  (7) recent_rating の重みを常に再正規化
+#  (8) レース内のrating変動量をゼロサム化
+#  (9) レース前評価とレース後時計補正を分離
 
 from __future__ import annotations
 
@@ -1020,6 +1023,64 @@ def mean_or_none(values: List[float]) -> Optional[float]:
     return float(sum(values) / len(values))
 
 
+def calc_pre_race_level_score(
+    pre_top3_mean: Optional[float],
+    pre_top5_mean: Optional[float],
+    pre_mean: Optional[float],
+    pre_p50: Optional[float],
+) -> Optional[float]:
+    """
+    レース前に取得できる出走馬ratingだけでレースレベルを計算する。
+    レース結果や走破タイムは一切使用しないため、レース前予想で利用できる。
+    """
+    values = [pre_top3_mean, pre_top5_mean, pre_mean, pre_p50]
+    if any(v is None or pd.isna(v) for v in values):
+        return None
+
+    return float(
+        (float(pre_top3_mean) * 0.35)
+        + (float(pre_top5_mean) * 0.25)
+        + (float(pre_mean) * 0.25)
+        + (float(pre_p50) * 0.15)
+    )
+
+
+def calc_result_time_level_adjustment(
+    race_best_vs_master_sec: Optional[float] = None,
+    top5_time_vs_master_mean: Optional[float] = None,
+    fast_runner_rate: Optional[float] = None,
+) -> Optional[float]:
+    """
+    レース終了後に判明する時計情報だけからレースレベルの加減点を計算する。
+    時計評価に使える値が1つもない場合は、実際の0点と区別するため None を返す。
+    """
+    time_values = [race_best_vs_master_sec, top5_time_vs_master_mean, fast_runner_rate]
+    if all(v is None or pd.isna(v) for v in time_values):
+        return None
+
+    time_adjustment = 0.0
+    if race_best_vs_master_sec is not None and not pd.isna(race_best_vs_master_sec):
+        time_adjustment += clamp(-6.0 * float(race_best_vs_master_sec), -18.0, 12.0)
+    if top5_time_vs_master_mean is not None and not pd.isna(top5_time_vs_master_mean):
+        time_adjustment += clamp(-4.0 * float(top5_time_vs_master_mean), -16.0, 12.0)
+    if fast_runner_rate is not None and not pd.isna(fast_runner_rate):
+        time_adjustment += clamp(float(fast_runner_rate), 0.0, 1.0) * 8.0
+
+    return float(time_adjustment)
+
+
+def calc_final_race_level_score(
+    pre_race_level_score: Optional[float],
+    result_time_level_adjustment: Optional[float],
+) -> Optional[float]:
+    """事前レースレベルに、取得できた場合だけレース後の時計補正を加える。"""
+    if pre_race_level_score is None or pd.isna(pre_race_level_score):
+        return None
+    if result_time_level_adjustment is None or pd.isna(result_time_level_adjustment):
+        return float(pre_race_level_score)
+    return float(pre_race_level_score + result_time_level_adjustment)
+
+
 def calc_race_level_score(
     pre_top3_mean: Optional[float],
     pre_top5_mean: Optional[float],
@@ -1029,30 +1090,19 @@ def calc_race_level_score(
     top5_time_vs_master_mean: Optional[float] = None,
     fast_runner_rate: Optional[float] = None,
 ) -> Optional[float]:
-    """
-    上位層だけでなく出走馬全体の厚みも見るレースレベル総合スコア。
-    pre_top3_mean 単独だと1〜3頭の高ratingに引っ張られるため、平均・中央値も混ぜる。
-    条件別最速基準タイムに近い/速いレースは、時計面のレースレベルとして少し加点する。
-    """
-    values = [pre_top3_mean, pre_top5_mean, pre_mean, pre_p50]
-    if any(v is None or pd.isna(v) for v in values):
-        return None
-
-    base_score = float(
-        (float(pre_top3_mean) * 0.35)
-        + (float(pre_top5_mean) * 0.25)
-        + (float(pre_mean) * 0.25)
-        + (float(pre_p50) * 0.15)
+    """後方互換用に、従来名で最終レースレベルを返す。"""
+    pre_score = calc_pre_race_level_score(
+        pre_top3_mean,
+        pre_top5_mean,
+        pre_mean,
+        pre_p50,
     )
-    time_adjustment = 0.0
-    if race_best_vs_master_sec is not None and not pd.isna(race_best_vs_master_sec):
-        time_adjustment += clamp(-6.0 * float(race_best_vs_master_sec), -18.0, 12.0)
-    if top5_time_vs_master_mean is not None and not pd.isna(top5_time_vs_master_mean):
-        time_adjustment += clamp(-4.0 * float(top5_time_vs_master_mean), -16.0, 12.0)
-    if fast_runner_rate is not None and not pd.isna(fast_runner_rate):
-        time_adjustment += clamp(float(fast_runner_rate), 0.0, 1.0) * 8.0
-
-    return float(base_score + time_adjustment)
+    time_adjustment = calc_result_time_level_adjustment(
+        race_best_vs_master_sec,
+        top5_time_vs_master_mean,
+        fast_runner_rate,
+    )
+    return calc_final_race_level_score(pre_score, time_adjustment)
 
 
 def parse_yyyymmdd(value) -> Optional[datetime.date]:
@@ -1075,7 +1125,6 @@ def weighted_recent_rating(history_rows: List[Dict], limit: int = 3) -> Optional
         return None
     weights = [0.50, 0.30, 0.20][:len(rows)]
     rows_recent_first = list(reversed(rows))
-    total_w = sum(weights)
     total = 0.0
     used_w = 0.0
     for row, w in zip(rows_recent_first, weights):
@@ -1086,7 +1135,8 @@ def weighted_recent_rating(history_rows: List[Dict], limit: int = 3) -> Optional
         used_w += w
     if used_w == 0.0:
         return None
-    return float(total / used_w if used_w != total_w else total)
+    # 履歴数や欠損位置にかかわらず、実際に使用した重みで必ず再正規化する。
+    return float(total / used_w)
 
 
 def calc_rating_confidence(start_count: int, recent_start_count: int) -> float:
@@ -1536,14 +1586,21 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                 race_median_vs_master_sec = calc_time_vs_master_sec(median_time, cond_best_time)
                 top5_time_vs_master_mean = mean_or_none(top5_time_vs_master_values)
                 field_time_vs_master_mean = mean_or_none(time_vs_master_values)
-                race_level_score = calc_race_level_score(
+                # レース前ratingとレース後時計情報を別々に計算し、未来情報の混入を防ぐ。
+                pre_race_level_score = calc_pre_race_level_score(
                     pre_top3,
                     pre_top5,
                     pre_mean,
                     pre_p50,
+                )
+                result_time_level_adjustment = calc_result_time_level_adjustment(
                     race_best_vs_master_sec,
                     top5_time_vs_master_mean,
                     fast_runner_rate,
+                )
+                final_race_level_score = calc_final_race_level_score(
+                    pre_race_level_score,
+                    result_time_level_adjustment,
                 )
                 store.race_levels.append({
                     "race_id": str(rid),
@@ -1570,7 +1627,11 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     "gap_top1_p50": gap_top1_p50,
                     "gap_top3_p50": gap_top3_p50,
                     "gap_top5_p50": gap_top5_p50,
-                    "race_level_score": race_level_score,
+                    "pre_race_level_score": pre_race_level_score,
+                    "result_time_level_adjustment": result_time_level_adjustment,
+                    "final_race_level_score": final_race_level_score,
+                    # 既存利用コードとの互換性を保つため、従来列は最終評価と同じ値にする。
+                    "race_level_score": final_race_level_score,
                     "cond_best_time_baseline": cond_best_time,
                     "cond_median_time_baseline": cond_median_time,
                     "day_bias_sec": day_bias_sec,
@@ -1586,6 +1647,9 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     "surface_rating_mode": surface_key or "overall",
                 })
 
+                # 第1段階：全出走馬の更新前情報と raw_delta を一時保存する。
+                # この段階ではrating・出走回数・履歴・出力明細を一切更新しない。
+                pending_updates: List[Dict] = []
                 for starter in starters:
                     hid = starter["horse_id"]
                     others = [s["pre_effective"] for s in starters if s["horse_id"] != hid]
@@ -1619,10 +1683,35 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     expected = expected_score(starter["pre_effective"], opp_strength)
                     n_starts = store.start_counts.get(hid, 0)
                     k = k_factor(race_class, n_starts, field_size, winner_margin_sec)
-                    delta = k * (actual_score - expected)
+                    raw_delta = k * (actual_score - expected)
 
-                    post_overall = starter["pre_overall"] + (delta * OVERALL_UPDATE_SHARE)
-                    post_surface = starter["pre_surface"] + (delta * SURFACE_UPDATE_SHARE)
+                    pending_updates.append({
+                        "starter": starter,
+                        "opp_avg": opp_avg,
+                        "opp_top3": opp_top3,
+                        "opp_strength": opp_strength,
+                        "rank_score": rank_score,
+                        "actual_score": actual_score,
+                        "expected_score": expected,
+                        "n_starts": n_starts,
+                        "k_factor": k,
+                        "raw_delta": raw_delta,
+                    })
+
+                # 第2段階：レース平均を引いて変動量をゼロサム化してから、全更新を確定する。
+                race_mean_delta = mean_or_default(
+                    [float(item["raw_delta"]) for item in pending_updates],
+                    0.0,
+                )
+                for pending in pending_updates:
+                    starter = pending["starter"]
+                    hid = starter["horse_id"]
+                    raw_delta = float(pending["raw_delta"])
+                    adjusted_delta = raw_delta - race_mean_delta
+                    n_starts = int(pending["n_starts"])
+
+                    post_overall = starter["pre_overall"] + (adjusted_delta * OVERALL_UPDATE_SHARE)
+                    post_surface = starter["pre_surface"] + (adjusted_delta * SURFACE_UPDATE_SHARE)
                     if surface_key:
                         post_effective = ((1.0 - SURFACE_RATING_WEIGHT) * post_overall) + (
                             SURFACE_RATING_WEIGHT * post_surface
@@ -1644,13 +1733,16 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                         "pre_surface_rating": starter["pre_surface"],
                         "post_surface_rating": post_surface,
                         "surface": surface_key,
-                        "k_factor": k,
-                        "rank_score": rank_score,
-                        "actual_score": actual_score,
-                        "expected_score": expected,
-                        "opp_avg_rating": opp_avg,
-                        "opp_top3_rating": opp_top3,
-                        "opp_strength": opp_strength,
+                        "k_factor": pending["k_factor"],
+                        "rank_score": pending["rank_score"],
+                        "actual_score": pending["actual_score"],
+                        "expected_score": pending["expected_score"],
+                        "raw_delta": raw_delta,
+                        "race_mean_delta": race_mean_delta,
+                        "adjusted_delta": adjusted_delta,
+                        "opp_avg_rating": pending["opp_avg"],
+                        "opp_top3_rating": pending["opp_top3"],
+                        "opp_strength": pending["opp_strength"],
                         "margin_sec": starter["margin_sec"],
                         "gap_from_winner_sec": gap_map.get(hid),
                         "winner_margin_sec": winner_margin_sec,
@@ -1812,6 +1904,9 @@ def build_readme_dataframe(source_xlsx: Path) -> pd.DataFrame:
         "rank_score: 頭数比例の着順スコア(0~1)\n"
         "actual_score: 着差・タイム・上がり・通過順込みの実績スコア\n"
         "expected_score: 期待スコア\n"
+        "raw_delta: 馬ごとのK係数で計算した補正前のrating変動量\n"
+        "race_mean_delta: 同一レース全出走馬のraw_delta平均\n"
+        "adjusted_delta: raw_deltaからレース平均を引いた、実際のrating更新量\n"
         "opp_avg_rating/opp_top3_rating/opp_strength: 相手平均と上位層の強さ\n"
         "margin_sec/gap_from_winner_sec/winner_margin_sec: 着差情報\n"
         "condition_best_time/condition_median_time: 条件別標準タイム参照値\n"
@@ -1833,14 +1928,21 @@ def build_readme_dataframe(source_xlsx: Path) -> pd.DataFrame:
         "pre_bottom1/pre_bottom5_mean: 下位層の弱さ\n"
         "pre_std/pre_iqr: ばらつき（団子/格差）\n"
         "gap_top1_p50/gap_top3_p50/gap_top5_p50: 1強・上位層の厚み指標\n"
-        "race_level_score: 上位層・全体の厚み・条件別最速基準への近さを混ぜた複合レースレベル\n"
-        "race_level_score_rank/pre_top3_mean_rank: 複合スコア/上位3頭平均の順位\n"
+        "pre_race_level_score: レース前ratingだけで計算した予想利用可能なレースレベル\n"
+        "result_time_level_adjustment: レース後時計情報だけから計算した加減点。時計情報が全てない場合は欠損\n"
+        "final_race_level_score: pre_race_level_scoreに時計補正を加えた回顧用レースレベル\n"
+        "race_level_score: final_race_level_scoreと同じ後方互換用の列\n"
+        "pre_race_level_score_rank/final_race_level_score_rank: 事前評価/最終評価のdense順位\n"
+        "race_level_score_rank: final_race_level_score_rankと同じ後方互換用の順位列\n"
+        "pre_top3_mean_rank: 上位3頭平均の順位\n"
         "cond_best_time_baseline/cond_median_time_baseline/day_bias_sec: 条件別標準タイムと当日馬場差\n"
         "race_best_time/race_median_time/winner_margin_sec: 当該レース実績\n"
         "race_best_vs_master_sec/race_median_vs_master_sec: レース時計 - 条件別最速基準タイム\n"
         "fast_runner_count/fast_runner_rate: 条件別最速基準タイム以内で走った馬の数/割合\n"
         "top5_time_vs_master_mean/field_time_vs_master_mean: 上位5頭/全出走馬の基準タイム差平均",
-        "条件別標準タイムは `data/master/場所_馬場_タイム.xlsx` を参照。予想側で「レースの強さ・格差・荒れやすさ・条件時計差」を特徴量に利用する想定。"
+        "race_level_scoreはレース後の時計情報を含むためレース前予想には使用しません。"
+        "レース前予想ではpre_race_level_scoreを使用してください。"
+        "条件別標準タイムは `data/master/場所_馬場_タイム.xlsx` を参照します。"
     )
 
     meta_top = {
@@ -1856,6 +1958,100 @@ def build_readme_dataframe(source_xlsx: Path) -> pd.DataFrame:
 
 
 # ========= 8) Excel へ書き出し =============================================
+
+def _print_series_distribution(label: str, series: pd.Series) -> None:
+    """検証結果として数値列の最小値・中央値・最大値を安全に表示する。"""
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        print(f"[verify] {label}: 欠損のみ")
+        return
+    print(
+        f"[verify] {label}: 最小={numeric.min():.6f} "
+        f"中央値={numeric.median():.6f} 最大={numeric.max():.6f}"
+    )
+
+
+def validate_output_dataframes(
+    df_horses: pd.DataFrame,
+    df_races: pd.DataFrame,
+    df_entries: pd.DataFrame,
+    df_ratings: pd.DataFrame,
+    df_hist: pd.DataFrame,
+    df_levels: pd.DataFrame,
+) -> None:
+    """出力直前のDataFrameを検証し、異常があれば警告と集計値を表示する。"""
+    tolerance = 1e-6
+    print("[verify] ===== 自動検証 =====")
+
+    # 1走馬のrecent_ratingは、その1走のpost_ratingと一致しなければならない。
+    single_start = df_ratings.loc[
+        pd.to_numeric(df_ratings.get("start_count"), errors="coerce") == 1,
+        ["horse_id", "recent_rating"],
+    ]
+    latest_post = (
+        df_hist.dropna(subset=["horse_id"])
+        .drop_duplicates(subset=["horse_id"], keep="last")
+        [["horse_id", "post_rating"]]
+    )
+    single_check = single_start.merge(latest_post, on="horse_id", how="left")
+    single_diff = (
+        pd.to_numeric(single_check["recent_rating"], errors="coerce")
+        - pd.to_numeric(single_check["post_rating"], errors="coerce")
+    ).abs()
+    single_failures = int((single_diff.fillna(float("inf")) >= tolerance).sum())
+    if single_failures:
+        print(f"[warn] 1走馬のrecent_rating不一致: {single_failures}件")
+    else:
+        print(f"[verify] 1走馬のrecent_rating一致: OK ({len(single_check)}頭)")
+
+    # レース内のadjusted_delta合計はゼロ付近でなければならない。
+    adjusted_by_race = (
+        df_hist.assign(
+            adjusted_delta=pd.to_numeric(df_hist["adjusted_delta"], errors="coerce")
+        )
+        .groupby("race_id", dropna=False)["adjusted_delta"]
+        .sum(min_count=1)
+    )
+    max_abs_adjusted_sum = (
+        float(adjusted_by_race.abs().max()) if adjusted_by_race.notna().any() else float("nan")
+    )
+    bad_delta_races = int((adjusted_by_race.abs() >= tolerance).sum())
+    if bad_delta_races:
+        print(f"[warn] adjusted_delta合計が許容誤差以上のレース: {bad_delta_races}件")
+    else:
+        print("[verify] レース別adjusted_delta合計: OK")
+
+    # 時計補正の有無ごとに最終レースレベルの関係式を確認する。
+    pre_score = pd.to_numeric(df_levels["pre_race_level_score"], errors="coerce")
+    adjustment = pd.to_numeric(df_levels["result_time_level_adjustment"], errors="coerce")
+    final_score = pd.to_numeric(df_levels["final_race_level_score"], errors="coerce")
+    with_time = adjustment.notna()
+    with_time_diff = (final_score - pre_score - adjustment).abs()
+    without_time_diff = (final_score - pre_score).abs()
+    bad_with_time = int((with_time & (with_time_diff >= tolerance)).sum())
+    bad_without_time = int((~with_time & (without_time_diff >= tolerance)).sum())
+    if bad_with_time or bad_without_time:
+        print(
+            "[warn] レースレベル関係式の不一致: "
+            f"時計補正あり={bad_with_time}件 時計補正なし={bad_without_time}件"
+        )
+    else:
+        print("[verify] レースレベル関係式: OK")
+
+    print(f"[verify] 馬数: {len(df_horses):,}")
+    print(f"[verify] レース数: {len(df_races):,}")
+    print(f"[verify] 出走件数: {len(df_entries):,}")
+    print(f"[verify] recent_rating欠損数: {int(df_ratings['recent_rating'].isna().sum()):,}")
+    _print_series_distribution("recent_rating", df_ratings["recent_rating"])
+    print(f"[verify] raw_delta平均: {pd.to_numeric(df_hist['raw_delta'], errors='coerce').mean():.9f}")
+    print(
+        "[verify] adjusted_delta平均: "
+        f"{pd.to_numeric(df_hist['adjusted_delta'], errors='coerce').mean():.9f}"
+    )
+    print(f"[verify] レース別adjusted_delta合計の最大絶対値: {max_abs_adjusted_sum:.12g}")
+    _print_series_distribution("pre_race_level_score", df_levels["pre_race_level_score"])
+    _print_series_distribution("final_race_level_score", df_levels["final_race_level_score"])
+
 
 def write_store_to_excel(store: MemoryStore, out_path: Path, source_xlsx: Path) -> None:
     out_path = Path(out_path)
@@ -1910,11 +2106,20 @@ def write_store_to_excel(store: MemoryStore, out_path: Path, source_xlsx: Path) 
 
     df_levels = pd.DataFrame(store.race_levels)
     if not df_levels.empty:
-        if "race_level_score" in df_levels.columns:
-            df_levels["race_level_score_rank"] = df_levels["race_level_score"].rank(
-                ascending=False,
-                method="min",
+        if "pre_race_level_score" in df_levels.columns:
+            df_levels["pre_race_level_score_rank"] = (
+                df_levels["pre_race_level_score"]
+                .rank(method="dense", ascending=False)
+                .astype("Int64")
             )
+        if "final_race_level_score" in df_levels.columns:
+            df_levels["final_race_level_score_rank"] = (
+                df_levels["final_race_level_score"]
+                .rank(method="dense", ascending=False)
+                .astype("Int64")
+            )
+            # 後方互換列は最終評価順位と完全に同じ値にする。
+            df_levels["race_level_score_rank"] = df_levels["final_race_level_score_rank"]
         if "pre_top3_mean" in df_levels.columns:
             df_levels["pre_top3_mean_rank"] = df_levels["pre_top3_mean"].rank(
                 ascending=False,
@@ -1926,6 +2131,14 @@ def write_store_to_excel(store: MemoryStore, out_path: Path, source_xlsx: Path) 
         df_levels = df_levels.sort_values("race_id")
 
     df_readme = build_readme_dataframe(source_xlsx)
+    validate_output_dataframes(
+        df_horses,
+        df_races,
+        df_entries,
+        df_ratings,
+        df_hist,
+        df_levels,
+    )
 
     if mode == "w":
         with pd.ExcelWriter(out_path, engine="openpyxl") as writer:

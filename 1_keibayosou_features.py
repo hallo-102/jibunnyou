@@ -208,7 +208,31 @@ def _normalize_place_text(x: Any) -> str:
         return ""
     s = str(x).strip()
     s = re.sub(r"競馬場", "", s)
+    for place in ("札幌", "函館", "福島", "新潟", "東京", "中山", "中京", "京都", "阪神", "小倉"):
+        if place in s:
+            return place
     return s
+
+
+def _pick_value_pattern_col(
+    df: pd.DataFrame,
+    candidates: list[str],
+    pattern: str,
+    *,
+    minimum_matches: int = 1,
+) -> Optional[str]:
+    """列ずれした過去走シートから、値パターンが最も合う列を選ぶ。"""
+    preferred = _pick_col(df, candidates)
+    search_cols = ([preferred] if preferred else []) + [str(col) for col in df.columns if str(col) != preferred]
+    best_col: Optional[str] = None
+    best_count = 0
+    for col in search_cols:
+        values = df[col].fillna("").astype(str).str.strip()
+        count = int(values.str.match(pattern, na=False).sum())
+        if count > best_count:
+            best_col = col
+            best_count = count
+    return best_col if best_count >= minimum_matches else preferred
 
 
 def _normalize_horse_name(x: Any) -> str:
@@ -643,6 +667,108 @@ def _calc_style_pressure_fit(
     return round(base * reliability, 4)
 
 
+def _pass_position_rates(pass_value: Any, field_size: Any) -> Optional[Tuple[float, float, float]]:
+    """過去レース自身の頭数を使い、序盤・4角・位置上昇率を返す。"""
+    nums = re.findall(r"\d+", str(pass_value or ""))
+    size = _to_float(field_size)
+    if not nums or pd.isna(size) or size <= 0:
+        return None
+    early = max(1, int(nums[0])) / float(size)
+    final = max(1, int(nums[-1])) / float(size)
+    return min(early, 1.5), min(final, 1.5), early - final
+
+
+def _build_running_style_profile(
+    pass_s: pd.Series,
+    field_size_s: pd.Series,
+    remark_s: Optional[pd.Series] = None,
+) -> Dict[str, Any]:
+    """複数の過去走から、4分類脚質と位置取り統計を作る。"""
+    rows: list[Tuple[float, float, float]] = []
+    for idx in pass_s.index:
+        size = field_size_s.get(idx) if idx in field_size_s.index else np.nan
+        rates = _pass_position_rates(pass_s.get(idx), size)
+        if rates is not None:
+            rows.append(rates)
+
+    if not rows:
+        return {
+            "running_style": "",
+            "running_style_confidence": 0.0,
+            "early_position_rate": np.nan,
+            "final_corner_position_rate": np.nan,
+            "position_gain_rate": np.nan,
+            "front_run_rate": 0.0,
+            "middle_run_rate": 0.0,
+            "late_run_rate": 0.0,
+            "escape_run_rate": 0.0,
+            "style_change_rate": 1.0,
+            "delay_rate": 0.0,
+        }
+
+    rates_df = pd.DataFrame(rows, columns=["early", "final", "gain"])
+    escape_rate = float(rates_df["early"].le(0.15).mean())
+    front_rate = float(rates_df["early"].le(0.33).mean())
+    late_rate = float(rates_df["early"].ge(0.67).mean())
+    middle_rate = max(0.0, 1.0 - front_rate - late_rate)
+    gain_rate = float(rates_df["gain"].mean())
+
+    if escape_rate >= 0.35:
+        running_style = "逃げ"
+        confidence = escape_rate
+    elif front_rate >= 0.50:
+        running_style = "先行"
+        confidence = front_rate
+    elif late_rate >= 0.50:
+        running_style = "追込"
+        confidence = late_rate
+    else:
+        running_style = "差し"
+        confidence = max(middle_rate, min(1.0, max(0.0, gain_rate) * 2.0))
+
+    delay_rate = 0.0
+    if remark_s is not None and not remark_s.empty:
+        delay_words = ("出遅", "出負", "出脚", "スタート", "ゲート", "躓")
+        delay_rate = float(remark_s.fillna("").astype(str).map(lambda x: any(word in x for word in delay_words)).mean())
+
+    return {
+        "running_style": running_style,
+        "running_style_confidence": float(max(0.0, min(confidence, 1.0))),
+        "early_position_rate": float(rates_df["early"].mean()),
+        "final_corner_position_rate": float(rates_df["final"].mean()),
+        "position_gain_rate": gain_rate,
+        "front_run_rate": front_rate,
+        "middle_run_rate": middle_rate,
+        "late_run_rate": late_rate,
+        "escape_run_rate": escape_rate,
+        "style_change_rate": float(max(0.0, 1.0 - confidence)),
+        "delay_rate": delay_rate,
+    }
+
+
+def _style_group_for_pressure(running_style: str) -> Optional[str]:
+    """4分類脚質を、先行圧計算用の前・中・後へ変換する。"""
+    if running_style in {"逃げ", "先行"}:
+        return "front"
+    if running_style == "差し":
+        return "mid"
+    if running_style == "追込":
+        return "rear"
+    return None
+
+
+def _infer_race_pace(escape_count: int, front_count: int, known_count: int) -> str:
+    """脚質候補数から今回の想定ペースを返す。"""
+    if known_count <= 0:
+        return "ミドル"
+    front_ratio = float(escape_count + front_count) / float(known_count)
+    if escape_count >= 3 or front_ratio >= 0.45:
+        return "ハイ"
+    if escape_count == 0 and (front_count <= 1 or front_ratio < 0.20):
+        return "スロー"
+    return "ミドル"
+
+
 def _compute_horse_features_from_race_sheets(
     book: Dict[Any, pd.DataFrame],
     now_df: pd.DataFrame,
@@ -715,12 +841,25 @@ def _compute_horse_features_from_race_sheets(
         c_last3f = _pick_col(df, ["上り", "上り3F", "上り３F", "後3F"])
         c_margin = _pick_col(df, ["着差"])
         c_time_idx = _pick_col(df, ["ﾀｲﾑ指数", "タイム指数", "ﾀｲﾑ 指数"])
-        c_pass = _pick_col(df, ["通過", "通過順位", "通過順", "コーナー 通過順"])
+        c_pass = _pick_value_pattern_col(
+            df,
+            ["通過", "通過順位", "通過順", "コーナー 通過順"],
+            r"^\d{1,2}(?:-\d{1,2}){1,4}$",
+        )
         c_race_id = _pick_col(df, ["race_id", "レースID"])
         c_lap = _pick_col(df, ["ラップタイム"])
         c_place = _pick_col(df, ["場所", "競馬場", "場名", "開催"])
         c_surface = _pick_col(df, ["芝・ダ", "芝ダ", "コース"])
+        if c_surface is None:
+            c_surface = c_dist
         c_race_name = _pick_col(df, ["レース名", "クラス", "条件"])
+        c_field_size = _pick_col(df, ["頭数", "頭 数", "出走頭数"])
+        c_track = _pick_col(df, ["馬場", "馬 場", "馬場状態"])
+        c_remark = _pick_value_pattern_col(
+            df,
+            ["備考", "脚注", "コメント"],
+            r".*(?:出遅|出負|出脚|不利|挟ま|接触|詰ま|進路|落鉄).*$",
+        )
 
         if c_name is None:
             print(f"[WARN] レースIDシートに馬名列がありません: rid_str={rid_str}（特徴量はNaNになります）")
@@ -754,28 +893,44 @@ def _compute_horse_features_from_race_sheets(
                 if not style_horse_name:
                     continue
                 one_style = _select_past_rows_for_horse(style_horse_name)
-                style, confidence, style_n = _dominant_style_from_pass_series(one_style[c_pass], race_field_size)
-                running_style, running_style_confidence, running_style_n = dominant_running_style_from_pass_series(
-                    one_style[c_pass],
-                    race_field_size,
+                past_sizes = (
+                    pd.to_numeric(one_style[c_field_size], errors="coerce")
+                    if c_field_size
+                    else pd.Series(race_field_size, index=one_style.index, dtype=float)
                 )
+                profile = _build_running_style_profile(
+                    one_style[c_pass],
+                    past_sizes,
+                    one_style[c_remark] if c_remark else None,
+                )
+                running_style = str(profile["running_style"])
+                running_style_confidence = float(profile["running_style_confidence"])
+                style = _style_group_for_pressure(running_style)
                 race_style_map[_style_lookup_key(style_horse_name, r_style.get("馬番"))] = {
                     "style": style,
-                    "style_confidence": confidence,
-                    "style_n": style_n,
+                    "style_confidence": running_style_confidence,
                     "running_style": running_style,
                     "running_style_confidence": running_style_confidence,
-                    "running_style_n": running_style_n,
+                    **profile,
                 }
 
         known_styles = [v for v in race_style_map.values() if v.get("style")]
         race_known_count = len(known_styles)
         race_front_count = sum(1 for v in known_styles if v.get("style") == "front")
+        race_escape_count = sum(1 for v in known_styles if v.get("running_style") == "逃げ")
+        race_stalker_count = sum(1 for v in known_styles if v.get("running_style") == "差し")
+        race_closer_count = sum(1 for v in known_styles if v.get("running_style") == "追込")
         race_front_pressure = _calc_front_pressure(race_front_count, race_known_count, race_field_size)
         if race_field_size is not None and race_field_size > 0:
             race_style_known_ratio = min(float(race_known_count) / float(race_field_size), 1.0)
         else:
             race_style_known_ratio = min(float(race_known_count) / max(float(len(g)), 1.0), 1.0)
+        race_front_ratio = float(race_front_count / race_known_count) if race_known_count else 0.0
+        inferred_race_pace = _infer_race_pace(
+            race_escape_count,
+            max(0, race_front_count - race_escape_count),
+            race_known_count,
+        )
 
         for _, r_now in g.iterrows():
             umaban = r_now.get("馬番")
@@ -799,6 +954,9 @@ def _compute_horse_features_from_race_sheets(
             one["__pace__"] = one[c_lap].map(_parse_pace_from_laps) if c_lap else ""
             one["__last3f__"] = last3_s
             one["__time_idx__"] = time_idx_s
+            one["__field_size__"] = pd.to_numeric(one[c_field_size], errors="coerce") if c_field_size else np.nan
+            one["__track__"] = one[c_track].fillna("").astype(str) if c_track else ""
+            one["__remark__"] = one[c_remark].fillna("").astype(str) if c_remark else ""
 
             if c_date and not one.empty:
                 one["__date__"] = one[c_date].map(_parse_yyyymmdd)
@@ -855,7 +1013,7 @@ def _compute_horse_features_from_race_sheets(
             now_place = _normalize_place_text(r_now.get("場所"))
             now_surface = _parse_surface(r_now.get("コース")) if "コース" in now.columns else _parse_surface(r_now.get("芝・ダ"))
             now_class = _parse_class_name_from_text(r_now.get("クラス", r_now.get("レース名", "")))
-            now_pace = _pick_now_pace(r_now)
+            now_pace = inferred_race_pace
 
             context_feats = _calc_contextual_last3f_features(
                 one=one,
@@ -880,15 +1038,19 @@ def _compute_horse_features_from_race_sheets(
             style_meta = race_style_map.get(_style_lookup_key(horse_name, umaban), {})
             style = style_meta.get("style")
             style_confidence = float(style_meta.get("style_confidence") or 0.0)
-            if style is None and c_pass and not one.empty:
-                style, style_confidence, _style_n = _dominant_style_from_pass_series(one[c_pass], field_size)
             running_style = str(style_meta.get("running_style") or "")
             running_style_confidence = float(style_meta.get("running_style_confidence") or 0.0)
             if not running_style and c_pass and not one.empty:
-                running_style, running_style_confidence, _running_style_n = dominant_running_style_from_pass_series(
+                fallback_profile = _build_running_style_profile(
                     one[c_pass],
-                    field_size,
+                    one["__field_size__"],
+                    one["__remark__"],
                 )
+                style_meta = fallback_profile
+                running_style = str(fallback_profile["running_style"])
+                running_style_confidence = float(fallback_profile["running_style_confidence"])
+                style = _style_group_for_pressure(running_style)
+                style_confidence = running_style_confidence
 
             style_pressure_fit = _calc_style_pressure_fit(
                 style=style,
@@ -944,6 +1106,81 @@ def _compute_horse_features_from_race_sheets(
             past_racelevel_top5_avg3 = float(past_levels.sort_values(ascending=False).head(5).mean()) if not past_levels.empty else np.nan
             past_racelevel_top5_best = float(past_levels.max()) if not past_levels.empty else np.nan
 
+            distance_change_signed = (
+                float(now_dist - past_mean_dist)
+                if now_dist is not None and not np.isnan(past_mean_dist)
+                else np.nan
+            )
+            distance_extension = max(0.0, distance_change_signed) if not np.isnan(distance_change_signed) else np.nan
+            distance_shortening = max(0.0, -distance_change_signed) if not np.isnan(distance_change_signed) else np.nan
+            top3_mask = finish_s.le(3.0)
+            exact_distance_mask = (
+                one["__place__"].eq(now_place)
+                & one["__surface__"].eq(now_surface)
+                & pd.to_numeric(one["__dist__"], errors="coerce").eq(now_dist)
+            )
+            range_distance_mask = (
+                one["__surface__"].eq(now_surface)
+                & pd.to_numeric(one["__dist__"], errors="coerce").sub(float(now_dist or 0)).abs().le(200.0)
+            )
+            exact_count = int(exact_distance_mask.sum())
+            range_count = int(range_distance_mask.sum())
+            distance_exact_top3_rate = float(top3_mask[exact_distance_mask].mean()) if exact_count else np.nan
+            distance_range_top3_rate = float(top3_mask[range_distance_mask].mean()) if range_count else np.nan
+            distance_time_values = time_idx_s[range_distance_mask].dropna()
+            distance_time_idx = float(distance_time_values.mean()) if not distance_time_values.empty else np.nan
+            recent_distance_time_idx = float(distance_time_values.head(3).mean()) if not distance_time_values.empty else np.nan
+            condition_match_reliability = float(exact_count / (exact_count + 3.0))
+            distance_range_reliability = float(range_count / (range_count + 3.0))
+
+            track_text = one["__track__"].fillna("").astype(str)
+            good_track_mask = track_text.eq("良") | track_text.str.contains("良", na=False) & ~track_text.str.contains("稍", na=False)
+            bad_track_mask = track_text.str.contains("稍|重|不良", regex=True, na=False)
+            good_track_values = time_idx_s[good_track_mask].dropna()
+            bad_track_values = time_idx_s[bad_track_mask].dropna()
+            good_track_time_idx = float(good_track_values.mean()) if not good_track_values.empty else np.nan
+            bad_track_time_idx = float(bad_track_values.mean()) if not bad_track_values.empty else np.nan
+            bad_track_count = int(bad_track_mask.sum())
+            bad_track_top3_rate = float(top3_mask[bad_track_mask].mean()) if bad_track_count else np.nan
+            track_condition_time_idx_diff = (
+                bad_track_time_idx - good_track_time_idx
+                if not np.isnan(bad_track_time_idx) and not np.isnan(good_track_time_idx)
+                else np.nan
+            )
+            bad_track_reliability = float(bad_track_count / (bad_track_count + 3.0))
+            current_track_text = str(r_now.get("馬場", r_now.get("馬場状態", "")) or "")
+            current_track_is_bad = float(bool(re.search("稍|重|不良", current_track_text)))
+            if current_track_is_bad:
+                track_condition_fit = (
+                    bad_track_time_idx + (track_condition_time_idx_diff if not np.isnan(track_condition_time_idx_diff) else 0.0)
+                    if not np.isnan(bad_track_time_idx)
+                    else np.nan
+                )
+            else:
+                track_condition_fit = good_track_time_idx
+
+            remark_text = one["__remark__"].fillna("").astype(str)
+            delay_mask = remark_text.str.contains("出遅|出負|出脚|スタート|ゲート|躓", regex=True, na=False)
+            trouble_mask = remark_text.str.contains("不利|挟ま|接触|詰ま|進路|外々|落鉄", regex=True, na=False)
+            delay_rate = float(delay_mask.mean()) if len(delay_mask) else 0.0
+            trouble_rate = float(trouble_mask.mean()) if len(trouble_mask) else 0.0
+            recent_delay_flag = float(delay_mask.iloc[0]) if len(delay_mask) else 0.0
+            recent_trouble_flag = float(trouble_mask.iloc[0]) if len(trouble_mask) else 0.0
+            recent_time_idx_maintained = (
+                recent3_time_idx - avg_time_idx
+                if not np.isnan(recent3_time_idx) and not np.isnan(avg_time_idx)
+                else np.nan
+            )
+            recent_margin = _safe_recent_mean(margin_s, n=3)
+            recent_margin_improvement = (
+                avg_margin - recent_margin
+                if not np.isnan(avg_margin) and not np.isnan(recent_margin)
+                else np.nan
+            )
+            condition_change_score = max(condition_match_reliability, distance_range_reliability * 0.8)
+            trouble_severity = max(recent_delay_flag, recent_trouble_flag, min(1.0, delay_rate + trouble_rate))
+            rebound_score_base = trouble_severity * condition_change_score
+
             rows.append(
                 {
                     "rid_str": rid_str,
@@ -983,6 +1220,48 @@ def _compute_horse_features_from_race_sheets(
                     "rating_now": rating_now,
                     "past_racelevel_top5_avg3": past_racelevel_top5_avg3,
                     "past_racelevel_top5_best": past_racelevel_top5_best,
+                    "early_position_rate": style_meta.get("early_position_rate", np.nan),
+                    "final_corner_position_rate": style_meta.get("final_corner_position_rate", np.nan),
+                    "position_gain_rate": style_meta.get("position_gain_rate", np.nan),
+                    "front_run_rate": style_meta.get("front_run_rate", 0.0),
+                    "middle_run_rate": style_meta.get("middle_run_rate", 0.0),
+                    "late_run_rate": style_meta.get("late_run_rate", 0.0),
+                    "escape_run_rate": style_meta.get("escape_run_rate", 0.0),
+                    "style_change_rate": style_meta.get("style_change_rate", 1.0),
+                    "delay_rate": delay_rate,
+                    "escape_candidate_count": race_escape_count,
+                    "front_candidate_count": max(0, race_front_count - race_escape_count),
+                    "stalker_candidate_count": race_stalker_count,
+                    "closer_candidate_count": race_closer_count,
+                    "front_style_ratio": race_front_ratio,
+                    "known_style_ratio": race_style_known_ratio,
+                    "front_pressure": race_front_pressure,
+                    "inferred_pace_code": {"スロー": 0.0, "ミドル": 0.5, "ハイ": 1.0}.get(inferred_race_pace, 0.5),
+                    "pace_reliability": race_style_known_ratio,
+                    "distance_change_signed": distance_change_signed,
+                    "distance_extension": distance_extension,
+                    "distance_shortening": distance_shortening,
+                    "distance_exact_top3_rate": distance_exact_top3_rate,
+                    "distance_range_top3_rate": distance_range_top3_rate,
+                    "distance_time_idx": distance_time_idx,
+                    "recent_distance_time_idx": recent_distance_time_idx,
+                    "condition_match_reliability": condition_match_reliability,
+                    "distance_range_reliability": distance_range_reliability,
+                    "good_track_time_idx": good_track_time_idx,
+                    "bad_track_time_idx": bad_track_time_idx,
+                    "bad_track_top3_rate": bad_track_top3_rate,
+                    "bad_track_count": bad_track_count,
+                    "track_condition_time_idx_diff": track_condition_time_idx_diff,
+                    "bad_track_reliability": bad_track_reliability,
+                    "current_track_is_bad": current_track_is_bad,
+                    "track_condition_fit": track_condition_fit,
+                    "recent_delay_flag": recent_delay_flag,
+                    "trouble_rate": trouble_rate,
+                    "recent_trouble_flag": recent_trouble_flag,
+                    "recent_time_idx_maintained": recent_time_idx_maintained,
+                    "recent_margin_improvement": recent_margin_improvement,
+                    "condition_change_score": condition_change_score,
+                    "rebound_score_base": rebound_score_base,
                     # ここから追加
                     "cond_match_count": context_feats["cond_match_count"],
                     "cond_avg_last3f": context_feats["cond_avg_last3f"],
@@ -1013,6 +1292,13 @@ def _compute_horse_features_from_race_sheets(
         feat_df["rating_field_percentile"] = np.nan
 
     feat_df = _attach_master_rating_features(feat_df, levels_df)
+
+    recent_ability = pd.to_numeric(feat_df.get("recent3_time_idx"), errors="coerce")
+    ability_requirement = recent_ability.groupby(feat_df["rid_str"]).rank(pct=True, method="average")
+    maintained = pd.to_numeric(feat_df.get("recent_time_idx_maintained"), errors="coerce").fillna(-10.0)
+    maintained_factor = ((maintained + 10.0) / 10.0).clip(lower=0.0, upper=1.0)
+    rebound_base = pd.to_numeric(feat_df.get("rebound_score_base"), errors="coerce").fillna(0.0)
+    feat_df["rebound_score"] = (ability_requirement.fillna(0.0) * maintained_factor * rebound_base).clip(0.0, 1.0)
 
     for c in FEAT_COLS:
         if c not in feat_df.columns:

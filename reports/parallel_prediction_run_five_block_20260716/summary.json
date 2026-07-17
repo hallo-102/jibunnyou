@@ -1,0 +1,212 @@
+[
+  {
+    "date": "20260404",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 1531432,
+    "elapsed_seconds": 240.7
+  },
+  {
+    "date": "20260405",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2038699,
+    "elapsed_seconds": 268.2
+  },
+  {
+    "date": "20260411",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2539048,
+    "elapsed_seconds": 301.3
+  },
+  {
+    "date": "20260412",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2742758,
+    "elapsed_seconds": 312.2
+  },
+  {
+    "date": "20260418",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2457573,
+    "elapsed_seconds": 299.2
+  },
+  {
+    "date": "20260419",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2571210,
+    "elapsed_seconds": 304.1
+  },
+  {
+    "date": "20260425",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2464193,
+    "elapsed_seconds": 313.4
+  },
+  {
+    "date": "20260426",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2944424,
+    "elapsed_seconds": 336.3
+  },
+  {
+    "date": "20260502",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2669330,
+    "elapsed_seconds": 323.3
+  },
+  {
+    "date": "20260503",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2832743,
+    "elapsed_seconds": 330.8
+  },
+  {
+    "date": "20260509",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2543746,
+    "elapsed_seconds": 314.4
+  },
+  {
+    "date": "20260510",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2717327,
+    "elapsed_seconds": 327.0
+  },
+  {
+    "date": "20260516",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2355957,
+    "elapsed_seconds": 299.2
+  },
+  {
+    "date": "20260517",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2825249,
+    "elapsed_seconds": 330.7
+  },
+  {
+    "date": "20260523",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2672916,
+    "elapsed_seconds": 327.2
+  },
+  {
+    "date": "20260524",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 3035554,
+    "elapsed_seconds": 342.0
+  },
+  {
+    "date": "20260530",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 1812725,
+    "elapsed_seconds": 269.3
+  },
+  {
+    "date": "20260531",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 1863346,
+    "elapsed_seconds": 269.4
+  },
+  {
+    "date": "20260606",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 1332312,
+    "elapsed_seconds": 246.4
+  },
+  {
+    "date": "20260607",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 1733302,
+    "elapsed_seconds": 270.4
+  },
+  {
+    "date": "20260613",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2600519,
+    "elapsed_seconds": 323.8
+  },
+  {
+    "date": "20260614",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2660199,
+    "elapsed_seconds": 330.0
+  },
+  {
+    "date": "20260620",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2452324,
+    "elapsed_seconds": 311.8
+  },
+  {
+    "date": "20260621",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2359556,
+    "elapsed_seconds": 315.0
+  },
+  {
+    "date": "20260627",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2341049,
+    "elapsed_seconds": 303.9
+  },
+  {
+    "date": "20260628",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2241096,
+    "elapsed_seconds": 296.6
+  },
+  {
+    "date": "20260704",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2349275,
+    "elapsed_seconds": 295.3
+  },
+  {
+    "date": "20260705",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2344986,
+    "elapsed_seconds": 289.0
+  },
+  {
+    "date": "20260711",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2646868,
+    "elapsed_seconds": 300.2
+  },
+  {
+    "date": "20260712",
+    "returncode": 0,
+    "output_exists": true,
+    "output_size": 2258827,
+    "elapsed_seconds": 278.5
+  }
+]

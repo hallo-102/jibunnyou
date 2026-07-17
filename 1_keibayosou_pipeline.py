@@ -61,6 +61,9 @@ from openpyxl.utils import get_column_letter
 from keibayosou_config import (
     TARGET_SHEET,
     NOW_SHEET,
+    FEATURE_HEALTH_SHEET,
+    FEATURE_CORRELATION_SHEET,
+    FEATURE_CONTRIBUTION_SHEET,
     ALPHA,
     EXTRA_ALPHA,
     DL_PROB_BLEND,
@@ -71,7 +74,12 @@ from keibayosou_config import (
     ODDS_CSV,
     SUCCESS_REPORT,
     FEAT_COLS,
+    FEATURE_WEIGHTS,
     JAPANESE_FEATURE_NAMES,
+    LOWER_IS_BETTER_FEATURES,
+    SCORING_BLOCK_WEIGHTS,
+    SCORING_FEATURE_BLOCKS,
+    SCORING_MODEL_VERSION,
 )
 from keibayosou_features import (
     _normalize_rid_series,
@@ -83,13 +91,88 @@ from keibayosou_features import (
     score_sum,
 )
 from keibayosou_loaders import load_base_time, load_odds_csv, load_race_levels
-from keibayosou_penalties import calc_extra_penalty, calc_rest_dist_risk
+from keibayosou_penalties import calc_extra_penalty_components, calc_rest_dist_risk
 from keibayosou_utils import (
     _build_feature_sheet_for_export,
     _normalize_place,
     _normalize_surface,
     _to_int,
+    build_feature_health_diagnostics,
+    normalize_features_within_race,
 )
+
+
+def compute_five_block_scores(feat_df: pd.DataFrame) -> pd.DataFrame:
+    """尺度統一した特徴量から5ブロック候補スコアを計算する。"""
+    out = feat_df.copy()
+    used_features = list(dict.fromkeys(feature for cols in SCORING_FEATURE_BLOCKS.values() for feature in cols))
+    normalized = normalize_features_within_race(
+        out,
+        used_features,
+        race_col="rid_str",
+        lower_is_better=LOWER_IS_BETTER_FEATURES,
+    )
+
+    missing_cols: list[str] = []
+    for block, features in SCORING_FEATURE_BLOCKS.items():
+        pct_cols: list[str] = []
+        feature_weight = float(SCORING_BLOCK_WEIGHTS[block]) / max(len(features), 1)
+        for feature in features:
+            pct_col = f"{feature}_pct"
+            contribution_col = f"{feature}_contribution"
+            out[pct_col] = pd.to_numeric(normalized[feature], errors="coerce").fillna(0.5)
+            out[contribution_col] = out[pct_col] * feature_weight * 100.0
+            pct_cols.append(pct_col)
+            missing_col = f"{feature}_missing"
+            out[missing_col] = normalized[missing_col]
+            missing_cols.append(missing_col)
+        out[f"{block}_score"] = out[pct_cols].mean(axis=1) * 100.0
+
+    risk_raw = (
+        pd.to_numeric(out.get("favorite_risk"), errors="coerce").fillna(0.0)
+        + pd.to_numeric(out.get("extra_penalty"), errors="coerce").fillna(0.0)
+    )
+
+    def _normalize_risk(s: pd.Series) -> pd.Series:
+        """リスク差が無いレースは全頭0、差がある場合だけ0〜100へ広げる。"""
+        values = pd.to_numeric(s, errors="coerce").fillna(0.0)
+        minimum = float(values.min())
+        maximum = float(values.max())
+        if maximum <= minimum:
+            return pd.Series(0.0, index=values.index)
+        return (values - minimum) / (maximum - minimum) * 100.0
+
+    out["risk_score"] = risk_raw.groupby(out["rid_str"], group_keys=False).transform(_normalize_risk)
+    out["five_block_raw_score"] = (
+        out["ability_score"] * SCORING_BLOCK_WEIGHTS["ability"]
+        + out["condition_score"] * SCORING_BLOCK_WEIGHTS["condition"]
+        + out["pace_style_score"] * SCORING_BLOCK_WEIGHTS["pace_style"]
+        + out["recent_form_score"] * SCORING_BLOCK_WEIGHTS["recent_form"]
+        - out["risk_score"] * SCORING_BLOCK_WEIGHTS["risk"]
+    )
+    out["five_block_score"] = out.groupby("rid_str")["five_block_raw_score"].transform(normalize_score).round(2)
+    out["five_block_rank"] = out.groupby("rid_str")["five_block_score"].rank(
+        "dense", ascending=False
+    ).astype(int)
+    out["data_confidence"] = (1.0 - out[missing_cols].mean(axis=1)).clip(0.0, 1.0) * 100.0
+
+    block_labels = {
+        "ability_score": "能力",
+        "condition_score": "条件適性",
+        "pace_style_score": "展開適性",
+        "recent_form_score": "近走状態",
+    }
+    positive_cols = list(block_labels)
+    out["main_positive_reasons"] = out[positive_cols].apply(
+        lambda row: "、".join(block_labels[col] for col in row.nlargest(2).index),
+        axis=1,
+    )
+    out["main_negative_reasons"] = np.where(
+        out["risk_score"] >= 70.0,
+        "リスク高",
+        np.where(out["data_confidence"] < 60.0, "データ信頼度低", "大きな減点なし"),
+    )
+    return out
 
 
 def compute_scores_with_pipeline_logic(
@@ -116,10 +199,28 @@ def compute_scores_with_pipeline_logic(
 
     out["favorite_risk"] = out.apply(calc_fav_risk, axis=1)
     out["rest_dist_risk"] = out.apply(calc_rest_dist_risk, axis=1)
-    out["extra_penalty"] = out.apply(
-        lambda r: calc_extra_penalty(r, rest_dist_risk=r.get("rest_dist_risk")),
+    penalty_components = out.apply(
+        lambda r: calc_extra_penalty_components(r, rest_dist_risk=r.get("rest_dist_risk")),
         axis=1,
+        result_type="expand",
+    ).rename(
+        columns={
+            "popular_underperformer": "penalty_popular_underperformer",
+            "good_loser": "penalty_good_loser",
+            "ta_n": "penalty_ta_n",
+            "close_loss": "penalty_close_loss",
+            "rest_distance": "penalty_rest_distance",
+        }
     )
+    out = pd.concat([out, penalty_components], axis=1)
+    component_cols = [
+        "penalty_popular_underperformer",
+        "penalty_good_loser",
+        "penalty_ta_n",
+        "penalty_close_loss",
+        "penalty_rest_distance",
+    ]
+    out["extra_penalty"] = out[component_cols].sum(axis=1)
 
     # dl_score は 0.5 を中立点として total に反映する。
     # 1回目は dl 系列が無いので 0.5 扱いとなり、2回目だけ順位へ効く。
@@ -135,6 +236,14 @@ def compute_scores_with_pipeline_logic(
     )
     out["score"] = out.groupby("rid_str")["total"].transform(normalize_score).round(2)
     out["rank"] = out.groupby("rid_str")["score"].rank("dense", ascending=False).astype(int)
+    out = compute_five_block_scores(out)
+    if SCORING_MODEL_VERSION == "five_block":
+        out["legacy_total"] = out["total"]
+        out["legacy_score"] = out["score"]
+        out["legacy_rank"] = out["rank"]
+        out["total"] = out["five_block_raw_score"]
+        out["score"] = out["five_block_score"]
+        out["rank"] = out["five_block_rank"]
     return out
 
 
@@ -1477,6 +1586,35 @@ def write_features_to_excel(
             out_excel = alt
 
     feat_export = _build_feature_sheet_for_export(feat_df, FEAT_COLS, JAPANESE_FEATURE_NAMES)
+    default_weights = FEATURE_WEIGHTS.get("__default__", {})
+    feature_health_df, feature_correlation_df = build_feature_health_diagnostics(
+        feat_df,
+        FEAT_COLS,
+        weights=default_weights,
+        race_col="rid_str",
+    )
+    contribution_parts: list[pd.DataFrame] = []
+    id_cols = [col for col in ["rid_str", "馬番", "馬名"] if col in feat_df.columns]
+    for block, features in SCORING_FEATURE_BLOCKS.items():
+        effective_weight = float(SCORING_BLOCK_WEIGHTS[block]) / max(len(features), 1)
+        for feature in features:
+            pct_col = f"{feature}_pct"
+            contribution_col = f"{feature}_contribution"
+            if feature not in feat_df.columns or pct_col not in feat_df.columns:
+                continue
+            part = feat_df[id_cols].copy()
+            part["ブロック"] = block
+            part["特徴量"] = feature
+            part["正規化前の値"] = feat_df[feature]
+            part["正規化後の値"] = feat_df[pct_col]
+            part["重み"] = effective_weight
+            part["スコア寄与"] = feat_df.get(contribution_col, 0.0)
+            contribution_parts.append(part)
+    feature_contribution_df = (
+        pd.concat(contribution_parts, ignore_index=True)
+        if contribution_parts
+        else pd.DataFrame(columns=[*id_cols, "ブロック", "特徴量", "正規化前の値", "正規化後の値", "重み", "スコア寄与"])
+    )
 
     # TARGETは rid_str ごとに rank 昇順（上位=1が先）に並べる
     if {"rid_str", "rank"}.issubset(feat_export.columns):
@@ -1504,6 +1642,9 @@ def write_features_to_excel(
     with pd.ExcelWriter(out_excel, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
         feat_export.to_excel(writer, sheet_name=TARGET_SHEET, index=False)
         now_export.to_excel(writer, sheet_name=NOW_SHEET, index=False)
+        feature_health_df.to_excel(writer, sheet_name=FEATURE_HEALTH_SHEET, index=False)
+        feature_correlation_df.to_excel(writer, sheet_name=FEATURE_CORRELATION_SHEET, index=False)
+        feature_contribution_df.to_excel(writer, sheet_name=FEATURE_CONTRIBUTION_SHEET, index=False)
 
         if not bet_df.empty:
             bet_df.to_excel(writer, sheet_name=BET_SHEET, index=False)
@@ -1609,7 +1750,19 @@ def run_pipeline(
         out_df = merged.copy()
 
         # score系の列が無いと後続や出力で困るので、念のため空列を作る
-        for c in ["score", "rank", "favorite_risk", "extra_penalty", "rest_dist_risk", "dl_rank_score"]:
+        for c in [
+            "score",
+            "rank",
+            "favorite_risk",
+            "extra_penalty",
+            "rest_dist_risk",
+            "dl_rank_score",
+            "penalty_popular_underperformer",
+            "penalty_good_loser",
+            "penalty_ta_n",
+            "penalty_close_loss",
+            "penalty_rest_distance",
+        ]:
             if c not in out_df.columns:
                 out_df[c] = pd.NA
 
@@ -1744,7 +1897,19 @@ def run_pipeline(
     # 既に同名列が merged 側に入っている場合（過去の with_feat を入力にした等）
     # pandas merge が suffix（_x/_y）を付ける際に列名が衝突して MergeError になることがあります。
     # ここでは「今回あらためて計算した列」で上書きする前提で、古い同名列を削除してから結合します。
-    _cols_to_add = ["score", "rank", "favorite_risk", "extra_penalty", "rest_dist_risk", "dl_rank_score"]
+    _cols_to_add = [
+        "score",
+        "rank",
+        "favorite_risk",
+        "extra_penalty",
+        "rest_dist_risk",
+        "dl_rank_score",
+        "penalty_popular_underperformer",
+        "penalty_good_loser",
+        "penalty_ta_n",
+        "penalty_close_loss",
+        "penalty_rest_distance",
+    ]
     _cols_to_drop = []
     for _c in _cols_to_add:
         _cols_to_drop.extend([_c, f"{_c}_x", f"{_c}_y"])
@@ -1753,7 +1918,7 @@ def run_pipeline(
     # 今走情報へ結合（rest_dist_risk も出力する）
     out_df = pd.merge(
         merged,
-        feat_df[["rid_str", "馬番", "score", "rank", "favorite_risk", "extra_penalty", "rest_dist_risk", "dl_rank_score"]],
+        feat_df[["rid_str", "馬番", *_cols_to_add]],
         on=["rid_str", "馬番"],
         how="left",
     )
