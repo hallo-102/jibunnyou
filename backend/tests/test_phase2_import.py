@@ -3,6 +3,8 @@ from datetime import date
 from importlib import import_module
 from pathlib import Path
 
+import pandas as pd
+
 
 def _first_existing_directory(*candidates: Path) -> Path:
     """Return the first input directory available on host or in Compose."""
@@ -11,6 +13,17 @@ def _first_existing_directory(*candidates: Path) -> Path:
         if candidate.is_dir():
             return candidate
     raise AssertionError(f"test input directory was not found: {candidates}")
+
+
+def _prediction_rank_from_workbook(path: Path, race_id: str, horse_no: int) -> int:
+    """Read the expected rank from the mutable production workbook used by this integration test."""
+
+    frame = pd.read_excel(path, sheet_name="今走レース情報")
+    race_ids = frame["レースID"].astype(str).str.replace(r"\.0$", "", regex=True)
+    horse_numbers = pd.to_numeric(frame["馬番"], errors="coerce")
+    matches = frame[(race_ids == race_id) & (horse_numbers == horse_no)]
+    assert len(matches) == 1
+    return int(matches.iloc[0]["予想順位"])
 
 
 def test_phase2_imports_existing_excel_and_ozzu(monkeypatch, tmp_path):
@@ -59,6 +72,11 @@ def test_phase2_imports_existing_excel_and_ozzu(monkeypatch, tmp_path):
         workbook = excel_input_dir / "馬の競走成績_20260705.xlsx"
         feature_workbook = legacy_output_dir / "馬の競走成績_with_feat_20260705.xlsx"
         odds_csv = odds_input_dir / "OZZU_20260705.csv"
+        expected_prediction_rank = _prediction_rank_from_workbook(
+            feature_workbook,
+            race_id="202602010801",
+            horse_no=4,
+        )
 
         workbook_summary = excel_importer.import_race_workbook(db, workbook)
         feature_summary = excel_importer.import_race_workbook(db, feature_workbook)
@@ -85,7 +103,7 @@ def test_phase2_imports_existing_excel_and_ozzu(monkeypatch, tmp_path):
             .filter(models.RaceEntry.race_id == "202602010801", models.RaceEntry.horse_no == 4)
             .one()
         )
-        assert entry.prediction_rank == 1
+        assert entry.prediction_rank == expected_prediction_rank
         assert entry.prediction_score is not None
 
         quality_summary = data_quality_service.run_data_quality_checks(
@@ -173,7 +191,7 @@ def test_phase2_imports_existing_excel_and_ozzu(monkeypatch, tmp_path):
         assert (tmp_path / "exports" / "runs" / job.id / "output_manifest_v1.json").exists()
         assert (tmp_path / "logs" / "runs" / job.id / "stdout.log").exists()
         db.refresh(entry)
-        assert entry.prediction_rank == 1
+        assert entry.prediction_rank == expected_prediction_rank
         assert entry.prediction_score is not None
 
         result_job = jobs_endpoint.create_job(
@@ -247,7 +265,7 @@ def test_phase2_imports_existing_excel_and_ozzu(monkeypatch, tmp_path):
             )
             .one()
         )
-        assert prediction_result.prediction_rank == 1
+        assert prediction_result.prediction_rank == expected_prediction_rank
         assert prediction_result.prediction_score is not None
         assert prediction_result.risk_reason
         assert prediction_result.evaluation_reason

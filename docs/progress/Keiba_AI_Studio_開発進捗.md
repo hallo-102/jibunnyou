@@ -1,5 +1,162 @@
 # Keiba AI Studio 開発進捗
 
+## 2026-07-23 Ver.1.1 リリース受入監査
+
+### 実施内容・結果
+
+- 全変更ファイルの差分、Compose解決、空白エラー、実APIキー・秘密鍵・固定Bearer値の混入を監査。
+- migrationは実行DB・headとも`0006_notifications`で一致。
+- version APIは`1.1.0`、database revisionは`0006_notifications`を返却。
+- Backend 78 passed、Frontend UI契約18 passed、6route production build成功。
+- Docker全serviceを再起動し、readiness全項目ok、healthcheck対象healthy、Celery Worker pongを確認。
+- Browserで6routeすべての画面タイトル、API ok、DB ok、エラーなしを確認。
+- `npm audit`で検出したNext.js・sharpの高重要度脆弱性をNext.js 15.5.21、sharp 0.35.3へ更新して解消。
+- 更新後の`npm audit --omit=dev`は0 vulnerabilities、Backend `pip check`は問題なし。
+- WindowsとAlpine Dockerの双方で更新後のproduction buildに成功。
+
+### 判定
+
+- Ver.1.1リリース受入: 合格。
+- コミット候補: Ver.1.1のmigration・通知・UI・文書・依存更新を1つのrelease commitへまとめる。
+- 推奨コミットメッセージ: `feat: release Keiba AI Studio v1.1.0`
+- 予想ロジック変更がないため3か月バックテストは対象外。
+
+## 2026-07-23 Ver.1.1 共通ヘッダー・操作ツールバー分割
+
+### 実施内容・結果
+
+- API・DB状態、通知センター、テーマ切替、次操作、処理順、エラー・処理中表示を`WorkspaceHeader.tsx`へ抽出。
+- 開催日Excel選択、レース検索、取込・予想・AI・買い目・品質・結果操作を`ActionToolbar.tsx`へ抽出。
+- 通知・health・開催日Excel関連型を各コンポーネントからexport。
+- 親画面はAPI処理と状態管理を保持し、表示・操作契約をpropsで渡す構成へ整理。
+- レース検索欄へ一意な操作名を追加。
+- 親画面はVer.1.1分割開始前の2,507行から1,292行まで縮小。
+- Backend 78 passed、Frontend UI契約18 passed、6route production build成功。
+- Dockerへ反映し、通知センター開閉、未読操作、検索入力、主要操作、API/DB正常をBrowserで確認。
+
+### 判定
+
+- Ver.1.1第11段階（共通ヘッダー・操作ツールバー分割）完了。
+- Ver.1.1の主要構造整理は完了。次作業はリリース受入監査、差分整理、Gitコミット候補の確定。
+
+## 2026-07-23 Ver.1.1 レースワークスペース分割
+
+### 実施内容・結果
+
+- レース一覧と出走馬の多列比較表を`RaceWorkspace.tsx`へ抽出。
+- Python・独立AI・比較統合・買い目・品質のレース別状態バッジを同コンポーネントへ移動。
+- 出走馬のPython・独立AI・統合AI・旧AI比較表示と26列のソート見出しを移動。
+- レース、出走馬、Python予想結果、品質状態、ソート関連型を同コンポーネントからexport。
+- 親画面は選択レース・ソート状態とデータMapをpropsで渡す構成へ整理。
+- Backend 78 passed、Frontend UI契約17 passed、6route production build成功。
+- Dockerへ反映し、レース一覧・出走馬表・Python順位ソート、API/DB正常をBrowserで確認。
+
+### 判定
+
+- Ver.1.1第10段階（レースワークスペース分割）完了。
+- 次作業: 共通ヘッダー・操作ツールバーを独立コンポーネントへ分割し、Ver.1.1の構造整理を仕上げる。
+
+## 2026-07-23 Ver.1.1 買い目候補コンポーネント分割
+
+### 実施内容・結果
+
+- 予想source、券種、方式、1点金額、レース・日上限、最大点数を`BetPlanningPanel.tsx`へ抽出。
+- 自動投票無効の安全案内、候補一覧、購入候補確認・外部購入の手動記録・見送り操作も同コンポーネントへ移動。
+- `BetCandidate`、`BetGenerationResult`と選択値の型を同コンポーネントからexport。
+- 親画面は候補生成API、状態更新API、controlled stateを保持する構成へ整理。
+- 7つの入力欄へ一意な操作名を追加し、キーボード・支援技術・自動検証から識別しやすく改善。
+- Backend 78 passed、Frontend UI契約16 passed、6route production build成功。
+- Dockerへ反映し、ワイド・5頭BOX・1点600円への変更と自動投票無効案内をBrowserで確認。
+
+### 判定
+
+- Ver.1.1第9段階（買い目候補コンポーネント分割）完了。
+- 次作業: レース一覧・出走馬表を独立コンポーネントへ分割。
+
+## 2026-07-23 Ver.1.1 AI比較領域コンポーネント分割
+
+### 実施内容・結果
+
+- 独立AI分析、Python/独立AI比較・統合、旧AI補正の3パネルを`AiAnalysisPanels.tsx`へ抽出。
+- 独立AI・比較・統合・旧AI関連型を同コンポーネントからexportし、親画面の型定義を縮小。
+- 親画面は取得済み分析、旧AI差分、数値・エラー書式化関数をpropsで渡す表示契約へ整理。
+- 独立AIの`insufficient_quota`を英語の生エラーではなく、日本語のAPI Platform Billing復旧案内へ統一。
+- Backend 78 passed、Frontend UI契約15 passed、6route production build成功。
+- Dockerへ反映し、API/DB正常、3パネル表示、日本語の利用枠案内、英語生エラー非表示をBrowserで確認。
+
+### 判定
+
+- Ver.1.1第8段階（AI比較領域コンポーネント分割）完了。
+- 次作業: 買い目候補領域を独立コンポーネントへ分割。
+
+## 2026-07-23 Ver.1.1 成績分析コンポーネント分割
+
+### 実施内容・結果
+
+- 成績集計の期間、source、券種、内訳の操作とKPI・内訳・選択レース結果を`PerformancePanel.tsx`へ抽出。
+- `RaceResult`と`AnalyticsSummary`型を成績分析コンポーネント側へ移動。
+- 親画面は集計状態、書式化関数、更新関数をpropsで渡すcontrolled構成へ整理。
+- 4つの選択欄へ一意な操作名を追加し、キーボード・支援技術・自動検証から識別しやすく改善。
+- Backend 78 passed、Frontend UI契約14 passed、6route production build成功。
+- Dockerへ反映し、全期間・競馬場別への切替、集計更新、回収率243.3%と選択レース結果の表示を確認。
+
+### 判定
+
+- Ver.1.1第7段階（成績分析コンポーネント分割）完了。
+- 次作業: AI比較領域を独立コンポーネントへ分割。
+
+## 2026-07-23 Ver.1.1 運用領域コンポーネント分割
+
+### 実施内容・結果
+
+- 取得状況、ジョブ、品質チェックの3パネルを`OperationsPanels.tsx`へ抽出。
+- `Job`、`CollectionRun`、`Issue`型も運用コンポーネント側へ移動。
+- 親画面はAPI状態と再取得関数をpropsで渡し、表示責任と副作用を分離。
+- 運用画面では3パネル、レース画面では取得状況だけを表示する既存契約を維持。
+- Backend 78 passed、Frontend UI契約13 passed、6route production build成功。
+
+### 判定
+
+- Ver.1.1第6段階（運用領域コンポーネント分割）完了。
+- 次作業: 成績分析を独立コンポーネントへ分割。
+
+## 2026-07-23 Ver.1.1 route別データ取得最適化
+
+### 実施内容・結果
+
+- health、開催日、Excel、ジョブ、通知を全route共通取得へ整理。
+- KPI・処理状況・成績・取得履歴・品質問題の日次一覧をroute別取得へ分離。
+- 5秒pollingで取得履歴を監視するrouteをレース画面と運用画面だけに限定。
+- 初回レース選択時の選択レースAPI二重取得を1回へ統合。
+- BrowserとGateway logでroute別API通信を確認し、console error/warning 0件を確認。
+- Backend 78 passed、Frontend UI契約12 passed、6route production build成功。
+
+### 判定
+
+- Ver.1.1第5段階（route別データ取得最適化）完了。
+- 次作業: 巨大な共通画面本体を領域別コンポーネントへ分割し、保守性を改善。
+
+## 2026-07-22 Ver.1.1 通知センター・テーマ切替・route分離
+
+### 実施内容・結果
+
+- `0006_notifications`で通知履歴、source重複抑制、未読・既読時刻を追加。
+- failed jobとwarning/errorのデータ品質issueを専用通知へ自動集約。
+- 通知一覧、集計、個別既読・未読、一括既読APIを追加。
+- Headerの未読badge、通知一覧、対象画面導線をFrontendへ追加。
+- OS設定追従、ライト、ダークの3テーマを選択でき、端末へ保存する機能を追加。
+- 初回描画前のテーマ適用、印刷時のlight固定、再利用可能なテーマ操作部品を追加。
+- `/races`、`/analysis`、`/bets`、`/performance`、`/operations`を追加し、6領域をURLで直接開けるようにした。
+- 共通navigationで現在位置を表示し、通知と次操作の導線も領域別URLへ接続した。
+- pathnameに応じて担当パネルだけを表示し、画面見出しとskip link移動先もroute別に切り替えた。
+- 可変の実データExcelに対する固定順位assertを、入力Excelとの一致検証へ修正。
+- Backend 78 passed、Frontend UI契約11 passed、6route production buildとBrowser表示検証に成功。
+
+### 判定
+
+- Ver.1.1第4段階（route別表示分離）完了。
+- 次作業: 共通状態を維持しながら、routeごとのデータ取得を段階分割。
+
 ## 2026-07-10 Phase 0 Loop 1 / 5
 
 ### 現在のフェーズ

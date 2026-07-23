@@ -167,10 +167,10 @@ NAS/ローカル永続領域
 | Results | `POST /result-imports`, `GET /races/{id}/results`, `POST /settlements` |
 | Analytics | `GET /analytics/dashboard`, `POST /backtests`, `GET /backtests/{id}/metrics` |
 | Settings | `GET /settings/active`, `GET /settings/versions`, `POST /settings/activate` |
-| Notifications | `GET /notifications`, `POST /notifications/{id}/acknowledge`, `POST /notifications/{id}/resolve` |
+| Notifications | `GET /notifications`, `GET /notifications/summary`, `PATCH /notifications/{id}/read`, `POST /notifications/read-all` |
 | Artifacts | `GET /runs/{id}/artifacts`, `GET /artifacts/{id}/download` |
 
-表は論理API一覧である。Ver.1.0の実経路は`/api/openapi.json`を正とし、Settingsの直接変更、専用Notifications、Artifact download、横断backtest APIは後続とする。既存APIは互換エンドポイントとして保持する。
+表は論理API一覧である。実経路は`/api/openapi.json`を正とし、Settingsの直接変更、Artifact download、横断backtest APIは後続とする。専用NotificationsはVer.1.1で実装済み。既存APIは互換エンドポイントとして保持する。
 
 ## 8. データベース一覧
 
@@ -200,10 +200,10 @@ NAS/ローカル永続領域
 
 ### 8.4 運用
 
-- audit_logs, config_versions, feature_weight_versions
+- audit_logs, config_versions, feature_weight_versions, notifications
 - user_race_notes, ui_preferences（単一ユーザーでも設定保持に使用）
 
-専用notificationsと配信設定は後続migrationとし、Ver.1.0はjob_runs、data_quality_issues、audit_logs、画面alertを通知正本とする。上記は論理名を含み、実テーブル名との対応はAlembic migrationとSQLAlchemy modelを正とする。
+Ver.1.1ではnotificationsを通知正本とし、failed job_runsとwarning/errorのdata_quality_issuesを重複なく永続化する。既読状態と履歴はnotificationsに保持し、外部メール等の配信設定は後続とする。上記は論理名を含み、実テーブル名との対応はAlembic migrationとSQLAlchemy modelを正とする。
 
 すべての履歴性データは原則論理削除または不変Artifactとして扱う。確率はDB内部0〜1、金額は整数円、日時はTIMESTAMPTZを標準とする。
 

@@ -214,4 +214,4 @@
 
 ## 4. 次の作業
 
-Ver.1.0完成。通常運用ではREADMEと運用手順に従い、予想ロジック変更時はGolden Masterと3か月backtest、月次で隔離restore試験を継続する。将来拡張はADR-009を起点に別版で計画する。
+Ver.1.1では専用Web通知、ダークモード、6領域のURL・表示分離、route別データ取得とpolling最適化、運用・成績・AI比較・買い目・レースの各領域抽出、共通ヘッダーの`WorkspaceHeader`抽出、主要操作の`ActionToolbar`抽出まで実装済み。差分・秘密情報・migration・全テスト・Docker再起動・Celery・6画面・依存関係のリリース受入監査にも合格した。次はVer.1.1差分をrelease commitとして確定し、その後Ver.1.2の改善候補を選定する。通常運用ではREADMEと運用手順に従い、予想ロジック変更時はGolden Masterと3か月backtest、月次で隔離restore試験を継続する。

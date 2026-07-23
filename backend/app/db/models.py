@@ -519,6 +519,48 @@ class DataQualityIssue(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "category",
+            "source_type",
+            "source_id",
+            name="uq_notifications_source",
+        ),
+        CheckConstraint(
+            "severity IN ('info','warning','error')",
+            name="ck_notifications_severity",
+        ),
+        Index("ix_notifications_unread_time", "is_read", "created_at"),
+        Index("ix_notifications_race_time", "race_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    category: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    race_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    race_date: Mapped[date | None] = mapped_column(Date, index=True)
+    action_anchor: Mapped[str | None] = mapped_column(String(200))
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class RaceQualityStatus(Base):
     __tablename__ = "race_quality_statuses"
     __table_args__ = (UniqueConstraint("race_id", name="uq_race_quality_status_race_id"),)

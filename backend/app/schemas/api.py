@@ -629,6 +629,36 @@ class DataQualityIssueRead(BaseModel):
     created_at: datetime
 
 
+class NotificationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    category: str
+    severity: str
+    title: str
+    message: str
+    source_type: str
+    source_id: str
+    race_id: str | None = None
+    race_date: date | None = None
+    action_anchor: str | None = None
+    is_read: bool
+    read_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class NotificationReadUpdate(BaseModel):
+    is_read: bool
+
+
+class NotificationSummaryRead(BaseModel):
+    total_count: int = 0
+    unread_count: int = 0
+    error_count: int = 0
+    warning_count: int = 0
+
+
 class RaceQualityStatusRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

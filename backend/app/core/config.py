@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="KEIBA_", extra="ignore")
 
     app_name: str = "Keiba AI Studio"
-    app_version: str = "1.0.0"
+    app_version: str = "1.1.0"
     environment: str = "local"
     git_commit: str = "unknown"
     database_url: str = "sqlite:///./data/keiba_ai_studio.db"
