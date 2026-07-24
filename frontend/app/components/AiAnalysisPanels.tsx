@@ -191,7 +191,7 @@ export default function AiAnalysisPanels({
     <>
       <section data-route-section="analysis" id="ai-analysis">
         <div className="sectionHeader">
-          <h2>独立AI分析</h2>
+          <h2>過去のAPI独立AI履歴（読み取り専用）</h2>
           <span>
             {independentAnalysis
               ? `${independentAnalysis.status} / #${independentAnalysis.analysis_sequence}`
@@ -232,8 +232,8 @@ export default function AiAnalysisPanels({
                 ))}
             </div>
             <div className="resultStrip">
-              <span>{independentAnalysis.model_name}</span>
-              <strong>Python結果 非表示</strong>
+              <span>旧方式の保存済み結果</span>
+              <strong>新規API実行は廃止</strong>
               <span title={independentAnalysis.output_hash || ""}>
                 hash {independentAnalysis.output_hash?.slice(0, 12) || "-"}
               </span>
@@ -251,7 +251,7 @@ export default function AiAnalysisPanels({
 
       <section data-route-section="analysis">
         <div className="sectionHeader">
-          <h2>Python / 独立AI 比較・統合</h2>
+          <h2>過去のAPI比較・統合履歴（読み取り専用）</h2>
           <span>
             {integrationAnalysis
               ? `${integrationAnalysis.status} / #${integrationAnalysis.analysis_sequence}`

@@ -43,8 +43,8 @@ type WorkspaceHeaderProps = {
   onUpdateNotificationReadState: (notificationId: string, isRead: boolean) => void;
   progress: {
     python: boolean;
-    independentAi: boolean;
-    integration: boolean;
+    chatgptPrompt: boolean;
+    chatgptSaved: boolean;
     bets: boolean;
     result: boolean;
   };
@@ -171,8 +171,8 @@ export default function WorkspaceHeader({
         <a href={workspaceHref(nextAction.anchor)}>対象画面へ</a>
         <ol aria-label="処理順">
           <li className={progress.python ? "done" : "current"}>Python</li>
-          <li className={progress.independentAi ? "done" : ""}>独立AI</li>
-          <li className={progress.integration ? "done" : ""}>比較・統合</li>
+          <li className={progress.chatgptPrompt ? "done" : ""}>ChatGPT用プロンプト</li>
+          <li className={progress.chatgptSaved ? "done" : ""}>回答保存</li>
           <li className={progress.bets ? "done" : ""}>候補</li>
           <li className={progress.result ? "done" : ""}>結果</li>
         </ol>

@@ -542,7 +542,7 @@ def _user_facing_ai_error(exc: BaseException) -> str:
             "利用上限を確認してください。ChatGPTの契約とは別管理です。"
         )
     if "invalid_api_key" in lowered or "incorrect api key" in lowered:
-        return "OpenAI APIキーが無効です。.envのOPENAI_API_KEYを確認してサービスを再起動してください。"
+        return "この旧API予想方式は廃止されています。ChatGPT手動予想を使用してください。"
     if "rate_limit" in lowered or getattr(exc, "status_code", None) == 429:
         return "OpenAI APIの一時的なレート上限に達しました。少し待ってから再実行してください。"
     if isinstance(exc, TimeoutError) or "timeout" in lowered:

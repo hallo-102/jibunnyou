@@ -17,8 +17,6 @@ from app.legacy_bridge.legacy_runner import LEGACY_COLLECTION_SCRIPTS
 from app.legacy_bridge.prediction_runner import run_prediction_job
 from app.schemas.api import JobCreate, JobRead
 from app.services.ai_opinion import run_ai_bet_correction, run_ai_explain, run_ai_second_opinion
-from app.services.ai_independent import run_independent_analysis
-from app.services.ai_integration import run_comparison_integration
 from app.services.betting import generate_bet_candidates, settle_bets_for_race
 from app.services.collector import run_collection_pipeline
 from app.services.data_quality import has_blocking_quality_status, run_data_quality_checks
@@ -44,8 +42,6 @@ SUPPORTED_JOB_TYPES = {
     "prediction.run",
     "prediction.risk_evaluation",
     "ai.explain",
-    "ai.independent",
-    "ai.compare_integrate",
     "ai.second_opinion",
     "ai.bet_correction",
     "bet.generate",
@@ -123,23 +119,16 @@ def create_job(
         payload.job_type in {"prediction.run", "prediction.python"}
         and get_settings().job_execution_mode == "queue"
     )
-    use_ai_queue = (
-        payload.job_type in {"ai.independent", "ai.compare_integrate"}
-        and get_settings().job_execution_mode == "queue"
-    )
-    use_worker_queue = use_collector_queue or use_prediction_queue or use_ai_queue
+    use_worker_queue = use_collector_queue or use_prediction_queue
     if use_collector_queue:
         queue_name = "collector"
         task_name = "keiba_ai_studio.collector.run"
     elif use_prediction_queue:
         queue_name = "prediction"
         task_name = "keiba_ai_studio.prediction.run"
-    elif payload.job_type == "ai.independent":
-        queue_name = "ai"
-        task_name = "keiba_ai_studio.ai.independent"
     else:
-        queue_name = "ai"
-        task_name = "keiba_ai_studio.ai.compare_integrate"
+        queue_name = "inline"
+        task_name = ""
     job = JobRun(
         job_type=payload.job_type,
         status="queued" if use_worker_queue else "running",
@@ -268,29 +257,6 @@ def create_job(
                 force=payload.force,
             )
             job.message = _json_message(prediction_summary)
-        elif payload.job_type == "ai.independent":
-            if not payload.race_id:
-                raise ValueError("ai.independentにはrace_idが必要です")
-            independent_summary = run_independent_analysis(
-                db,
-                race_id=payload.race_id,
-                job_run_id=job.id,
-                rerun_reason=(payload.params or {}).get("rerun_reason"),
-            )
-            job.message = _json_message(independent_summary)
-        elif payload.job_type == "ai.compare_integrate":
-            if not payload.race_id:
-                raise ValueError("ai.compare_integrateにはrace_idが必要です")
-            params = payload.params or {}
-            integration_summary = run_comparison_integration(
-                db,
-                race_id=payload.race_id,
-                job_run_id=job.id,
-                independent_analysis_id=params.get("independent_analysis_id"),
-                prediction_run_id=params.get("prediction_run_id"),
-                rerun_reason=params.get("rerun_reason"),
-            )
-            job.message = _json_message(integration_summary)
         elif payload.job_type == "ai.explain":
             params = payload.params or {}
             ai_summary = run_ai_explain(
@@ -452,8 +418,6 @@ def _requires_quality_gate(job_type: str) -> bool:
         "prediction.run",
         "prediction.python",
         "prediction.risk_evaluation",
-        "ai.independent",
-        "ai.compare_integrate",
         "ai.explain",
         "ai.second_opinion",
         "ai.bet_correction",

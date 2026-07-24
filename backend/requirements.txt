@@ -14,5 +14,4 @@ requests==2.33.1
 torch==2.11.0
 python-multipart==0.0.20
 httpx==0.28.1
-openai==2.44.0
 pytest==8.3.4

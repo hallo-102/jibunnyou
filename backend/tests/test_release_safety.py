@@ -34,7 +34,8 @@ def test_local_secret_files_are_ignored_and_examples_are_placeholders() -> None:
 
     assert re.search(r"(?m)^\.env$", gitignore)
     assert re.search(r"(?m)^\.env\.\*$", gitignore)
-    assert "OPENAI_API_KEY=" in env_example
+    assert "OPENAI_API_KEY=" not in env_example
+    assert "KEIBA_CHATGPT_URL=https://chatgpt.com/" in env_example
     assert "CHANGE_THIS_TO_A_LONG_RANDOM_PASSWORD" in env_example
     assert not re.search(r"sk-(?:proj-)?[A-Za-z0-9_-]{20,}", env_example)
 

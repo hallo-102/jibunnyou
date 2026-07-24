@@ -1240,6 +1240,94 @@ tbody tr.selected {
   padding: 0 12px;
 }
 
+.chatgptManualPanel {
+  padding: 12px;
+}
+
+.manualFlowNote {
+  margin: 0 0 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.manualActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.manualTextField {
+  display: block;
+  margin-top: 12px;
+}
+
+.manualTextField > span {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.manualTextField textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  padding: 10px;
+  color: var(--text);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.manualSuccess,
+.manualError,
+.manualWarning {
+  border-radius: 5px;
+  padding: 9px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.manualSuccess {
+  background: var(--success-bg);
+  color: var(--green);
+}
+
+.manualError,
+.manualWarning,
+.lengthWarning {
+  color: var(--amber);
+}
+
+.manualError,
+.manualWarning {
+  background: var(--warning-bg, var(--neutral-bg));
+}
+
+.manualHistory {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.manualHistory article {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 10px;
+}
+
+.manualHistory pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  color: var(--muted);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 @media (max-width: 980px) {
   .topBar {
     align-items: flex-start;

@@ -339,15 +339,13 @@ def test_insufficient_quota_stops_without_retry_and_returns_japanese_guidance(tm
         assert analysis.status == "failed"
 
 
-def test_openai_provider_requires_api_key(tmp_path, monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("KEIBA_OPENAI_API_KEY", raising=False)
-    settings = _settings(tmp_path, ai_provider="openai", openai_api_key=None)
-    with pytest.raises(AiProviderUnavailable, match="APIキーが未設定"):
+def test_retired_openai_provider_is_disabled_without_api_key(tmp_path):
+    settings = _settings(tmp_path, ai_provider="openai")
+    with pytest.raises(AiProviderUnavailable, match="廃止されました"):
         create_independent_ai_provider(settings)
 
 
-def test_independent_job_is_dispatched_to_dedicated_queue(tmp_path, monkeypatch):
+def test_independent_api_job_type_is_no_longer_supported(tmp_path, monkeypatch):
     calls: list[tuple[str, list[str], str]] = []
     monkeypatch.setattr(
         jobs_endpoint,
@@ -362,20 +360,21 @@ def test_independent_job_is_dispatched_to_dedicated_queue(tmp_path, monkeypatch)
 
     with _session(tmp_path / "queue.db") as db:
         _seed_race(db)
-        job = jobs_endpoint.create_job(
-            JobCreate(
-                job_type="ai.independent",
-                race_date=date(2026, 7, 10),
-                race_id="202607100901",
-            ),
-            db,
-        )
+        with pytest.raises(Exception) as exc_info:
+            jobs_endpoint.create_job(
+                JobCreate(
+                    job_type="ai.independent",
+                    race_date=date(2026, 7, 10),
+                    race_id="202607100901",
+                ),
+                db,
+            )
 
-        assert job.status == "queued"
-        assert calls == [("keiba_ai_studio.ai.independent", [job.id], "ai")]
+        assert getattr(exc_info.value, "status_code", None) == 422
+        assert calls == []
 
 
-def test_independent_analysis_api_returns_locked_result(monkeypatch):
+def test_independent_analysis_api_is_gone_and_history_remains_readable(monkeypatch):
     monkeypatch.setattr(
         ai_independent_service,
         "create_independent_ai_provider",
@@ -428,11 +427,7 @@ def test_independent_analysis_api_returns_locked_result(monkeypatch):
         )
         latest = client.get(f"/api/v1/races/{race_id}/ai-independent-analysis")
 
-    assert created.status_code == 202
-    assert created.json()["status"] == "completed"
+    assert created.status_code == 410
+    assert "廃止" in created.text
     assert latest.status_code == 200
-    payload = latest.json()
-    assert payload["status"] == "succeeded"
-    assert payload["output_locked"] is True
-    assert payload["output"]["race_id"] == race_id
-    assert len(payload["output"]["runners"]) == 2
+    assert latest.json() is None

@@ -1041,6 +1041,49 @@ class AiAnalysisOutput(Base):
     )
 
 
+class ChatgptManualPrediction(Base):
+    """Store user-mediated ChatGPT prompts and pasted responses without API calls."""
+
+    __tablename__ = "chatgpt_manual_predictions"
+    __table_args__ = (
+        CheckConstraint(
+            "source = 'chatgpt_manual'",
+            name="ck_chatgpt_manual_predictions_source",
+        ),
+        Index(
+            "ix_chatgpt_manual_predictions_race_created",
+            "race_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    race_id: Mapped[str] = mapped_column(
+        ForeignKey("races.race_id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
+    source: Mapped[str] = mapped_column(
+        String(32),
+        default="chatgpt_manual",
+        server_default="chatgpt_manual",
+        nullable=False,
+    )
+    prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    response_text: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        nullable=False,
+    )
+
+
 class BetStatusHistory(Base):
     __tablename__ = "bet_status_history"
     __table_args__ = (

@@ -46,19 +46,11 @@ def create_independent_analysis(
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)],
     db: Session = Depends(get_db),
 ) -> JobRun:
-    """Queue an independent analysis without exposing Python prediction fields."""
+    """Reject the retired API prediction operation while keeping history readable."""
 
-    return create_job(
-        JobCreate(
-            job_type="ai.independent",
-            race_date=payload.race_date,
-            race_id=payload.race_id,
-            force=payload.force,
-            params={"rerun_reason": payload.rerun_reason} if payload.rerun_reason else {},
-        ),
-        db,
-        idempotency_key=idempotency_key,
-        idempotency_scope="POST:/api/v1/ai/independent-analysis",
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="APIによるAI予想は廃止されました。ChatGPT手動予想を使用してください",
     )
 
 
@@ -128,24 +120,11 @@ def create_comparison_integration(
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)],
     db: Session = Depends(get_db),
 ) -> JobRun:
-    """Queue comparison only after an immutable independent result exists."""
+    """Reject the retired API integration operation while preserving old results."""
 
-    params = {
-        "independent_analysis_id": payload.independent_analysis_id,
-        "prediction_run_id": payload.prediction_run_id,
-        "rerun_reason": payload.rerun_reason,
-    }
-    return create_job(
-        JobCreate(
-            job_type="ai.compare_integrate",
-            race_date=payload.race_date,
-            race_id=payload.race_id,
-            force=payload.force,
-            params={key: value for key, value in params.items() if value is not None},
-        ),
-        db,
-        idempotency_key=idempotency_key,
-        idempotency_scope="POST:/api/v1/ai/comparison-integration",
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="APIによるAI比較・統合は廃止されました。ChatGPT手動予想を使用してください",
     )
 
 

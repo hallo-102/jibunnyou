@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,17 +33,19 @@ class Settings(BaseSettings):
     prediction_runner_mode: Literal["dry_run", "execute"] = "dry_run"
     legacy_timeout_seconds: int = 900
     prediction_timeout_seconds: int = Field(default=1800, ge=60, le=7200)
-    ai_provider: Literal["disabled", "openai", "mock"] = "openai"
-    openai_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("KEIBA_OPENAI_API_KEY", "OPENAI_API_KEY"),
-    )
+    # 旧API方式は過去履歴の読取互換性と旧テスト用だけに残し、正式機能では無効にする。
+    # "openai"は旧.envを読み込んでも起動を壊さない互換値で、Provider生成時は常に無効扱い。
+    ai_provider: Literal["disabled", "openai", "mock"] = "disabled"
     ai_model: str = "gpt-5.4-mini-2026-03-17"
     ai_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] = "low"
     ai_timeout_seconds: int = Field(default=120, ge=10, le=900)
     ai_max_output_tokens: int = Field(default=8000, ge=1000, le=32000)
     ai_max_retries: int = Field(default=2, ge=0, le=3)
     ai_retry_delays_seconds: list[int] = [2, 10]
+    chatgpt_manual_prediction_enabled: bool = True
+    chatgpt_url: str = "https://chatgpt.com/"
+    chatgpt_recent_races_per_horse: int = Field(default=5, ge=1, le=10)
+    chatgpt_prompt_length_warning: int = Field(default=50000, ge=1000, le=200000)
     collector_max_retries: int = Field(default=3, ge=0, le=3)
     collector_retry_delays_seconds: list[int] = [10, 60, 300]
     collector_min_interval_seconds: int = Field(default=60, ge=0, le=86400)

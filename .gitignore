@@ -24,6 +24,8 @@ src/
 tests/
 !backend/tests/
 !backend/tests/**/*.py
+!frontend/tests/
+!frontend/tests/**/*.mjs
 tokutyouryou_keisann/*/
 yosou_py/
 yosou_py_backup_20260412/

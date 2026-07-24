@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 export const WORKSPACE_ROUTES = [
   { href: "/#dashboard", pathname: "/", label: "概要" },
   { href: "/races#race-workspace", pathname: "/races", label: "レース・予想" },
-  { href: "/analysis#ai-analysis", pathname: "/analysis", label: "AI比較" },
+  { href: "/analysis#chatgpt-manual", pathname: "/analysis", label: "ChatGPT予想" },
   { href: "/bets#bet-planning", pathname: "/bets", label: "買い目候補" },
   { href: "/performance#performance", pathname: "/performance", label: "成績分析" },
   { href: "/operations#operations", pathname: "/operations", label: "ジョブ・品質" }

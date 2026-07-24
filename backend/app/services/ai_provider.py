@@ -97,96 +97,6 @@ class AiPipelineProvider(IndependentAiProvider, Protocol):
         """Return one guarded integration proposal."""
 
 
-class OpenAIResponsesProvider:
-    """Use the OpenAI Responses API with native Pydantic structured output."""
-
-    def __init__(self, settings: Settings) -> None:
-        if settings.openai_api_key is None or not settings.openai_api_key.get_secret_value().strip():
-            raise AiProviderUnavailable(
-                "OpenAI APIキーが未設定です。OPENAI_API_KEYを設定してから再実行してください"
-            )
-        try:
-            from openai import OpenAI
-        except ImportError as exc:  # pragma: no cover - 依存欠損はコンテナ起動検証で確認する。
-            raise AiProviderUnavailable("OpenAI Python SDKがインストールされていません") from exc
-
-        self.model_name = settings.ai_model
-        self._reasoning_effort = settings.ai_reasoning_effort
-        self._max_output_tokens = settings.ai_max_output_tokens
-        self._client = OpenAI(
-            api_key=settings.openai_api_key.get_secret_value(),
-            timeout=settings.ai_timeout_seconds,
-            max_retries=0,
-        )
-
-    def analyze(self, input_snapshot: IndependentAnalysisInput) -> AiProviderResult:
-        response = self._client.responses.parse(
-            model=self.model_name,
-            reasoning={"effort": self._reasoning_effort},
-            max_output_tokens=self._max_output_tokens,
-            input=[
-                {"role": "developer", "content": INDEPENDENT_DEVELOPER_PROMPT},
-                {
-                    "role": "user",
-                    "content": input_snapshot.model_dump_json(exclude_none=False),
-                },
-            ],
-            text_format=IndependentAnalysisResponse,
-        )
-        parsed = response.output_parsed
-        if parsed is None:
-            raise AiProviderResponseError("AI応答を構造化出力として解析できませんでした")
-
-        usage = getattr(response, "usage", None)
-        return AiProviderResult(
-            output=parsed,
-            provider_response_id=getattr(response, "id", None),
-            prompt_tokens=getattr(usage, "input_tokens", None),
-            completion_tokens=getattr(usage, "output_tokens", None),
-        )
-
-    def compare(self, input_snapshot: ComparisonInput) -> AiComparisonProviderResult:
-        response = self._parse_response(
-            developer_prompt=COMPARISON_DEVELOPER_PROMPT,
-            input_json=input_snapshot.model_dump_json(exclude_none=False),
-            output_schema=ComparisonResponse,
-        )
-        return AiComparisonProviderResult(
-            output=response.output_parsed,
-            provider_response_id=getattr(response, "id", None),
-            prompt_tokens=getattr(getattr(response, "usage", None), "input_tokens", None),
-            completion_tokens=getattr(getattr(response, "usage", None), "output_tokens", None),
-        )
-
-    def integrate(self, input_snapshot: IntegrationInput) -> AiIntegrationProviderResult:
-        response = self._parse_response(
-            developer_prompt=INTEGRATION_DEVELOPER_PROMPT,
-            input_json=input_snapshot.model_dump_json(exclude_none=False),
-            output_schema=IntegrationResponse,
-        )
-        return AiIntegrationProviderResult(
-            output=response.output_parsed,
-            provider_response_id=getattr(response, "id", None),
-            prompt_tokens=getattr(getattr(response, "usage", None), "input_tokens", None),
-            completion_tokens=getattr(getattr(response, "usage", None), "output_tokens", None),
-        )
-
-    def _parse_response(self, *, developer_prompt: str, input_json: str, output_schema):
-        response = self._client.responses.parse(
-            model=self.model_name,
-            reasoning={"effort": self._reasoning_effort},
-            max_output_tokens=self._max_output_tokens,
-            input=[
-                {"role": "developer", "content": developer_prompt},
-                {"role": "user", "content": input_json},
-            ],
-            text_format=output_schema,
-        )
-        if response.output_parsed is None:
-            raise AiProviderResponseError("AI応答を構造化出力として解析できませんでした")
-        return response
-
-
 class DeterministicMockAiProvider:
     """Provide an input-only deterministic provider for automated tests."""
 
@@ -410,10 +320,10 @@ class DeterministicMockAiProvider:
 def create_independent_ai_provider(settings: Settings) -> IndependentAiProvider:
     """Build only an explicitly configured provider; never silently fabricate AI output."""
 
-    if settings.ai_provider == "openai":
-        return OpenAIResponsesProvider(settings)
     if settings.ai_provider == "mock":
         if settings.environment not in {"test", "development", "local"}:
             raise AiProviderUnavailable("mock AI providerは本番環境では使用できません")
         return DeterministicMockAiProvider()
-    raise AiProviderUnavailable("AI providerが無効です。KEIBA_AI_PROVIDERを確認してください")
+    raise AiProviderUnavailable(
+        "APIによるAI予想は廃止されました。ChatGPT手動予想を使用してください"
+    )

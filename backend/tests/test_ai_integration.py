@@ -317,7 +317,7 @@ def test_integration_rejects_rank_shift_over_exceptional_limit(tmp_path):
             _validate_integration(integration_input, integration)
 
 
-def test_comparison_integration_job_uses_ai_queue(tmp_path, monkeypatch):
+def test_comparison_integration_api_job_type_is_no_longer_supported(tmp_path, monkeypatch):
     calls: list[tuple[str, list[str], str]] = []
     monkeypatch.setattr(
         jobs_endpoint,
@@ -332,18 +332,19 @@ def test_comparison_integration_job_uses_ai_queue(tmp_path, monkeypatch):
 
     with _session(tmp_path / "queue.db") as db:
         _seed_race_and_python(db)
-        job = jobs_endpoint.create_job(
-            JobCreate(
-                job_type="ai.compare_integrate",
-                race_date=date(2026, 7, 10),
-                race_id=RACE_ID,
-                params={"prediction_run_id": PREDICTION_RUN_ID},
-            ),
-            db,
-        )
+        with pytest.raises(Exception) as exc_info:
+            jobs_endpoint.create_job(
+                JobCreate(
+                    job_type="ai.compare_integrate",
+                    race_date=date(2026, 7, 10),
+                    race_id=RACE_ID,
+                    params={"prediction_run_id": PREDICTION_RUN_ID},
+                ),
+                db,
+            )
 
-        assert job.status == "queued"
-        assert calls == [("keiba_ai_studio.ai.compare_integrate", [job.id], "ai")]
+        assert getattr(exc_info.value, "status_code", None) == 422
+        assert calls == []
 
 
 def test_comparison_integration_api_preserves_independent_latest(tmp_path, monkeypatch):
@@ -391,13 +392,9 @@ def test_comparison_integration_api_preserves_independent_latest(tmp_path, monke
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-    assert created.status_code == 202
-    assert created.json()["status"] == "completed"
+    assert created.status_code == 410
+    assert "廃止" in created.text
     assert latest_integration.status_code == 200
-    integration_payload = latest_integration.json()
-    assert integration_payload["status"] == "succeeded"
-    assert integration_payload["comparison_locked"] is True
-    assert integration_payload["integration_locked"] is True
-    assert integration_payload["comparison"]["opposition"]["has_material_opposition"] is True
+    assert latest_integration.json() is None
     assert latest_independent.status_code == 200
     assert latest_independent.json()["id"] == independent_summary["analysis_id"]

@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  ArrowUpDown,
   BadgeCent,
   CheckCircle2,
   ListRestart,
@@ -18,13 +17,9 @@ export type RaceWorkbook = {
 };
 
 type ActionToolbarProps = {
-  aiJobActive: boolean;
   canGenerateBets: boolean;
-  canRunIntegration: boolean;
-  integrationJobActive: boolean;
   isBusy: boolean;
   onGenerateBets: () => void;
-  onRunComparisonIntegration: () => void;
   onRunJob: (jobType: string) => void;
   onSearchTextChange: (value: string) => void;
   onWorkbookSelection: (fileName: string) => void;
@@ -38,13 +33,9 @@ type ActionToolbarProps = {
 };
 
 export default function ActionToolbar({
-  aiJobActive,
   canGenerateBets,
-  canRunIntegration,
-  integrationJobActive,
   isBusy,
   onGenerateBets,
-  onRunComparisonIntegration,
   onRunJob,
   onSearchTextChange,
   onWorkbookSelection,
@@ -110,32 +101,6 @@ export default function ActionToolbar({
       >
         {predictionJobActive ? <RefreshCw size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
         {predictionJobActive ? "Python予想 実行中" : "Python予想"}
-      </button>
-      <button
-        disabled={isBusy || aiJobActive || !selectedDate || !selectedRaceId}
-        onClick={() => onRunJob("ai.independent")}
-        title={!selectedDate || !selectedRaceId
-          ? "開催日とレースを選択してください"
-          : aiJobActive
-            ? "独立AI分析を実行中です"
-            : "Python予想を見せずに選択レースを独立分析"}
-        type="button"
-      >
-        {aiJobActive ? <RefreshCw size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
-        {aiJobActive ? "独立AI 実行中" : "独立AI分析"}
-      </button>
-      <button
-        disabled={isBusy || integrationJobActive || !canRunIntegration}
-        onClick={onRunComparisonIntegration}
-        title={!canRunIntegration
-          ? "固定済み独立AI結果とPython予想が必要です"
-          : integrationJobActive
-            ? "Python/AI比較・統合を実行中です"
-            : "固定済み独立AI結果を変更せずPython予想と比較・統合"}
-        type="button"
-      >
-        {integrationJobActive ? <RefreshCw size={16} aria-hidden="true" /> : <ArrowUpDown size={16} aria-hidden="true" />}
-        {integrationJobActive ? "比較・統合 実行中" : "Python/AI比較・統合"}
       </button>
       <button
         disabled={isBusy || !canGenerateBets}

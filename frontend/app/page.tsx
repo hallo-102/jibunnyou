@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import ActionToolbar, { type RaceWorkbook } from "./components/ActionToolbar";
+import ChatgptManualPanel from "./components/ChatgptManualPanel";
 import AiAnalysisPanels, {
   type AiBetStrategy,
   type AiEvaluation,
@@ -158,7 +159,7 @@ function formatAiJobFailure(message?: string | null) {
     return fallback;
   }
   if (message.includes("insufficient_quota") || message.includes("exceeded your current quota")) {
-    return "OpenAI APIの利用枠がありません。API Platform側のBillingで支払い方法・残高・利用上限を確認してください。ChatGPTの契約とは別管理です。";
+    return "この旧API予想方式は廃止されています。ChatGPT手動予想を使用してください。";
   }
   return message.replace(/^AiIndependentError:\s*/, "");
 }
@@ -211,7 +212,7 @@ export default function Home() {
   const routePresentation = {
     "/": { key: "dashboard", title: "概要", anchor: "dashboard" },
     "/races": { key: "races", title: "レース・予想", anchor: "primary-workspace" },
-    "/analysis": { key: "analysis", title: "AI比較", anchor: "ai-analysis" },
+    "/analysis": { key: "analysis", title: "ChatGPT予想", anchor: "chatgpt-manual" },
     "/bets": { key: "bets", title: "買い目候補", anchor: "bet-planning" },
     "/performance": { key: "performance", title: "成績分析", anchor: "performance" },
     "/operations": { key: "operations", title: "ジョブ・品質", anchor: "operations" }
@@ -237,6 +238,8 @@ export default function Home() {
   const [aiEvaluations, setAiEvaluations] = useState<AiEvaluation[]>([]);
   const [finalPredictions, setFinalPredictions] = useState<FinalPrediction[]>([]);
   const [aiBetStrategy, setAiBetStrategy] = useState<AiBetStrategy | null>(null);
+  const [chatgptPromptReady, setChatgptPromptReady] = useState(false);
+  const [chatgptResponseSaved, setChatgptResponseSaved] = useState(false);
   const [bets, setBets] = useState<BetCandidate[]>([]);
   const [selectedRaceBets, setSelectedRaceBets] = useState<BetCandidate[]>([]);
   const [raceResult, setRaceResult] = useState<RaceResult | null>(null);
@@ -415,37 +418,6 @@ export default function Home() {
     [jobs, selectedDate, selectedRaceId]
   );
 
-  const aiJobActive = useMemo(
-    () =>
-      jobs.some(
-        (job) =>
-          job.job_type === "ai.independent" &&
-          ["queued", "running"].includes(job.status) &&
-          (!selectedDate || job.race_date === selectedDate) &&
-          (!selectedRaceId || job.race_id === selectedRaceId)
-      ),
-    [jobs, selectedDate, selectedRaceId]
-  );
-
-  const integrationJobActive = useMemo(
-    () =>
-      jobs.some(
-        (job) =>
-          job.job_type === "ai.compare_integrate" &&
-          ["queued", "running"].includes(job.status) &&
-          (!selectedDate || job.race_date === selectedDate) &&
-          (!selectedRaceId || job.race_id === selectedRaceId)
-      ),
-    [jobs, selectedDate, selectedRaceId]
-  );
-
-  const canRunIntegration = Boolean(
-    independentAnalysis?.status === "succeeded" &&
-      independentAnalysis.output_locked &&
-      independentAnalysis.output &&
-      predictionResults.length >= 2
-  );
-
   const displayEntries = useMemo(() => {
     const entrySortValue = (entry: Entry, key: EntrySortKey): SortValue => {
       const prediction = predictionByHorseNo.get(entry.horse_no);
@@ -535,11 +507,8 @@ export default function Home() {
     if (predictionResults.length < 2) {
       return { label: "Python予想を実行", detail: "出走馬データから基準予想を作成します", anchor: "#race-workspace" };
     }
-    if (!independentAnalysis?.output_locked) {
-      return { label: "独立AI分析を実行", detail: "Python順位を見せずにAI評価を固定します", anchor: "#ai-analysis" };
-    }
-    if (!integrationAnalysis?.integration_locked) {
-      return { label: "Python/AIを比較・統合", detail: "固定済み独立結果とPython予想を比較します", anchor: "#ai-analysis" };
+    if (!chatgptPromptReady) {
+      return { label: "ChatGPT用プロンプトを作成", detail: "内容を確認してChatGPTへ手動で送信します", anchor: "#chatgpt-manual" };
     }
     if (!selectedRaceBets.length) {
       return { label: "買い目候補を作成", detail: "予算上限内の候補だけを保存します", anchor: "#bet-planning" };
@@ -548,7 +517,7 @@ export default function Home() {
       return { label: "結果を取得", detail: "確定結果と払戻を取り込みます", anchor: "#operations" };
     }
     return { label: "成績を確認", detail: "source・券種・条件別KPIを確認します", anchor: "#performance" };
-  }, [independentAnalysis, integrationAnalysis, predictionResults.length, qualityByRaceId, raceResult, selectedDate, selectedRaceBets.length, selectedRaceId]);
+  }, [chatgptPromptReady, predictionResults.length, qualityByRaceId, raceResult, selectedDate, selectedRaceBets.length, selectedRaceId]);
 
   async function loadRouteData(routeKey: string, raceDate: string) {
     const routeTasks: Array<Promise<unknown>> = [];
@@ -867,25 +836,6 @@ export default function Home() {
     }
   }
 
-  async function runComparisonIntegration() {
-    setIsBusy(true);
-    setError("");
-    try {
-      await apiPost<Job>("/v1/ai/comparison-integration", {
-        race_id: selectedRaceId,
-        race_date: selectedDate || null,
-        independent_analysis_id: independentAnalysis?.id || null,
-        prediction_run_id: predictionResults[0]?.prediction_run_id || null,
-        force: false
-      });
-      await refreshAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "unknown error");
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
   async function generateBetPreviews() {
     setIsBusy(true);
     setError("");
@@ -1088,6 +1038,8 @@ export default function Home() {
   }, [activeRouteKey, selectedDate, selectedRaceId]);
 
   useEffect(() => {
+    setChatgptPromptReady(false);
+    setChatgptResponseSaved(false);
     if (selectedRaceId) {
       void loadSelectedRaceData(selectedRaceId);
     }
@@ -1114,8 +1066,8 @@ export default function Home() {
           void updateNotificationReadState(notificationId, isRead)}
         progress={{
           python: predictionResults.length >= 2,
-          independentAi: Boolean(independentAnalysis?.output_locked),
-          integration: Boolean(integrationAnalysis?.integration_locked),
+          chatgptPrompt: chatgptPromptReady,
+          chatgptSaved: chatgptResponseSaved,
           bets: selectedRaceBets.length > 0,
           result: raceResult?.result_status === "confirmed"
         }}
@@ -1125,13 +1077,9 @@ export default function Home() {
       />
 
       <ActionToolbar
-        aiJobActive={aiJobActive}
         canGenerateBets={Boolean(selectedRaceId) && predictionResults.length >= 2}
-        canRunIntegration={canRunIntegration}
-        integrationJobActive={integrationJobActive}
         isBusy={isBusy}
         onGenerateBets={() => void generateBetPreviews()}
-        onRunComparisonIntegration={() => void runComparisonIntegration()}
         onRunJob={(jobType) => void runJob(jobType)}
         onSearchTextChange={setSearchText}
         onWorkbookSelection={(fileName) => void handleWorkbookSelection(fileName)}
@@ -1166,11 +1114,11 @@ export default function Home() {
           <strong>{predictionStatuses.length}</strong>
         </div>
         <div>
-          <span>独立AI済み</span>
+          <span>旧API独立AI履歴</span>
           <strong>{independentAnalyses.filter((analysis) => analysis.status === "succeeded").length}</strong>
         </div>
         <div>
-          <span>比較・統合済み</span>
+          <span>旧API比較・統合履歴</span>
           <strong>{integrationAnalyses.filter((analysis) => analysis.status === "succeeded").length}</strong>
         </div>
         <div>
@@ -1217,6 +1165,13 @@ export default function Home() {
           onRetryCollection={retryCollection}
         />
 
+        <ChatgptManualPanel
+          onPromptReady={setChatgptPromptReady}
+          onResponseSaved={setChatgptResponseSaved}
+          pythonPredictionReady={predictionResults.length >= 2}
+          selectedRaceId={selectedRaceId}
+        />
+
         <AiAnalysisPanels
           aiBetStrategy={aiBetStrategy}
           aiDiff={aiDiff}
@@ -1236,7 +1191,8 @@ export default function Home() {
             <summary>予想から成績確認まで</summary>
             <ol>
               <li>レースと品質状態を確認してPython予想を実行します。</li>
-              <li>独立AIを固定してからPython/AI比較・統合を実行します。</li>
+              <li>ChatGPT用プロンプトを作成・コピーし、ChatGPTへ手動で貼り付けて送信します。</li>
+              <li>ChatGPTの回答を手動で貼り付け、対象レースへ保存します。</li>
               <li>予算と最大点数を設定し、買い目候補だけを保存します。</li>
               <li>外部購入した場合だけ、確認後に手動購入を記録します。</li>
               <li>確定結果を取得して精算し、条件別成績を確認します。</li>

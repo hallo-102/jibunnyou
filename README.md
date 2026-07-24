@@ -1,6 +1,6 @@
 # Keiba AI Studio
 
-Keiba AI Studioは、既存Python予想、Pythonを見ない生成AI独立分析、両者の比較・統合、買い目候補、結果照合、成績分析を一つの画面で扱うローカル競馬予想アプリです。外部への自動投票機能は実装していません。
+Keiba AI Studioは、既存Python予想、ChatGPT用予想プロンプトの生成・コピー、手動で取り込んだ回答履歴、買い目候補、結果照合、成績分析を一つの画面で扱うローカル競馬予想アプリです。ChatGPTにはWebで最新情報を調査し、Pythonを見ない独立評価の後にPython予想へ賛否・順位修正を行うよう依頼します。ChatGPTの自動操作と外部への自動投票は実装していません。
 
 ## 最短起動手順（Windows PowerShell）
 
@@ -22,7 +22,7 @@ Invoke-RestMethod http://127.0.0.1:18080/api/ready
 docker compose ps
 ```
 
-ブラウザで `http://127.0.0.1:18080` を開きます。独立AIを使う場合だけ、`.env`の`OPENAI_API_KEY`へローカルでキーを設定し、APIとWorkerを再作成します。
+ブラウザで `http://127.0.0.1:18080` を開きます。ChatGPT手動予想にAPIキーは不要です。対象レースのPython予想後にプロンプトを作成・コピーし、ChatGPTへ手動で貼り付けます。Web検索が有効であることを確認して送信し、回答は画面へ手動で貼り付けて保存します。
 
 ```powershell
 # 設定変更をAPIとWorkerへ反映する。
