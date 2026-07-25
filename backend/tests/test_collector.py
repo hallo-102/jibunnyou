@@ -10,7 +10,17 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.base import Base
 from app.api.v1.endpoints import jobs as jobs_endpoint
-from app.db.models import ArtifactFile, CollectionCacheEntry, CollectionRun, JobLog, JobRun, RawFileRecord
+from app.db.models import (
+    ArtifactFile,
+    CollectionCacheEntry,
+    CollectionRun,
+    DataQualityIssue,
+    JobLog,
+    JobRun,
+    Race,
+    RaceQualityStatus,
+    RawFileRecord,
+)
 from app.schemas.api import JobCreate
 from app.services.collector import execute_with_finite_retry, run_collection_pipeline
 from app.services.collector import CollectorBlockedError
@@ -260,6 +270,100 @@ def test_latest_failed_collection_or_active_collection_blocks_downstream_job(tmp
         db.commit()
 
         assert has_blocking_quality_status(db, race_date=target_date) is True
+
+
+def test_unscoped_missing_other_races_does_not_block_selected_healthy_race(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'race-scoped-collection-gate.db'}")
+    Base.metadata.create_all(engine)
+    target_date = date(2026, 7, 25)
+    source_file = "OZZU_20260725.csv"
+
+    with Session(engine) as db:
+        race = Race(
+            race_id="202607020101",
+            race_date=target_date,
+            race_number=1,
+            venue="中京",
+        )
+        db.add(race)
+        db.add(
+            RaceQualityStatus(
+                race_id=race.race_id,
+                status="YELLOW",
+                summary="RED 0 / YELLOW 1",
+                issue_count=1,
+                red_count=0,
+                yellow_count=1,
+            )
+        )
+        collection_job = JobRun(
+            job_type="collection.odds",
+            status="completed",
+            race_date=target_date,
+        )
+        db.add(collection_job)
+        db.flush()
+        db.add(
+            CollectionRun(
+                job_run_id=collection_job.id,
+                source_code="SRC_JRA_003",
+                data_kind="odds",
+                status="partial",
+                mode="dry_run",
+                race_date=target_date,
+                race_id=race.race_id,
+                force=False,
+                cache_key="c" * 64,
+                quality_status="RED",
+                summary_json={
+                    "import": {"source_file": source_file},
+                    "quality": {"unscoped_source_errors": 1},
+                },
+            )
+        )
+        db.add(
+            DataQualityIssue(
+                severity="error",
+                code="odds_entry_mismatch",
+                message=(
+                    "オッズと出走馬を安全に照合できないため反映しません: "
+                    "reason=race_not_found, racecourse=中京, race=4"
+                ),
+                source_file=source_file,
+            )
+        )
+        db.commit()
+
+        # 日全体の処理はREDのまま止めるが、正常な明示選択raceは別raceの欠落で止めない。
+        assert has_blocking_quality_status(db, race_date=target_date) is True
+        assert (
+            has_blocking_quality_status(
+                db,
+                race_date=target_date,
+                race_id=race.race_id,
+            )
+            is False
+        )
+
+        db.add(
+            DataQualityIssue(
+                severity="error",
+                code="invalid_odds_value",
+                message="オッズ値を数値化できません: value=不明",
+                source_file=source_file,
+            )
+        )
+        db.commit()
+
+        # 対象を特定できない未知のエラーは、従来どおり安全側で停止する。
+        assert (
+            has_blocking_quality_status(
+                db,
+                race_date=target_date,
+                race_id=race.race_id,
+            )
+            is True
+        )
 
 
 def test_execute_mode_requires_explicit_source_approval(

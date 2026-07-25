@@ -145,12 +145,15 @@ def has_blocking_quality_status(
         if run.status in {"queued", "running", "failed", "blocked"}:
             return True
         if run.status == "partial" or run.quality_status == "RED":
-            if race_id and run.race_id is None:
+            if race_id:
                 quality = (run.summary_json or {}).get("quality") or {}
+                # オッズ取込はrunにrace_idがあっても開催日CSV全体を処理する。
                 # 日付全体の一部raceだけがREDでも、正常な対象raceまで一律停止しない。
-                # raceへ紐付けられないsource errorだけは対象日全体を安全側で停止する。
                 if int(quality.get("unscoped_source_errors") or 0) > 0:
-                    return True
+                    # 取込対象Excelに存在しない別レースのオッズはrace_not_foundになる。
+                    # 明示選択された既存raceには影響しないため、それだけでは停止しない。
+                    if _has_blocking_unscoped_source_error(db, run):
+                        return True
                 continue
             return True
 
@@ -165,6 +168,35 @@ def has_blocking_quality_status(
             (JobRun.race_id == race_id) | (JobRun.race_id.is_(None))
         )
     return db.scalar(active_job_stmt.limit(1)) is not None
+
+
+def _has_blocking_unscoped_source_error(db: Session, run: CollectionRun) -> bool:
+    """Return whether a global collection has an unscoped error relevant to a selected race."""
+
+    summary = run.summary_json or {}
+    source_file = (summary.get("import") or {}).get("source_file")
+    if not source_file:
+        # エラー詳細を特定できない旧runは、安全側で停止する。
+        return True
+
+    issues = list(
+        db.scalars(
+            select(DataQualityIssue).where(
+                DataQualityIssue.source_file == source_file,
+                DataQualityIssue.race_id.is_(None),
+                DataQualityIssue.severity == "error",
+            )
+        )
+    )
+    if not issues:
+        # summaryと明細が食い違う場合は、安全側で停止する。
+        return True
+
+    return any(
+        issue.code != "odds_entry_mismatch"
+        or "reason=race_not_found" not in issue.message
+        for issue in issues
+    )
 
 
 def _load_target_races(

@@ -1,6 +1,6 @@
 import { BadgeCent, CheckCircle2, CircleSlash } from "lucide-react";
 
-export type BetSourceMode = "python" | "ai_integrated" | "both";
+export type BetSourceMode = "python" | "chatgpt_manual" | "ai_integrated" | "both";
 export type BetType = "3連複" | "ワイド";
 export type BetStrategyMode = "formation" | "box" | "wheel";
 
@@ -50,6 +50,7 @@ type BetPlanningPanelProps = {
   betStrategyMode: BetStrategyMode;
   betType: BetType;
   canUseIntegratedAi: boolean;
+  canUseManualChatgpt: boolean;
   canGenerate: boolean;
   formatCurrency: (value?: number | null) => string;
   isBusy: boolean;
@@ -75,6 +76,7 @@ export default function BetPlanningPanel({
   betStrategyMode,
   betType,
   canUseIntegratedAi,
+  canUseManualChatgpt,
   canGenerate,
   formatCurrency,
   isBusy,
@@ -108,8 +110,11 @@ export default function BetPlanningPanel({
             onChange={(event) => onBetSourceModeChange(event.target.value as BetSourceMode)}
           >
             <option value="python">Python案</option>
+            <option value="chatgpt_manual" disabled={!canUseManualChatgpt}>
+              ChatGPT手動案
+            </option>
             <option value="ai_integrated" disabled={!canUseIntegratedAi}>AI統合案</option>
-            <option value="both" disabled={!canUseIntegratedAi}>両方を比較</option>
+            <option value="both" disabled={!canUseManualChatgpt}>Python＋ChatGPTを比較</option>
           </select>
         </label>
         <label>
@@ -200,6 +205,8 @@ export default function BetPlanningPanel({
               <span className={`sourceBadge ${bet.source_type}`}>
                 {bet.source_type === "ai_integrated"
                   ? "AI統合案"
+                  : bet.source_type === "manual"
+                    ? "ChatGPT手動案"
                   : bet.source_type === "python"
                     ? "Python案"
                     : "旧AI案"}

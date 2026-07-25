@@ -21,6 +21,7 @@ from app.main import app
 from app.services.chatgpt_manual import (
     ChatgptManualError,
     copy_prompt_to_clipboard,
+    extract_chatgpt_manual_ranking,
     generate_chatgpt_prompt,
     list_chatgpt_history,
     open_chatgpt_browser,
@@ -228,8 +229,30 @@ def test_prompt_generation_requires_race_entries_and_python_prediction(tmp_path)
         db.add(Race(race_id="race-no-python", race_date=date(2026, 7, 23)))
         db.add(RaceEntry(race_id="race-no-python", horse_no=1, horse_name="未予想馬"))
         db.commit()
-        with pytest.raises(ChatgptManualError, match="Python予想が未実行"):
+        with pytest.raises(ChatgptManualError, match="正常完了したPython予想がありません"):
             generate_chatgpt_prompt(db, "race-no-python", settings=_settings(tmp_path))
+    finally:
+        db.close()
+
+
+def test_prompt_accepts_completed_date_wide_run_with_results_for_selected_race(tmp_path):
+    db = _session(tmp_path)
+    try:
+        _seed_race(db)
+        prediction_run = db.get(PredictionRun, "python-run-001")
+        assert prediction_run is not None
+        # 日付一括実行や旧データではrun自体にレースIDがない場合がある。
+        prediction_run.race_id = None
+        db.commit()
+
+        record = generate_chatgpt_prompt(
+            db,
+            "202607230101",
+            settings=_settings(tmp_path),
+        )
+
+        assert record.race_id == "202607230101"
+        assert "Python予想順位: 1" in record.prompt_text
     finally:
         db.close()
 
@@ -261,6 +284,58 @@ def test_manual_response_save_rejects_empty_and_history_is_readable(tmp_path):
         assert saved.prompt_text.endswith("利用者編集")
         assert history[0].id == saved.id
         assert db.scalar(select(ChatgptManualPrediction).where(ChatgptManualPrediction.id == saved.id))
+    finally:
+        db.close()
+
+
+def test_extract_chatgpt_manual_ranking_uses_final_ranking_and_skip_decision():
+    response_text = """
+1. 対象レース確認
+レースID 202607230101
+
+11. 統合最終ランキング
+最終順位\t馬\t統合スコア\t最終短評
+1\t2 テストホースB\t82\t本命候補
+2\t1 テストホースA\t70\t相手候補
+3\t4 テストホースD\t58\t押さえ
+
+12. 買い目提案
+最終判断：基本見送り
+
+13. Python予想への賛否
+一部賛成
+"""
+
+    ranking = extract_chatgpt_manual_ranking(
+        response_text,
+        race_id="202607230101",
+    )
+
+    assert ranking.horse_nos == [2, 1, 4]
+    assert ranking.scores_by_horse == {2: 82.0, 1: 70.0, 4: 58.0}
+    assert ranking.recommends_skip is True
+
+
+def test_save_chatgpt_response_rejects_final_different_race_id(tmp_path):
+    db = _session(tmp_path)
+    try:
+        _seed_race(db)
+        with pytest.raises(
+            ChatgptManualError,
+            match="最終レースIDが選択レースと一致しません",
+        ):
+            save_chatgpt_response(
+                db,
+                race_id="202607230101",
+                prompt_text="テスト用プロンプト",
+                response_text=(
+                    "対象レースID: 202607230101\n"
+                    "対象レースID: 202607230199\n"
+                    "11. 統合最終ランキング\n"
+                    "1\t2 テストホースB\t82\n"
+                    "2\t1 テストホースA\t70"
+                ),
+            )
     finally:
         db.close()
 

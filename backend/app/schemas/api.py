@@ -423,10 +423,10 @@ class BetGenerateRequest(BaseModel):
     race_date: date | None = None
     race_id: str | None = None
     prediction_run_id: str | None = None
-    source_modes: list[Literal["python", "ai_integrated"]] = Field(
+    source_modes: list[Literal["python", "ai_integrated", "manual"]] = Field(
         default_factory=lambda: ["python"],
         min_length=1,
-        max_length=2,
+        max_length=3,
     )
     bet_types: list[Literal["3連複", "ワイド"]] = Field(
         default_factory=lambda: ["3連複"],

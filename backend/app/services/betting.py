@@ -13,6 +13,7 @@ from app.db.models import (
     BetSettlement,
     AiAnalysis,
     AiAnalysisOutput,
+    ChatgptManualPrediction,
     PredictionResult,
     PredictionRun,
     Race,
@@ -30,11 +31,12 @@ from app.schemas.api import (
 from app.schemas.ai_integration import IntegrationResponse
 from app.legacy_bridge.normalization import normalize_horse_name
 from app.services.ai_independent import payload_sha256
+from app.services.chatgpt_manual import ChatgptManualError, extract_chatgpt_manual_ranking
 from app.services.history import record_bet_status_change
 
 
 BET_RULE_VERSION = "bet-rules-v1.0.0"
-SUPPORTED_BET_SOURCES = {"python", "ai_integrated"}
+SUPPORTED_BET_SOURCES = {"python", "ai_integrated", "manual"}
 SUPPORTED_BET_TYPES = {"3連複", "ワイド"}
 SUPPORTED_STRATEGY_MODES = {"formation", "box", "wheel"}
 
@@ -46,6 +48,7 @@ class _BetSource:
     source_snapshot_hash: str
     ai_analysis_id: str | None = None
     manual_review_required: bool = False
+    manual_review_reason: str | None = None
     integrated_score_by_horse: dict[int, float] | None = None
 
 
@@ -612,6 +615,69 @@ def _bet_sources(
             )
         )
 
+    if "manual" in source_modes:
+        manual_record = db.scalar(
+            select(ChatgptManualPrediction)
+            .where(
+                ChatgptManualPrediction.race_id == race_id,
+                ChatgptManualPrediction.response_text.is_not(None),
+            )
+            .order_by(
+                ChatgptManualPrediction.updated_at.desc(),
+                ChatgptManualPrediction.created_at.desc(),
+            )
+            .limit(1)
+        )
+        if manual_record is None or not manual_record.response_text:
+            warnings.append(
+                f"{race_id}: 保存済みChatGPT手動予想がないためChatGPT手動案を作成しません"
+            )
+        else:
+            try:
+                manual_ranking = extract_chatgpt_manual_ranking(
+                    manual_record.response_text,
+                    race_id=race_id,
+                )
+            except ChatgptManualError as exc:
+                warnings.append(f"{race_id}: {exc}")
+            else:
+                result_by_horse = {result.horse_no: result for result in results}
+                unknown_horse_nos = [
+                    horse_no
+                    for horse_no in manual_ranking.horse_nos
+                    if horse_no not in result_by_horse
+                ]
+                if unknown_horse_nos:
+                    warnings.append(
+                        f"{race_id}: ChatGPT最終順位に出走馬以外の馬番があります: "
+                        f"{unknown_horse_nos}"
+                    )
+                else:
+                    sources.append(
+                        _BetSource(
+                            source_type="manual",
+                            results=[
+                                result_by_horse[horse_no]
+                                for horse_no in manual_ranking.horse_nos
+                            ],
+                            source_snapshot_hash=payload_sha256(
+                                {
+                                    "schema_version": "chatgpt_manual_bet_source_v1",
+                                    "history_id": manual_record.id,
+                                    "race_id": race_id,
+                                    "response_text": manual_record.response_text,
+                                }
+                            ),
+                            manual_review_required=manual_ranking.recommends_skip,
+                            manual_review_reason=(
+                                "ChatGPT回答が基本見送りを推奨しているため手動確認が必要"
+                                if manual_ranking.recommends_skip
+                                else None
+                            ),
+                            integrated_score_by_horse=manual_ranking.scores_by_horse,
+                        )
+                    )
+
     if "ai_integrated" not in source_modes:
         return sources, warnings
 
@@ -705,7 +771,11 @@ def _build_combinations(
 
 
 def _source_label(source_type: str) -> str:
-    return {"python": "Python案", "ai_integrated": "AI統合案"}.get(source_type, source_type)
+    return {
+        "python": "Python案",
+        "ai_integrated": "AI統合案",
+        "manual": "ChatGPT手動案",
+    }.get(source_type, source_type)
 
 
 def _strategy_label(source_type: str, bet_type: str, strategy_mode: str) -> str:
@@ -748,10 +818,23 @@ def _build_candidate(
     prediction_run = db.get(PredictionRun, prediction_run_id)
     race = db.get(Race, race_id)
     race_date = prediction_run.race_date if prediction_run is not None else race.race_date if race else None
-    safe_results = [result for result in results if not result.risk_flag]
+    safe_results = (
+        results
+        if source.source_type == "manual"
+        else [result for result in results if not result.risk_flag]
+    )
     risk_count = len(results) - len(safe_results)
     rank_target = safe_results[0] if safe_results else results[0]
-    rank = _candidate_rank(rank_target)
+    source_top_score = (
+        source.integrated_score_by_horse.get(rank_target.horse_no)
+        if source.integrated_score_by_horse is not None
+        else None
+    )
+    rank = (
+        _candidate_rank_from_score(source_top_score or 0.0)
+        if source.source_type == "manual"
+        else _candidate_rank(rank_target)
+    )
 
     minimum_runners = 3 if bet_type == "3連複" else 2
     if len(results) < minimum_runners:
@@ -793,7 +876,11 @@ def _build_candidate(
     points = len(combo_payload)
     total_amount = points * stake_per_point
     source_reason = (
-        f"統合score={source.integrated_score_by_horse.get(rank_target.horse_no, 0):.2f}、"
+        (
+            f"ChatGPT score={source.integrated_score_by_horse.get(rank_target.horse_no, 0):.2f}、"
+            if source.source_type == "manual"
+            else f"統合score={source.integrated_score_by_horse.get(rank_target.horse_no, 0):.2f}、"
+        )
         if source.integrated_score_by_horse is not None
         else ""
     )
@@ -806,10 +893,17 @@ def _build_candidate(
     skip_reason = None
     warning_codes = ["AUTOMATIC_PURCHASE_DISABLED"]
     if source.manual_review_required:
-        warning_codes.append("AI_MANUAL_REVIEW_REQUIRED")
+        warning_codes.append(
+            "CHATGPT_MANUAL_REVIEW_REQUIRED"
+            if source.source_type == "manual"
+            else "AI_MANUAL_REVIEW_REQUIRED"
+        )
         if not allow_manual_review:
             status = "review_required"
-            skip_reason = "AI統合結果に重大不一致があるため手動確認が必要"
+            skip_reason = (
+                source.manual_review_reason
+                or "AI統合結果に重大不一致があるため手動確認が必要"
+            )
     if points == 0:
         status = "skipped"
         warning_codes.append("COMBINATION_NOT_AVAILABLE")
@@ -866,6 +960,16 @@ def _candidate_rank(top: PredictionResult) -> str:
     if score >= 56:
         return "A"
     if score >= 45:
+        return "B"
+    return "SKIP"
+
+
+def _candidate_rank_from_score(score: float) -> str:
+    if score >= 75:
+        return "S"
+    if score >= 65:
+        return "A"
+    if score >= 50:
         return "B"
     return "SKIP"
 

@@ -50,6 +50,8 @@ type WorkspaceHeaderProps = {
   };
   routeAnchor: string;
   routeTitle: string;
+  selectedDate: string;
+  selectedRaceId: string;
   unreadNotificationCount: number;
 };
 
@@ -67,6 +69,8 @@ export default function WorkspaceHeader({
   progress,
   routeAnchor,
   routeTitle,
+  selectedDate,
+  selectedRaceId,
   unreadNotificationCount
 }: WorkspaceHeaderProps) {
   return (
@@ -168,7 +172,14 @@ export default function WorkspaceHeader({
           <strong>{nextAction.label}</strong>
           <p>{nextAction.detail}</p>
         </div>
-        <a href={workspaceHref(nextAction.anchor)}>対象画面へ</a>
+        <a
+          href={workspaceHref(nextAction.anchor, {
+            raceDate: selectedDate,
+            raceId: selectedRaceId
+          })}
+        >
+          対象画面へ
+        </a>
         <ol aria-label="処理順">
           <li className={progress.python ? "done" : "current"}>Python</li>
           <li className={progress.chatgptPrompt ? "done" : ""}>ChatGPT用プロンプト</li>

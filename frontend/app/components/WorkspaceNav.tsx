@@ -16,9 +16,23 @@ const ROUTE_BY_ANCHOR: Record<string, string> = Object.fromEntries(
   WORKSPACE_ROUTES.map((route) => [`#${route.href.split("#")[1]}`, route.href])
 );
 
-export function workspaceHref(anchor: string) {
+type WorkspaceSelection = {
+  raceDate?: string;
+  raceId?: string;
+};
+
+export function workspaceHref(anchor: string, selection?: WorkspaceSelection) {
   // 既存の画面内anchorを、対応する領域別URLへ変換する。
-  return ROUTE_BY_ANCHOR[anchor] || anchor;
+  const href = ROUTE_BY_ANCHOR[anchor] || anchor;
+  if (!selection?.raceDate || !selection.raceId || !href.includes("#")) {
+    return href;
+  }
+  const [pathname, hash] = href.split("#", 2);
+  const params = new URLSearchParams({
+    race_date: selection.raceDate,
+    race_id: selection.raceId
+  });
+  return `${pathname}?${params.toString()}#${hash}`;
 }
 
 export default function WorkspaceNav() {

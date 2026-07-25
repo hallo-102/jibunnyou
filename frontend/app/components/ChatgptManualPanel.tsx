@@ -29,6 +29,7 @@ type ChatgptManualPanelProps = {
   onPromptReady: (ready: boolean) => void;
   onResponseSaved: (saved: boolean) => void;
   selectedRaceId: string;
+  selectedRaceLabel: string;
   pythonPredictionReady: boolean;
 };
 
@@ -52,6 +53,7 @@ export default function ChatgptManualPanel({
   onPromptReady,
   onResponseSaved,
   selectedRaceId,
+  selectedRaceLabel,
   pythonPredictionReady
 }: ChatgptManualPanelProps) {
   const [historyId, setHistoryId] = useState("");
@@ -87,6 +89,7 @@ export default function ChatgptManualPanel({
         `/v1/races/${encodeURIComponent(raceId)}/chatgpt-predictions`
       );
       setHistory(records);
+      onResponseSaved(records.some((record) => Boolean(record.response_text?.trim())));
     } catch (err) {
       setError(err instanceof Error ? err.message : "過去のChatGPT予想履歴を読み込めませんでした");
     }
@@ -98,7 +101,7 @@ export default function ChatgptManualPanel({
       return null;
     }
     if (!pythonPredictionReady) {
-      setError("Python予想が未実行です。先にPython予想を実行してください");
+      setError("正常完了したPython予想がありません。ジョブ・品質欄の失敗内容を確認してください");
       return null;
     }
     setIsBusy(true);
@@ -240,7 +243,10 @@ export default function ChatgptManualPanel({
     <section data-route-section="analysis" id="chatgpt-manual">
       <div className="sectionHeader">
         <h2>ChatGPT手動予想</h2>
-        <span>APIキー不要・送信は手動</span>
+        <span>
+          {selectedRaceLabel ? `対象: ${selectedRaceLabel}｜` : ""}
+          APIキー不要・送信は手動
+        </span>
       </div>
       <div className="chatgptManualPanel">
         <p className="manualFlowNote">
@@ -263,7 +269,9 @@ export default function ChatgptManualPanel({
           <button disabled={isBusy || (!prompt && !responseText)} onClick={clearInputs} type="button">入力内容をクリア</button>
         </div>
         {!pythonPredictionReady && selectedRaceId && (
-          <p className="manualWarning">Python予想が未実行です。先にPython予想を実行してください。</p>
+          <p className="manualWarning">
+            正常完了したPython予想がありません。ジョブ・品質欄の失敗内容を確認してください。
+          </p>
         )}
         <label className="manualTextField">
           <span>

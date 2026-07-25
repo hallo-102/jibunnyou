@@ -232,6 +232,18 @@ test("ChatGPT手動予想は生成・編集・コピー・手動回答保存を�
   assert.match(chatgptManualPanelSource, /予想結果を保存/);
   assert.match(chatgptManualPanelSource, /\/v1\/chatgpt\/responses/);
   assert.match(chatgptManualPanelSource, /Ctrl\+V/);
+  assert.match(chatgptManualPanelSource, /records\.some\(\(record\) => Boolean\(record\.response_text/);
+});
+
+test("対象画面への遷移で選択した開催日とレースをChatGPT予想へ引き継ぐ", () => {
+  assert.match(workspaceNavSource, /race_date: selection\.raceDate/);
+  assert.match(workspaceNavSource, /race_id: selection\.raceId/);
+  assert.match(workspaceHeaderSource, /raceDate: selectedDate/);
+  assert.match(workspaceHeaderSource, /raceId: selectedRaceId/);
+  assert.match(pageSource, /routeParams\.get\("race_date"\)/);
+  assert.match(pageSource, /routeParams\.get\("race_id"\)/);
+  assert.match(pageSource, /loadRaces\(nextDate, requestedRaceId\)/);
+  assert.match(chatgptManualPanelSource, /対象: \$\{selectedRaceLabel\}/);
 });
 
 test("ChatGPT手動予想はWeb最新情報の独立評価であることを案内する", () => {
@@ -239,6 +251,13 @@ test("ChatGPT手動予想はWeb最新情報の独立評価であることを案�
   assert.match(chatgptManualPanelSource, /Python予想への賛否と独立した最終予想/);
   assert.match(chatgptManualPanelSource, /Python予想の再説明が目的ではありません/);
   assert.match(chatgptManualPanelSource, /Web検索が有効/);
+});
+
+test("Python予想の失敗理由を未実行表示だけで終わらせず通知する", () => {
+  assert.match(pageSource, /\["completed", "failed"\]\.includes\(job\.status\)/);
+  assert.match(pageSource, /Python予想に失敗しました/);
+  assert.match(pageSource, /formatAiJobFailure\(finishedPrediction\.message\)/);
+  assert.match(chatgptManualPanelSource, /ジョブ・品質欄の失敗内容を確認/);
 });
 
 test("買い目条件・安全案内・候補操作をcontrolledな専用コンポーネントへ分離する", () => {
@@ -254,6 +273,10 @@ test("買い目条件・安全案内・候補操作をcontrolledな専用コン�
   assert.match(betPlanningPanelSource, /aria-label="買い目レース上限"/);
   assert.match(betPlanningPanelSource, /aria-label="買い目1日上限"/);
   assert.match(betPlanningPanelSource, /aria-label="買い目最大点数"/);
+  assert.match(betPlanningPanelSource, /ChatGPT手動案/);
+  assert.match(betPlanningPanelSource, /Python＋ChatGPTを比較/);
+  assert.match(pageSource, /betSourceMode === "chatgpt_manual" \? "manual"/);
+  assert.match(pageSource, /setBetSourceMode\("chatgpt_manual"\)/);
   assert.match(betPlanningPanelSource, /onStatusChange\(bet\.id, "purchased"/);
 });
 

@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db
 from app.db.migrations import upgrade_database
-from app.db.models import AiAnalysis, AiAnalysisOutput, BetCandidate, PredictionResult, PredictionRun
+from app.db.models import (
+    AiAnalysis,
+    AiAnalysisOutput,
+    BetCandidate,
+    ChatgptManualPrediction,
+    PredictionResult,
+    PredictionRun,
+)
 from app.main import app
 from app.schemas.ai_integration import IntegratedHorsePrediction, IntegrationResponse
 from app.schemas.api import BetStatusUpdate
@@ -268,6 +275,57 @@ def test_missing_integration_is_warning_not_fabricated_plan(tmp_path):
         assert summary.warnings
         assert "固定済みAI統合結果がない" in summary.warnings[0]
         assert db.scalar(select(func.count(BetCandidate.id))) == 0
+
+
+def test_chatgpt_manual_plan_uses_saved_final_ranking_and_requires_review_for_skip(tmp_path):
+    with _session(tmp_path / "manual.db") as db:
+        _seed_python(db)
+        db.add(
+            ChatgptManualPrediction(
+                race_id=RACE_ID,
+                source="chatgpt_manual",
+                prompt_text="テスト用プロンプト",
+                response_text=f"""
+1. 対象レース確認
+レースID: {RACE_ID}
+
+11. 統合最終ランキング
+| 最終順位 | 馬 | 統合スコア | 最終短評 |
+| --- | --- | --- | --- |
+| 1 | 4 買い目ホース4 | 88 | 本命候補 |
+| 2 | 2 買い目ホース2 | 78 | 相手候補 |
+| 3 | 3 買い目ホース3 | 68 | 相手候補 |
+
+12. 推奨買い目
+最終判断：基本見送り
+
+13. 最終結論
+慎重に判断する。
+""",
+            )
+        )
+        db.commit()
+
+        summary = generate_bet_candidates(
+            db,
+            race_id=RACE_ID,
+            source_modes=["manual"],
+            bet_types=["ワイド"],
+            strategy_modes=["wheel"],
+            stake_per_point=100,
+            max_race_amount=5000,
+            max_day_amount=10000,
+        )
+        candidate = db.scalar(select(BetCandidate))
+
+        assert summary.review_required == 1
+        assert candidate.status == "review_required"
+        assert candidate.source_type == "manual"
+        assert candidate.axis_horse_nos == [4]
+        assert candidate.rank == "S"
+        assert candidate.source_snapshot_hash and len(candidate.source_snapshot_hash) == 64
+        assert "CHATGPT_MANUAL_REVIEW_REQUIRED" in candidate.warning_codes
+        assert "ChatGPT score=88.00" in candidate.reason
 
 
 def test_same_plan_request_reuses_existing_candidate(tmp_path):

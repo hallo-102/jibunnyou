@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import webbrowser
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -27,6 +29,15 @@ SOURCE = "chatgpt_manual"
 
 class ChatgptManualError(RuntimeError):
     """Represent a safe Japanese message for a manual ChatGPT operation."""
+
+
+@dataclass(frozen=True)
+class ChatgptManualRanking:
+    """Represent a safely extracted final ranking from one pasted ChatGPT response."""
+
+    horse_nos: list[int]
+    scores_by_horse: dict[int, float]
+    recommends_skip: bool
 
 
 def generate_chatgpt_prompt(
@@ -56,15 +67,24 @@ def generate_chatgpt_prompt(
 
     prediction_run = db.scalar(
         select(PredictionRun)
+        .join(
+            PredictionResult,
+            PredictionResult.prediction_run_id == PredictionRun.id,
+        )
         .where(
-            PredictionRun.race_id == race_id,
+            PredictionResult.race_id == race_id,
             PredictionRun.status.in_(("completed", "succeeded")),
         )
-        .order_by(PredictionRun.created_at.desc())
+        .order_by(
+            PredictionRun.finished_at.desc(),
+            PredictionRun.created_at.desc(),
+        )
         .limit(1)
     )
     if prediction_run is None:
-        raise ChatgptManualError("Python予想が未実行です。先にPython予想を実行してください")
+        raise ChatgptManualError(
+            "正常完了したPython予想がありません。ジョブ・品質欄の失敗内容を確認してください"
+        )
     predictions = {
         item.horse_no: item
         for item in db.scalars(
@@ -115,6 +135,12 @@ def save_chatgpt_response(
         raise ChatgptManualError("ChatGPTの回答が空欄です")
     if db.get(Race, race_id) is None:
         raise ChatgptManualError("対象レースの情報が見つかりません")
+    response_race_ids = re.findall(r"(?<!\d)\d{12}(?!\d)", cleaned_response)
+    if response_race_ids and response_race_ids[-1] != race_id:
+        raise ChatgptManualError(
+            "ChatGPT回答の最終レースIDが選択レースと一致しません。"
+            "対象レースの回答を貼り付け直してください"
+        )
 
     record = db.get(ChatgptManualPrediction, history_id) if history_id else None
     if record is not None and record.race_id != race_id:
@@ -127,6 +153,97 @@ def save_chatgpt_response(
     db.commit()
     db.refresh(record)
     return record
+
+
+def extract_chatgpt_manual_ranking(
+    response_text: str,
+    *,
+    race_id: str,
+) -> ChatgptManualRanking:
+    """Extract the last matching race block and its final ranking without inventing horses."""
+
+    cleaned = response_text.strip()
+    race_position = cleaned.rfind(race_id)
+    if race_position < 0:
+        raise ChatgptManualError(
+            "ChatGPT回答に対象レースIDがないため、買い目候補へ使用できません"
+        )
+
+    block_start = cleaned.rfind("対象レース確認", 0, race_position)
+    block_start = block_start if block_start >= 0 else race_position
+    next_block = cleaned.find("対象レース確認", race_position + len(race_id))
+    block = cleaned[block_start:next_block if next_block >= 0 else None]
+
+    ranking_markers = ("統合最終ランキング", "最終統合ランキング", "最終ランキング")
+    ranking_start = max(block.rfind(marker) for marker in ranking_markers)
+    if ranking_start < 0:
+        raise ChatgptManualError(
+            "ChatGPT回答の統合最終ランキングを読み取れないため、買い目候補へ使用できません"
+        )
+    ranking_text = block[ranking_start:]
+    section_end = re.search(r"(?m)^\s*12[.．]\s*", ranking_text)
+    if section_end:
+        ranking_text = ranking_text[:section_end.start()]
+
+    ranked: list[tuple[int, int, float]] = []
+    for line in ranking_text.splitlines():
+        normalized = line.strip().strip("|").strip()
+        if not normalized:
+            continue
+        columns = [
+            column.strip()
+            for column in re.split(r"\s*\|\s*|\t+", normalized)
+            if column.strip()
+        ]
+        if len(columns) >= 3 and columns[0].isdigit():
+            horse_match = re.match(r"(\d{1,2})\s+", columns[1])
+            score_match = re.search(r"\d+(?:\.\d+)?", columns[2])
+            if horse_match and score_match:
+                ranked.append(
+                    (int(columns[0]), int(horse_match.group(1)), float(score_match.group(0)))
+                )
+                continue
+        plain_match = re.match(
+            r"^(\d{1,2})\s+(\d{1,2})\s+\S.+?\s+(\d{1,3}(?:\.\d+)?)\s+",
+            normalized,
+        )
+        if plain_match:
+            ranked.append(
+                (
+                    int(plain_match.group(1)),
+                    int(plain_match.group(2)),
+                    float(plain_match.group(3)),
+                )
+            )
+
+    unique_by_horse: dict[int, tuple[int, float]] = {}
+    for rank, horse_no, score in ranked:
+        if rank < 1 or horse_no < 1 or horse_no in unique_by_horse:
+            continue
+        unique_by_horse[horse_no] = (rank, score)
+    ordered = sorted(unique_by_horse.items(), key=lambda item: item[1][0])
+    if len(ordered) < 2:
+        raise ChatgptManualError(
+            "ChatGPT回答の最終順位を2頭以上読み取れないため、買い目候補へ使用できません"
+        )
+
+    recommendation_start = re.search(r"(?m)^\s*12[.．]\s*", block)
+    recommendation_end = re.search(r"(?m)^\s*13[.．]\s*", block)
+    recommendation = block[
+        recommendation_start.start() if recommendation_start else ranking_start:
+        recommendation_end.start() if recommendation_end else None
+    ]
+    recommends_skip = bool(
+        re.search(
+            r"(基本|原則|最終判断|結論|馬券判断)[^\n。]{0,20}見送り",
+            recommendation,
+        )
+    )
+    return ChatgptManualRanking(
+        horse_nos=[horse_no for horse_no, _ in ordered],
+        scores_by_horse={horse_no: score for horse_no, (_, score) in ordered},
+        recommends_skip=recommends_skip,
+    )
 
 
 def list_chatgpt_history(

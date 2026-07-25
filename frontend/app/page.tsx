@@ -267,6 +267,7 @@ export default function Home() {
   const [error, setError] = useState<string>("");
   const observedTerminalJobs = useRef<Set<string>>(new Set());
   const terminalJobsInitialized = useRef(false);
+  const routeSelectionApplied = useRef(false);
   const [entrySort, setEntrySort] = useState<{ key: EntrySortKey; direction: SortDirection }>({
     key: "integrated_rank",
     direction: "asc"
@@ -551,6 +552,15 @@ export default function Home() {
   async function refreshAll() {
     setError("");
     try {
+      let requestedDate = "";
+      let requestedRaceId = "";
+      if (!routeSelectionApplied.current && typeof window !== "undefined") {
+        // 画面遷移元で選択した開催日・レースを初回読込だけ復元する。
+        const routeParams = new URLSearchParams(window.location.search);
+        requestedDate = routeParams.get("race_date") || "";
+        requestedRaceId = routeParams.get("race_id") || "";
+        routeSelectionApplied.current = true;
+      }
       const [healthData, dayData, workbookData, jobData, notificationData] = await Promise.all([
         apiGet<Health>("/health"),
         apiGet<RaceDay[]>("/v1/race-days"),
@@ -573,7 +583,11 @@ export default function Home() {
       }
       setNotifications(notificationData);
 
-      const nextDate = selectedDate || dayData[0]?.race_date || "";
+      const nextDate = (
+        dayData.some((day) => day.race_date === requestedDate)
+          ? requestedDate
+          : selectedDate || dayData[0]?.race_date || ""
+      );
       if (nextDate !== selectedDate) {
         setSelectedDate(nextDate);
       }
@@ -582,7 +596,7 @@ export default function Home() {
         setSelectedWorkbookFile(matchingWorkbook.file_name);
       }
       await Promise.all([
-        loadRaces(nextDate),
+        loadRaces(nextDate, requestedRaceId),
         loadQualityStatuses(nextDate),
         loadRouteData(activeRouteKey, nextDate)
       ]);
@@ -762,7 +776,7 @@ export default function Home() {
     ]);
   }
 
-  async function loadRaces(raceDate: string) {
+  async function loadRaces(raceDate: string, preferredRaceId: string = selectedRaceId) {
     if (!raceDate) {
       setRaces([]);
       setSelectedRaceId("");
@@ -780,8 +794,8 @@ export default function Home() {
     const raceData = await apiGet<Race[]>(`/v1/races?race_date=${raceDate}`);
     setRaces(raceData);
     const nextRaceId = raceData[0]?.race_id || "";
-    const targetRaceId = raceData.some((race) => race.race_id === selectedRaceId)
-      ? selectedRaceId
+    const targetRaceId = raceData.some((race) => race.race_id === preferredRaceId)
+      ? preferredRaceId
       : nextRaceId;
     setSelectedRaceId(targetRaceId);
     if (targetRaceId && targetRaceId === selectedRaceId) {
@@ -842,7 +856,9 @@ export default function Home() {
     setBetGenerationMessage("");
     try {
       const sourceModes =
-        betSourceMode === "both" ? ["python", "ai_integrated"] : [betSourceMode];
+        betSourceMode === "both"
+          ? ["python", "manual"]
+          : [betSourceMode === "chatgpt_manual" ? "manual" : betSourceMode];
       const summary = await apiPost<BetGenerationResult>("/v1/bets/generate", {
         race_id: selectedRaceId,
         race_date: selectedDate || null,
@@ -966,27 +982,30 @@ export default function Home() {
             setCollections(collectionData);
           }
           setNotifications(notificationData);
-          const completedPrediction = jobData.find(
+          const finishedPrediction = jobData.find(
             (job) =>
               ["prediction.run", "prediction.python"].includes(job.job_type) &&
-              job.status === "completed" &&
+              ["completed", "failed"].includes(job.status) &&
               !observedTerminalJobs.current.has(job.id) &&
               (!selectedDate || job.race_date === selectedDate) &&
               (!selectedRaceId || job.race_id === selectedRaceId)
           );
-          if (
-            selectedRaceId &&
-            completedPrediction &&
-            !observedTerminalJobs.current.has(completedPrediction.id)
-          ) {
-            observedTerminalJobs.current.add(completedPrediction.id);
-            // 長時間ジョブ完了時だけ、選択レースの予想表示を更新する。
-            void Promise.all([
-              loadEntries(selectedRaceId),
-              loadPredictionResults(selectedRaceId),
-              loadPredictionStatuses(selectedDate),
-              apiGet<PredictionRun[]>("/v1/prediction-runs").then(setPredictionRuns)
-            ]);
+          if (selectedRaceId && finishedPrediction) {
+            observedTerminalJobs.current.add(finishedPrediction.id);
+            if (finishedPrediction.status === "completed") {
+              // 長時間ジョブ完了時だけ、選択レースの予想表示を更新する。
+              void Promise.all([
+                loadEntries(selectedRaceId),
+                loadPredictionResults(selectedRaceId),
+                loadPredictionStatuses(selectedDate),
+                apiGet<PredictionRun[]>("/v1/prediction-runs").then(setPredictionRuns)
+              ]);
+            } else {
+              // 実行失敗を未実行表示だけで終わらせず、利用者へ実際の原因を通知する。
+              setError(
+                `Python予想に失敗しました: ${formatAiJobFailure(finishedPrediction.message)}`
+              );
+            }
           }
           const finishedAi = jobData.find(
             (job) =>
@@ -1073,6 +1092,8 @@ export default function Home() {
         }}
         routeAnchor={routePresentation.anchor}
         routeTitle={routePresentation.title}
+        selectedDate={selectedDate}
+        selectedRaceId={selectedRaceId}
         unreadNotificationCount={unreadNotificationCount}
       />
 
@@ -1167,9 +1188,19 @@ export default function Home() {
 
         <ChatgptManualPanel
           onPromptReady={setChatgptPromptReady}
-          onResponseSaved={setChatgptResponseSaved}
+          onResponseSaved={(saved) => {
+            setChatgptResponseSaved(saved);
+            if (saved) {
+              setBetSourceMode("chatgpt_manual");
+            }
+          }}
           pythonPredictionReady={predictionResults.length >= 2}
           selectedRaceId={selectedRaceId}
+          selectedRaceLabel={
+            selectedRace
+              ? `${selectedRace.venue || ""}${selectedRace.race_number || ""}R ${selectedRace.name || ""}`.trim()
+              : ""
+          }
         />
 
         <AiAnalysisPanels
@@ -1207,6 +1238,7 @@ export default function Home() {
           betType={betType}
           canGenerate={Boolean(selectedRaceId) && predictionResults.length >= 2}
           canUseIntegratedAi={Boolean(integrationAnalysis?.integration_locked)}
+          canUseManualChatgpt={chatgptResponseSaved}
           formatCurrency={formatCurrency}
           isBusy={isBusy}
           maxBetPoints={maxBetPoints}
