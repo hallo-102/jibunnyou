@@ -283,13 +283,15 @@ test("買い目条件・安全案内・候補操作をcontrolledな専用コン�
 test("レース一覧・処理状況・出走馬比較表を専用コンポーネントへ分離する", () => {
   assert.match(pageSource, /<RaceWorkspace/);
   assert.match(pageSource, /visibleRaces=\{visibleRaces\}/);
-  assert.match(pageSource, /onSelectedRaceChange=\{setSelectedRaceId\}/);
+  assert.match(pageSource, /onSelectedRaceChange=\{changeSelectedRace\}/);
   assert.match(pageSource, /onEntrySort=\{updateEntrySort\}/);
   assert.match(raceWorkspaceSource, /<h2>レース一覧<\/h2>/);
   assert.match(raceWorkspaceSource, /<h2>出走馬<\/h2>/);
   assert.match(raceWorkspaceSource, /predictionByRaceId\.get\(race\.race_id\)/);
   assert.match(raceWorkspaceSource, /integrationByRaceId\.get\(race\.race_id\)/);
   assert.match(raceWorkspaceSource, /onSelectedRaceChange\(race\.race_id\)/);
+  assert.match(raceWorkspaceSource, /className="raceSelectButton"/);
+  assert.match(raceWorkspaceSource, /aria-pressed=\{race\.race_id === selectedRaceId\}/);
   assert.match(raceWorkspaceSource, /function EntrySortHeader/);
   assert.match(raceWorkspaceSource, /predictionByHorseNo\.get\(entry\.horse_no\)/);
   assert.match(raceWorkspaceSource, /integratedByHorseNo\.get\(entry\.horse_no\)/);
@@ -306,6 +308,7 @@ test("共通ヘッダー・通知・次操作・実行ツールバーを専用�
   assert.match(workspaceHeaderSource, /nextAction\.label/);
   assert.match(actionToolbarSource, /aria-label="開催日Excelファイル"/);
   assert.match(actionToolbarSource, /aria-label="レース検索"/);
+  assert.match(actionToolbarSource, /操作対象:/);
   assert.match(actionToolbarSource, /onRunJob\("prediction\.python"\)/);
   assert.doesNotMatch(actionToolbarSource, /ai\.independent|onRunComparisonIntegration/);
   assert.match(actionToolbarSource, /自動投票は行いません/);

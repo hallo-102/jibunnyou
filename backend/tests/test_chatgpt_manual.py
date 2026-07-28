@@ -138,6 +138,17 @@ def _seed_race(db: Session) -> None:
                 finish_position=index + 1,
             )
         )
+    db.add(
+        HorsePastPerformance(
+            source_file="duplicate.xlsx",
+            source_sheet="過去走",
+            target_race_id="202607230101",
+            horse_name="テストホースA",
+            race_date=date(2026, 7, 20),
+            race_name="過去レース0",
+            finish_position=1,
+        )
+    )
     db.commit()
 
 

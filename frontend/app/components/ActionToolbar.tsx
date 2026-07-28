@@ -28,6 +28,7 @@ type ActionToolbarProps = {
   searchText: string;
   selectedDate: string;
   selectedRaceId: string;
+  selectedRaceLabel: string;
   selectedWorkbookFile: string;
   workbookSelectionMessage: string;
 };
@@ -44,6 +45,7 @@ export default function ActionToolbar({
   searchText,
   selectedDate,
   selectedRaceId,
+  selectedRaceLabel,
   selectedWorkbookFile,
   workbookSelectionMessage
 }: ActionToolbarProps) {
@@ -68,6 +70,9 @@ export default function ActionToolbar({
       {workbookSelectionMessage && (
         <span className="workbookStatus" role="status">{workbookSelectionMessage}</span>
       )}
+      <span className="toolbarTarget" title={selectedRaceId || undefined}>
+        操作対象: {selectedRaceLabel || (selectedDate ? `${selectedDate}（レース未選択）` : "未選択")}
+      </span>
       <label className="searchField">
         <Search size={16} aria-hidden="true" />
         <input

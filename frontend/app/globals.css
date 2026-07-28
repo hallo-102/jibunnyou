@@ -689,6 +689,37 @@ tbody tr.selected {
   background: var(--panel-soft);
 }
 
+.raceSelectButton {
+  min-width: 2rem;
+  padding: 0.28rem 0.4rem;
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+}
+
+.raceSelectButton:hover,
+.raceSelectButton:focus-visible,
+.raceSelectButton[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.toolbarTarget {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.4rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .lowerGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;

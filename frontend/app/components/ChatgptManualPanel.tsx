@@ -66,9 +66,12 @@ export default function ChatgptManualPanel({
   const [error, setError] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const selectedRaceIdRef = useRef(selectedRaceId);
   const promptLength = useMemo(() => prompt.length, [prompt]);
 
   useEffect(() => {
+    // 非同期処理の完了時に、開始時と同じレースが選択中か確認するため保持する。
+    selectedRaceIdRef.current = selectedRaceId;
     setHistoryId("");
     setPrompt("");
     setResponseText("");
@@ -88,15 +91,24 @@ export default function ChatgptManualPanel({
       const records = await requestJson<ManualHistory[]>(
         `/v1/races/${encodeURIComponent(raceId)}/chatgpt-predictions`
       );
+      if (selectedRaceIdRef.current !== raceId) {
+        // レース切替後に返った古い履歴は新しいレースへ表示しない。
+        return;
+      }
       setHistory(records);
+      onPromptReady(records.some((record) => Boolean(record.prompt_text?.trim())));
       onResponseSaved(records.some((record) => Boolean(record.response_text?.trim())));
     } catch (err) {
+      if (selectedRaceIdRef.current !== raceId) {
+        return;
+      }
       setError(err instanceof Error ? err.message : "過去のChatGPT予想履歴を読み込めませんでした");
     }
   }
 
   async function generatePrompt(): Promise<PromptResult | null> {
-    if (!selectedRaceId) {
+    const requestedRaceId = selectedRaceId;
+    if (!requestedRaceId) {
       setError("対象レースを選択してください");
       return null;
     }
@@ -110,8 +122,12 @@ export default function ChatgptManualPanel({
     try {
       const result = await requestJson<PromptResult>("/v1/chatgpt/prompts", {
         method: "POST",
-        body: JSON.stringify({ race_id: selectedRaceId })
+        body: JSON.stringify({ race_id: requestedRaceId })
       });
+      if (selectedRaceIdRef.current !== requestedRaceId) {
+        // 生成中に選択が変わった場合、旧レースのプロンプトを現在欄へ混在させない。
+        return null;
+      }
       setHistoryId(result.history_id);
       setPrompt(result.prompt_text);
       onPromptReady(true);
@@ -122,9 +138,12 @@ export default function ChatgptManualPanel({
           ? `プロンプトを作成しました。${result.prompt_length.toLocaleString()}文字あるため、内容を確認してください`
           : "ChatGPT用プロンプトを作成しました。内容を確認・編集できます"
       );
-      await loadHistory(selectedRaceId);
+      await loadHistory(requestedRaceId);
       return result;
     } catch (err) {
+      if (selectedRaceIdRef.current !== requestedRaceId) {
+        return null;
+      }
       setError(err instanceof Error ? err.message : "ChatGPT用プロンプトの生成に失敗しました");
       return null;
     } finally {
@@ -194,7 +213,8 @@ export default function ChatgptManualPanel({
   }
 
   async function saveResponse() {
-    if (!selectedRaceId) {
+    const requestedRaceId = selectedRaceId;
+    if (!requestedRaceId) {
       setError("対象レースを選択してください");
       return;
     }
@@ -212,17 +232,24 @@ export default function ChatgptManualPanel({
       const saved = await requestJson<ManualHistory>("/v1/chatgpt/responses", {
         method: "POST",
         body: JSON.stringify({
-          race_id: selectedRaceId,
+          race_id: requestedRaceId,
           history_id: historyId || null,
           prompt_text: prompt,
           response_text: responseText
         })
       });
+      if (selectedRaceIdRef.current !== requestedRaceId) {
+        // 保存中に選択が変わった場合、完了状態を別レースへ引き継がない。
+        return;
+      }
       setHistoryId(saved.id);
       onResponseSaved(true);
       setMessage("ChatGPT予想結果を対象レースへ保存しました");
-      await loadHistory(selectedRaceId);
+      await loadHistory(requestedRaceId);
     } catch (err) {
+      if (selectedRaceIdRef.current !== requestedRaceId) {
+        return;
+      }
       setError(err instanceof Error ? err.message : "ChatGPT予想結果の保存に失敗しました");
     } finally {
       setIsBusy(false);

@@ -420,7 +420,7 @@ def _build_prompt(
         ]
         lines.extend(f"- {label}: {_format(value)}" for label, value in horse_items if _has_value(value))
 
-        past_rows = list(
+        raw_past_rows = list(
             db.scalars(
                 select(HorsePastPerformance)
                 .where(
@@ -428,9 +428,27 @@ def _build_prompt(
                     HorsePastPerformance.horse_name == entry.horse_name,
                 )
                 .order_by(HorsePastPerformance.race_date.desc())
-                .limit(recent_races_per_horse)
             )
         )
+        past_rows: list[HorsePastPerformance] = []
+        seen_past_races: set[tuple[Any, ...]] = set()
+        for row in raw_past_rows:
+            # 同一Excel行が複数回取り込まれていても、同じ過去走をプロンプトへ重複掲載しない。
+            dedupe_key = (
+                row.race_date,
+                row.race_name,
+                row.finish_position,
+                row.popularity,
+                row.odds,
+                row.distance,
+                row.jockey,
+            )
+            if dedupe_key in seen_past_races:
+                continue
+            seen_past_races.add(dedupe_key)
+            past_rows.append(row)
+            if len(past_rows) >= recent_races_per_horse:
+                break
         if past_rows:
             lines.append(f"- 過去走（直近{len(past_rows)}走）:")
             for row in past_rows:

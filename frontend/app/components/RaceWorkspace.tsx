@@ -251,7 +251,21 @@ export default function RaceWorkspace({
                       className={race.race_id === selectedRaceId ? "selected" : ""}
                       onClick={() => onSelectedRaceChange(race.race_id)}
                     >
-                      <td>{race.race_number}</td>
+                      <td>
+                        <button
+                          aria-label={`${race.venue || ""}${race.race_number || ""}R ${race.name || ""}を選択`}
+                          aria-pressed={race.race_id === selectedRaceId}
+                          className="raceSelectButton"
+                          onClick={(event) => {
+                            // 行クリックとの二重発火を避け、キーボードでも同じ選択処理を行う。
+                            event.stopPropagation();
+                            onSelectedRaceChange(race.race_id);
+                          }}
+                          type="button"
+                        >
+                          {race.race_number}
+                        </button>
+                      </td>
                       <td>{race.venue}</td>
                       <td>{race.start_time}</td>
                       <td>{race.name}</td>

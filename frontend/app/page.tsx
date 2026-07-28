@@ -268,6 +268,8 @@ export default function Home() {
   const observedTerminalJobs = useRef<Set<string>>(new Set());
   const terminalJobsInitialized = useRef(false);
   const routeSelectionApplied = useRef(false);
+  const selectedRaceIdRef = useRef("");
+  const selectedRaceLoadSequence = useRef(0);
   const [entrySort, setEntrySort] = useState<{ key: EntrySortKey; direction: SortDirection }>({
     key: "integrated_rank",
     direction: "asc"
@@ -497,6 +499,13 @@ export default function Home() {
     return predictionRuns.find((run) => run.id === latestRunId) || null;
   }, [predictionResults, predictionRuns]);
 
+  function changeSelectedRace(raceId: string) {
+    // 選択変更の時点で進行中の旧レース読込を無効化し、遅い応答による表示混在を防ぐ。
+    selectedRaceIdRef.current = raceId;
+    selectedRaceLoadSequence.current += 1;
+    setSelectedRaceId(raceId);
+  }
+
   const nextAction = useMemo(() => {
     const quality = selectedRaceId ? qualityByRaceId.get(selectedRaceId) : null;
     if (!selectedDate || !selectedRaceId) {
@@ -623,7 +632,7 @@ export default function Home() {
 
     setIsBusy(true);
     setSelectedDate(workbook.race_date);
-    setSelectedRaceId("");
+    changeSelectedRace("");
     try {
       const result = await apiPost<RaceWorkbookSelection>("/v1/race-workbooks/select", {
         file_name: fileName
@@ -765,21 +774,50 @@ export default function Home() {
   }
 
   async function loadSelectedRaceData(raceId: string) {
-    await Promise.all([
-      loadEntries(raceId),
-      loadPredictionResults(raceId),
-      loadIndependentRaceData(raceId),
-      loadIntegrationRaceData(raceId),
-      loadAiRaceData(raceId),
-      loadRaceBets(raceId),
-      loadRaceResult(raceId)
+    const requestSequence = ++selectedRaceLoadSequence.current;
+    const [
+      entryData,
+      predictionData,
+      independentData,
+      integrationData,
+      evaluationData,
+      finalData,
+      strategyData,
+      betData,
+      resultData
+    ] = await Promise.all([
+      apiGet<Entry[]>(`/v1/races/${raceId}/entries`),
+      apiGet<PredictionResult[]>(`/v1/races/${raceId}/prediction-results`),
+      apiGet<IndependentAiAnalysis | null>(`/v1/races/${raceId}/ai-independent-analysis`),
+      apiGet<AiIntegrationAnalysis | null>(`/v1/races/${raceId}/ai-integration-analysis`),
+      apiGet<AiEvaluation[]>(`/v1/races/${raceId}/ai-evaluations`),
+      apiGet<FinalPrediction[]>(`/v1/races/${raceId}/final-predictions`),
+      apiGet<AiBetStrategy | null>(`/v1/races/${raceId}/ai-bet-strategy`),
+      apiGet<BetCandidate[]>(`/v1/races/${raceId}/bets`),
+      apiGet<RaceResult | null>(`/v1/races/${raceId}/result`)
     ]);
+    if (
+      requestSequence !== selectedRaceLoadSequence.current ||
+      raceId !== selectedRaceIdRef.current
+    ) {
+      // 選択後に返った旧レースの応答は画面へ反映しない。
+      return;
+    }
+    setEntries(entryData);
+    setPredictionResults(predictionData);
+    setIndependentAnalysis(independentData);
+    setIntegrationAnalysis(integrationData);
+    setAiEvaluations(evaluationData);
+    setFinalPredictions(finalData);
+    setAiBetStrategy(strategyData);
+    setSelectedRaceBets(betData);
+    setRaceResult(resultData);
   }
 
   async function loadRaces(raceDate: string, preferredRaceId: string = selectedRaceId) {
     if (!raceDate) {
       setRaces([]);
-      setSelectedRaceId("");
+      changeSelectedRace("");
       setEntries([]);
       setPredictionResults([]);
       setIndependentAnalysis(null);
@@ -797,7 +835,7 @@ export default function Home() {
     const targetRaceId = raceData.some((race) => race.race_id === preferredRaceId)
       ? preferredRaceId
       : nextRaceId;
-    setSelectedRaceId(targetRaceId);
+    changeSelectedRace(targetRaceId);
     if (targetRaceId && targetRaceId === selectedRaceId) {
       // 選択が変わらない再読込ではeffectが発火しないため、ここで最新化する。
       await loadSelectedRaceData(targetRaceId);
@@ -1109,6 +1147,11 @@ export default function Home() {
         searchText={searchText}
         selectedDate={selectedDate}
         selectedRaceId={selectedRaceId}
+        selectedRaceLabel={
+          selectedRace
+            ? `${selectedRace.venue || ""}${selectedRace.race_number || ""}R ${selectedRace.name || ""}`.trim()
+            : ""
+        }
         selectedWorkbookFile={selectedWorkbookFile}
         workbookSelectionMessage={workbookSelectionMessage}
       />
@@ -1167,7 +1210,7 @@ export default function Home() {
         integrationByRaceId={integrationByRaceId}
         latestSelectedPredictionRun={latestSelectedPredictionRun}
         onEntrySort={updateEntrySort}
-        onSelectedRaceChange={setSelectedRaceId}
+        onSelectedRaceChange={changeSelectedRace}
         predictionByHorseNo={predictionByHorseNo}
         predictionByRaceId={predictionByRaceId}
         qualityByRaceId={qualityByRaceId}
