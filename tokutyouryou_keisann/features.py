@@ -47,12 +47,16 @@ except Exception:
 # ============================================================
 # マスタ読み込み
 # ============================================================
-@lru_cache(maxsize=1)
-def _load_pipeline_master_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
+@lru_cache(maxsize=64)
+def _load_pipeline_master_data(
+    raceday: str,
+    race_level_mtime_ns: int,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     本番予想コード側と同じ race_levels / base_time を読む。
     """
-    levels_df = load_race_levels(str(RACE_LEVEL_XLSX))
+    # キャッシュキーへRACEDAYとマスター更新時刻を含め、別日のrating混用を防ぐ。
+    levels_df = load_race_levels(str(RACE_LEVEL_XLSX), raceday=raceday)
     base_time_df = load_base_time(str(BASE_TIME_XLSX))
     return levels_df, base_time_df
 
@@ -446,8 +450,15 @@ def build_features_from_one_file(xlsx_path: str) -> pd.DataFrame:
       - time_idx_context_value
     など、本番側と同じ特徴量を使える。
     """
-    levels_df, base_time_df = _load_pipeline_master_data()
     raceday = _extract_raceday_from_path(xlsx_path)
+    try:
+        race_level_mtime_ns = int(Path(RACE_LEVEL_XLSX).stat().st_mtime_ns)
+    except OSError:
+        race_level_mtime_ns = 0
+    levels_df, base_time_df = _load_pipeline_master_data(
+        raceday,
+        race_level_mtime_ns,
+    )
 
     try:
         odds_df = load_odds_csv(str(ODDS_CSV), raceday=raceday)

@@ -1,0 +1,1208 @@
+{
+  "files": [
+    {
+      "file_name": "_馬の競走成績_20250608.xlsx",
+      "date": "20250608",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 14,
+      "unresolved_races": 10,
+      "resolved_horses": 206,
+      "unresolved_details": [
+        "202505030201:horse_count(15!=16)",
+        "202505030202:horse_count(15!=16)",
+        "202505030204:horse_count(15!=16)",
+        "202505030205:sheet_missing",
+        "202505030206:sheet_missing",
+        "202509030203:horse_count(13!=16)",
+        "202509030204:horse_count(13!=15)",
+        "202509030205:sheet_missing",
+        "202509030206:horse_count(15!=18)",
+        "202509030207:horse_count(17!=18)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250614.xlsx",
+      "date": "20250614",
+      "format": "race_rows",
+      "now_rows": 32,
+      "resolved_races": 21,
+      "unresolved_races": 11,
+      "resolved_horses": 308,
+      "unresolved_details": [
+        "202502010104:horse_count(14!=15)",
+        "202502010105:sheet_missing",
+        "202505030301:horse_count(12!=16)",
+        "202505030305:sheet_missing",
+        "202505030306:sheet_missing",
+        "202505030307:horse_count(15!=16)",
+        "202509030302:horse_count(15!=16)",
+        "202509030303:horse_count(15!=16)",
+        "202509030304:horse_count(13!=18)",
+        "202509030305:sheet_missing",
+        "202509030306:horse_count(16!=18)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250615.xlsx",
+      "date": "20250615",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 29,
+      "unresolved_races": 7,
+      "resolved_horses": 411,
+      "unresolved_details": [
+        "202502010205:sheet_missing",
+        "202505030404:horse_count(14!=18)",
+        "202505030405:sheet_missing",
+        "202509030401:horse_count(13!=16)",
+        "202509030402:horse_count(13!=14)",
+        "202509030403:horse_count(17!=18)",
+        "202509030405:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250621.xlsx",
+      "date": "20250621",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 23,
+      "unresolved_races": 13,
+      "resolved_horses": 301,
+      "unresolved_details": [
+        "202502010305:sheet_missing",
+        "202502010306:sheet_missing",
+        "202502010307:horse_count(15!=16)",
+        "202505030503:horse_count(15!=16)",
+        "202505030504:horse_count(15!=16)",
+        "202505030505:sheet_missing",
+        "202505030506:sheet_missing",
+        "202505030507:horse_count(13!=16)",
+        "202509030502:horse_count(15!=16)",
+        "202509030503:horse_count(14!=16)",
+        "202509030504:horse_count(12!=13)",
+        "202509030505:sheet_missing",
+        "202509030506:horse_count(14!=15)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250622.xlsx",
+      "date": "20250622",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 27,
+      "unresolved_races": 9,
+      "resolved_horses": 375,
+      "unresolved_details": [
+        "202502010401:horse_count(15!=16)",
+        "202502010405:sheet_missing",
+        "202505030605:horse_count(1!=16)",
+        "202505030606:sheet_missing",
+        "202509030601:horse_count(14!=16)",
+        "202509030602:horse_count(13!=14)",
+        "202509030603:horse_count(17!=18)",
+        "202509030605:sheet_missing",
+        "202509030606:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250628.xlsx",
+      "date": "20250628",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 27,
+      "unresolved_races": 9,
+      "resolved_horses": 343,
+      "unresolved_details": [
+        "202502010501:horse_count(13!=15)",
+        "202502010505:sheet_missing",
+        "202503020102:horse_count(9!=16)",
+        "202503020105:sheet_missing",
+        "202503020106:sheet_missing",
+        "202510020103:horse_count(15!=16)",
+        "202510020104:horse_count(13!=16)",
+        "202510020105:sheet_missing",
+        "202510020106:horse_count(13!=14)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250629.xlsx",
+      "date": "20250629",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 28,
+      "unresolved_races": 8,
+      "resolved_horses": 370,
+      "unresolved_details": [
+        "202502010605:sheet_missing",
+        "202503020204:horse_count(14!=15)",
+        "202503020205:sheet_missing",
+        "202503020206:sheet_missing",
+        "202510020203:horse_count(15!=16)",
+        "202510020204:horse_count(15!=16)",
+        "202510020205:sheet_missing",
+        "202510020206:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250705.xlsx",
+      "date": "20250705",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 28,
+      "unresolved_races": 8,
+      "resolved_horses": 331,
+      "unresolved_details": [
+        "202502010705:sheet_missing",
+        "202503020302:horse_count(14!=15)",
+        "202503020304:sheet_missing",
+        "202503020305:sheet_missing",
+        "202510020302:horse_count(15!=16)",
+        "202510020303:horse_count(17!=18)",
+        "202510020304:horse_count(12!=14)",
+        "202510020305:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250706.xlsx",
+      "date": "20250706",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 25,
+      "unresolved_races": 11,
+      "resolved_horses": 321,
+      "unresolved_details": [
+        "202502010805:sheet_missing",
+        "202503020403:horse_count(15!=16)",
+        "202503020404:sheet_missing",
+        "202503020405:sheet_missing",
+        "202503020406:horse_count(14!=16)",
+        "202503020407:horse_count(14!=16)",
+        "202510020402:horse_count(13!=16)",
+        "202510020403:horse_count(17!=18)",
+        "202510020404:horse_count(17!=18)",
+        "202510020405:sheet_missing",
+        "202510020406:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250712.xlsx",
+      "date": "20250712",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 29,
+      "unresolved_races": 7,
+      "resolved_horses": 373,
+      "unresolved_details": [
+        "202502010905:sheet_missing",
+        "202503020504:horse_count(15!=16)",
+        "202503020505:sheet_missing",
+        "202503020506:sheet_missing",
+        "202510020505:sheet_missing",
+        "202510020506:horse_count(16!=18)",
+        "202510020507:horse_count(16!=18)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250713.xlsx",
+      "date": "20250713",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 29,
+      "unresolved_races": 7,
+      "resolved_horses": 394,
+      "unresolved_details": [
+        "202502011003:horse_count(15!=16)",
+        "202502011005:sheet_missing",
+        "202503020605:sheet_missing",
+        "202510020603:horse_count(15!=16)",
+        "202510020604:horse_count(15!=16)",
+        "202510020605:sheet_missing",
+        "202510020606:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250719.xlsx",
+      "date": "20250719",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 30,
+      "unresolved_races": 6,
+      "resolved_horses": 401,
+      "unresolved_details": [
+        "202503020704:sheet_missing",
+        "202503020705:sheet_missing",
+        "202503020708:horse_count(15!=16)",
+        "202510020702:horse_count(13!=14)",
+        "202510020703:horse_count(17!=18)",
+        "202510020705:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250720.xlsx",
+      "date": "20250720",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 26,
+      "unresolved_races": 10,
+      "resolved_horses": 337,
+      "unresolved_details": [
+        "202502011204:horse_count(13!=14)",
+        "202502011205:sheet_missing",
+        "202503020802:horse_count(14!=15)",
+        "202503020803:horse_count(5!=6)",
+        "202503020805:sheet_missing",
+        "202503020806:horse_count(13!=14)",
+        "202503020807:horse_count(14!=15)",
+        "202510020801:horse_count(10!=11)",
+        "202510020803:horse_count(15!=16)",
+        "202510020805:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250726.xlsx",
+      "date": "20250726",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 30,
+      "unresolved_races": 6,
+      "resolved_horses": 368,
+      "unresolved_details": [
+        "202501010105:sheet_missing",
+        "202504020102:sheet_missing",
+        "202504020103:sheet_missing",
+        "202504020109:horse_count(13!=14)",
+        "202507030104:sheet_missing",
+        "202507030105:horse_count(14!=16)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250727.xlsx",
+      "date": "20250727",
+      "format": "race_rows",
+      "now_rows": 35,
+      "resolved_races": 28,
+      "unresolved_races": 7,
+      "resolved_horses": 324,
+      "unresolved_details": [
+        "202501010205:sheet_missing",
+        "202504020203:sheet_missing",
+        "202504020204:horse_count(14!=15)",
+        "202507030202:horse_count(15!=16)",
+        "202507030203:sheet_missing",
+        "202507030204:horse_count(15!=16)",
+        "202507030205:horse_count(17!=18)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250802.xlsx",
+      "date": "20250802",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 30,
+      "unresolved_races": 6,
+      "resolved_horses": 375,
+      "unresolved_details": [
+        "202501010305:sheet_missing",
+        "202504020302:horse_count(14!=15)",
+        "202504020304:sheet_missing",
+        "202504020311:horse_count(15!=17)",
+        "202507030302:sheet_missing",
+        "202507030303:horse_count(15!=16)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250803.xlsx",
+      "date": "20250803",
+      "format": "race_rows",
+      "now_rows": 35,
+      "resolved_races": 25,
+      "unresolved_races": 10,
+      "resolved_horses": 305,
+      "unresolved_details": [
+        "202501010405:sheet_missing",
+        "202504020402:sheet_missing",
+        "202504020404:sheet_missing",
+        "202504020405:horse_count(14!=15)",
+        "202507030402:sheet_missing",
+        "202507030403:sheet_missing",
+        "202507030404:horse_count(15!=16)",
+        "202507030405:horse_count(15!=16)",
+        "202507030409:horse_count(16!=18)",
+        "202507030412:horse_count(17!=18)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250809.xlsx",
+      "date": "20250809",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 30,
+      "unresolved_races": 6,
+      "resolved_horses": 390,
+      "unresolved_details": [
+        "202501010505:sheet_missing",
+        "202504020503:sheet_missing",
+        "202504020504:horse_count(14!=15)",
+        "202507030502:horse_count(14!=15)",
+        "202507030504:sheet_missing",
+        "202507030511:horse_count(17!=18)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250810.xlsx",
+      "date": "20250810",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 28,
+      "unresolved_races": 8,
+      "resolved_horses": 392,
+      "unresolved_details": [
+        "202501010605:sheet_missing",
+        "202504020602:sheet_missing",
+        "202504020603:sheet_missing",
+        "202504020605:horse_count(16!=18)",
+        "202504020609:horse_count(13!=14)",
+        "202507030604:sheet_missing",
+        "202507030605:horse_count(15!=16)",
+        "202507030611:horse_count(15!=16)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250816.xlsx",
+      "date": "20250816",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 27,
+      "unresolved_races": 9,
+      "resolved_horses": 344,
+      "unresolved_details": [
+        "202501010705:sheet_missing",
+        "202504020704:sheet_missing",
+        "202504020705:sheet_missing",
+        "202507030701:horse_count(8!=9)",
+        "202507030702:sheet_missing",
+        "202507030703:horse_count(17!=18)",
+        "202507030704:horse_count(15!=16)",
+        "202507030705:horse_count(15!=16)",
+        "202507030711:horse_count(16!=17)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250817.xlsx",
+      "date": "20250817",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 29,
+      "unresolved_races": 7,
+      "resolved_horses": 377,
+      "unresolved_details": [
+        "202501010805:sheet_missing",
+        "202504020804:sheet_missing",
+        "202504020805:horse_count(13!=15)",
+        "202504020812:horse_count(17!=18)",
+        "202507030802:sheet_missing",
+        "202507030803:sheet_missing",
+        "202507030805:horse_count(15!=16)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250823.xlsx",
+      "date": "20250823",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 29,
+      "unresolved_races": 7,
+      "resolved_horses": 344,
+      "unresolved_details": [
+        "202501020105:sheet_missing",
+        "202504030103:horse_count(16!=18)",
+        "202504030104:horse_count(15!=16)",
+        "202504030105:sheet_missing",
+        "202504030106:horse_count(14!=15)",
+        "202507040105:horse_count(1!=10)",
+        "202507040106:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250824.xlsx",
+      "date": "20250824",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 29,
+      "unresolved_races": 7,
+      "resolved_horses": 382,
+      "unresolved_details": [
+        "202501020205:sheet_missing",
+        "202504030205:horse_count(1!=14)",
+        "202504030206:sheet_missing",
+        "202507040204:horse_count(15!=16)",
+        "202507040205:sheet_missing",
+        "202507040206:horse_count(16!=17)",
+        "202507040208:horse_count(14!=15)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250830.xlsx",
+      "date": "20250830",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 32,
+      "unresolved_races": 4,
+      "resolved_horses": 429,
+      "unresolved_details": [
+        "202501020305:horse_count(1!=13)",
+        "202504030305:sheet_missing",
+        "202504030306:horse_count(17!=18)",
+        "202507040305:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250831.xlsx",
+      "date": "20250831",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 29,
+      "unresolved_races": 7,
+      "resolved_horses": 401,
+      "unresolved_details": [
+        "202501020402:horse_count(13!=14)",
+        "202501020405:sheet_missing",
+        "202504030405:sheet_missing",
+        "202504030406:sheet_missing",
+        "202507040404:horse_count(13!=16)",
+        "202507040405:sheet_missing",
+        "202507040406:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250906.xlsx",
+      "date": "20250906",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 456,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20250907.xlsx",
+      "date": "20250907",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 33,
+      "unresolved_races": 3,
+      "resolved_horses": 428,
+      "unresolved_details": [
+        "202506040205:sheet_missing",
+        "202506040206:sheet_missing",
+        "202509040205:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250913.xlsx",
+      "date": "20250913",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 19,
+      "unresolved_races": 5,
+      "resolved_horses": 232,
+      "unresolved_details": [
+        "202506040305:horse_count(1!=16)",
+        "202506040306:sheet_missing",
+        "202509040304:horse_count(15!=16)",
+        "202509040305:sheet_missing",
+        "202509040306:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250914.xlsx",
+      "date": "20250914",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 275,
+      "unresolved_details": [
+        "202506040405:sheet_missing",
+        "202506040406:horse_count(15!=16)",
+        "202509040405:sheet_missing",
+        "202509040406:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250915.xlsx",
+      "date": "20250915",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 246,
+      "unresolved_details": [
+        "202506040503:horse_count(15!=16)",
+        "202506040505:sheet_missing",
+        "202506040506:sheet_missing",
+        "202509040505:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250921.xlsx",
+      "date": "20250921",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 258,
+      "unresolved_details": [
+        "202506040704:sheet_missing",
+        "202506040705:sheet_missing",
+        "202509040705:sheet_missing",
+        "202509040706:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250927.xlsx",
+      "date": "20250927",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 283,
+      "unresolved_details": [
+        "202506040804:sheet_missing",
+        "202506040805:sheet_missing",
+        "202509040804:sheet_missing",
+        "202509040805:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20250928.xlsx",
+      "date": "20250928",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 286,
+      "unresolved_details": [
+        "202506040904:sheet_missing",
+        "202506040905:sheet_missing",
+        "202509040904:sheet_missing",
+        "202509040905:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251004.xlsx",
+      "date": "20251004",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 274,
+      "unresolved_details": [
+        "202505040103:sheet_missing",
+        "202505040105:sheet_missing",
+        "202508030103:sheet_missing",
+        "202508030105:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251005.xlsx",
+      "date": "20251005",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 19,
+      "unresolved_races": 5,
+      "resolved_horses": 275,
+      "unresolved_details": [
+        "202505040205:sheet_missing",
+        "202505040206:sheet_missing",
+        "202508030203:sheet_missing",
+        "202508030204:sheet_missing",
+        "202508030205:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251011.xlsx",
+      "date": "20251011",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 19,
+      "unresolved_races": 5,
+      "resolved_horses": 228,
+      "unresolved_details": [
+        "202505040304:sheet_missing",
+        "202505040305:sheet_missing",
+        "202505040306:sheet_missing",
+        "202508030305:sheet_missing",
+        "202508030306:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251012.xlsx",
+      "date": "20251012",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 263,
+      "unresolved_details": [
+        "202505040404:sheet_missing",
+        "202505040405:sheet_missing",
+        "202508030405:sheet_missing",
+        "202508030406:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251013.xlsx",
+      "date": "20251013",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 268,
+      "unresolved_details": [
+        "202505040505:sheet_missing",
+        "202505040506:sheet_missing",
+        "202508030505:sheet_missing",
+        "202508030506:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251018.xlsx",
+      "date": "20251018",
+      "format": "race_rows",
+      "now_rows": 35,
+      "resolved_races": 29,
+      "unresolved_races": 6,
+      "resolved_horses": 365,
+      "unresolved_details": [
+        "202504040105:sheet_missing",
+        "202504040107:horse_count(17!=18)",
+        "202505040604:sheet_missing",
+        "202505040605:horse_count(1!=16)",
+        "202508030605:sheet_missing",
+        "202508030606:horse_count(1!=16)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251019.xlsx",
+      "date": "20251019",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 30,
+      "unresolved_races": 6,
+      "resolved_horses": 395,
+      "unresolved_details": [
+        "202504040205:horse_count(1!=18)",
+        "202505040704:sheet_missing",
+        "202505040705:sheet_missing",
+        "202505040708:horse_count(14!=15)",
+        "202508030704:sheet_missing",
+        "202508030705:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251025.xlsx",
+      "date": "20251025",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 29,
+      "unresolved_races": 7,
+      "resolved_horses": 382,
+      "unresolved_details": [
+        "202504040303:horse_count(12!=13)",
+        "202504040307:horse_count(13!=14)",
+        "202505040804:sheet_missing",
+        "202505040805:sheet_missing",
+        "202505040806:sheet_missing",
+        "202508030805:sheet_missing",
+        "202508030806:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251026.xlsx",
+      "date": "20251026",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 31,
+      "unresolved_races": 5,
+      "resolved_horses": 406,
+      "unresolved_details": [
+        "202504040405:sheet_missing",
+        "202505040905:sheet_missing",
+        "202505040906:sheet_missing",
+        "202508030904:sheet_missing",
+        "202508030905:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251101.xlsx",
+      "date": "20251101",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 263,
+      "unresolved_details": [
+        "202505041004:sheet_missing",
+        "202505041005:sheet_missing",
+        "202508031005:sheet_missing",
+        "202508031006:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251102.xlsx",
+      "date": "20251102",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 257,
+      "unresolved_details": [
+        "202505041104:sheet_missing",
+        "202505041105:sheet_missing",
+        "202508031103:sheet_missing",
+        "202508031105:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251108.xlsx",
+      "date": "20251108",
+      "format": "race_rows",
+      "now_rows": 35,
+      "resolved_races": 29,
+      "unresolved_races": 6,
+      "resolved_horses": 412,
+      "unresolved_details": [
+        "202503030105:sheet_missing",
+        "202505050104:sheet_missing",
+        "202505050105:sheet_missing",
+        "202505050106:sheet_missing",
+        "202508040105:sheet_missing",
+        "202508040106:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251109.xlsx",
+      "date": "20251109",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 31,
+      "unresolved_races": 5,
+      "resolved_horses": 444,
+      "unresolved_details": [
+        "202503030206:sheet_missing",
+        "202505050205:sheet_missing",
+        "202505050206:sheet_missing",
+        "202508040204:sheet_missing",
+        "202508040205:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251115.xlsx",
+      "date": "20251115",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 31,
+      "unresolved_races": 5,
+      "resolved_horses": 447,
+      "unresolved_details": [
+        "202503030305:sheet_missing",
+        "202505050305:sheet_missing",
+        "202505050306:sheet_missing",
+        "202508040305:sheet_missing",
+        "202508040306:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251116.xlsx",
+      "date": "20251116",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 30,
+      "unresolved_races": 6,
+      "resolved_horses": 444,
+      "unresolved_details": [
+        "202503030406:sheet_missing",
+        "202505050404:sheet_missing",
+        "202505050405:sheet_missing",
+        "202508040404:sheet_missing",
+        "202508040405:sheet_missing",
+        "202508040412:horse_count(11!=12)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251122.xlsx",
+      "date": "20251122",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 22,
+      "unresolved_races": 2,
+      "resolved_horses": 330,
+      "unresolved_details": [
+        "202508040505:sheet_missing",
+        "202508040506:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251123.xlsx",
+      "date": "20251123",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 313,
+      "unresolved_details": [
+        "202505050504:sheet_missing",
+        "202505050505:sheet_missing",
+        "202508040604:sheet_missing",
+        "202508040605:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251124.xlsx",
+      "date": "20251124",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 306,
+      "unresolved_details": [
+        "202503030605:horse_count(1!=16)",
+        "202505050606:horse_count(1!=13)",
+        "202505050607:sheet_missing",
+        "202505050612:horse_count(17!=18)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251129.xlsx",
+      "date": "20251129",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 280,
+      "unresolved_details": [
+        "202505050704:horse_count(1!=16)",
+        "202505050705:sheet_missing",
+        "202508040705:sheet_missing",
+        "202508040706:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251130.xlsx",
+      "date": "20251130",
+      "format": "race_rows",
+      "now_rows": 24,
+      "resolved_races": 20,
+      "unresolved_races": 4,
+      "resolved_horses": 280,
+      "unresolved_details": [
+        "202505050805:sheet_missing",
+        "202505050806:sheet_missing",
+        "202508040803:sheet_missing",
+        "202508040806:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251206.xlsx",
+      "date": "20251206",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 32,
+      "unresolved_races": 4,
+      "resolved_horses": 456,
+      "unresolved_details": [
+        "202506050105:sheet_missing",
+        "202506050106:sheet_missing",
+        "202509050105:sheet_missing",
+        "202509050106:sheet_missing"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251207.xlsx",
+      "date": "20251207",
+      "format": "race_rows",
+      "now_rows": 36,
+      "resolved_races": 30,
+      "unresolved_races": 6,
+      "resolved_horses": 414,
+      "unresolved_details": [
+        "202506050203:sheet_missing",
+        "202506050205:sheet_missing",
+        "202507050205:sheet_missing",
+        "202509050205:sheet_missing",
+        "202509050206:sheet_missing",
+        "202509050212:horse_count(15!=17)"
+      ]
+    },
+    {
+      "file_name": "馬の競走成績_20251213.xlsx",
+      "date": "20251213",
+      "format": "horse_rows",
+      "now_rows": 499,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 499,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20251214.xlsx",
+      "date": "20251214",
+      "format": "horse_rows",
+      "now_rows": 496,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 496,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20251220.xlsx",
+      "date": "20251220",
+      "format": "horse_rows",
+      "now_rows": 547,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 547,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20251221.xlsx",
+      "date": "20251221",
+      "format": "horse_rows",
+      "now_rows": 546,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 546,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20251227.xlsx",
+      "date": "20251227",
+      "format": "horse_rows",
+      "now_rows": 349,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 349,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20251228.xlsx",
+      "date": "20251228",
+      "format": "horse_rows",
+      "now_rows": 356,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 356,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260104.xlsx",
+      "date": "20260104",
+      "format": "horse_rows",
+      "now_rows": 334,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 334,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260105.xlsx",
+      "date": "20260105",
+      "format": "horse_rows",
+      "now_rows": 332,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 332,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260110.xlsx",
+      "date": "20260110",
+      "format": "horse_rows",
+      "now_rows": 358,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 358,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260111.xlsx",
+      "date": "20260111",
+      "format": "horse_rows",
+      "now_rows": 366,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 366,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260112.xlsx",
+      "date": "20260112",
+      "format": "horse_rows",
+      "now_rows": 370,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 370,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260117.xlsx",
+      "date": "20260117",
+      "format": "horse_rows",
+      "now_rows": 336,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 336,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260118.xlsx",
+      "date": "20260118",
+      "format": "horse_rows",
+      "now_rows": 351,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 351,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260124.xlsx",
+      "date": "20260124",
+      "format": "horse_rows",
+      "now_rows": 500,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 500,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260125.xlsx",
+      "date": "20260125",
+      "format": "horse_rows",
+      "now_rows": 516,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 516,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260131.xlsx",
+      "date": "20260131",
+      "format": "horse_rows",
+      "now_rows": 519,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 519,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260201.xlsx",
+      "date": "20260201",
+      "format": "horse_rows",
+      "now_rows": 501,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 501,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260207.xlsx",
+      "date": "20260207",
+      "format": "horse_rows",
+      "now_rows": 513,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 513,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260208.xlsx",
+      "date": "20260208",
+      "format": "horse_rows",
+      "now_rows": 502,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 502,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260209.xlsx",
+      "date": "20260209",
+      "format": "horse_rows",
+      "now_rows": 155,
+      "resolved_races": 12,
+      "unresolved_races": 0,
+      "resolved_horses": 155,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260210.xlsx",
+      "date": "20260210",
+      "format": "horse_rows",
+      "now_rows": 325,
+      "resolved_races": 24,
+      "unresolved_races": 0,
+      "resolved_horses": 325,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260214.xlsx",
+      "date": "20260214",
+      "format": "horse_rows",
+      "now_rows": 539,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 539,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260215.xlsx",
+      "date": "20260215",
+      "format": "horse_rows",
+      "now_rows": 506,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 506,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260221.xlsx",
+      "date": "20260221",
+      "format": "horse_rows",
+      "now_rows": 530,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 530,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260222.xlsx",
+      "date": "20260222",
+      "format": "horse_rows",
+      "now_rows": 497,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 497,
+      "unresolved_details": []
+    },
+    {
+      "file_name": "馬の競走成績_20260228.xlsx",
+      "date": "20260228",
+      "format": "horse_rows",
+      "now_rows": 520,
+      "resolved_races": 36,
+      "unresolved_races": 0,
+      "resolved_horses": 520,
+      "unresolved_details": []
+    }
+  ],
+  "summary": {
+    "file_count": 81,
+    "legacy_file_count": 55,
+    "current_file_count": 26,
+    "resolved_races": 2204,
+    "unresolved_races": 332,
+    "resolved_horses": 30231
+  }
+}

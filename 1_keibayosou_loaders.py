@@ -8,9 +8,20 @@ import os
 import re
 import sys
 import unicodedata
+from functools import lru_cache
 from typing import Optional, Dict, List, Tuple, Any
 
 import pandas as pd
+
+
+@lru_cache(maxsize=4)
+def _read_race_level_book_cached(
+    path_abs: str,
+    mtime_ns: int,
+) -> Dict[str, pd.DataFrame]:
+    """更新時刻単位でマスターExcelをキャッシュする。返却側では必ずcopyする。"""
+    del mtime_ns  # キャッシュキーとしてのみ使用する。
+    return pd.read_excel(path_abs, sheet_name=None, engine="openpyxl")
 
 
 def _register_renamed_keibayosou_modules() -> None:
@@ -24,7 +35,192 @@ _register_renamed_keibayosou_modules()
 from keibayosou_utils import _normalize_place, _normalize_surface, _to_int
 
 
-def load_race_levels(path: str) -> pd.DataFrame:
+def _normalize_master_date(value: Any) -> pd.Timestamp:
+    """マスター内の日付を時系列比較できるTimestampへ正規化する。"""
+    if pd.isna(value):
+        return pd.NaT
+    digits = re.sub(r"\D", "", str(value))
+    if len(digits) >= 8:
+        return pd.to_datetime(digits[:8], format="%Y%m%d", errors="coerce")
+    return pd.to_datetime(value, errors="coerce")
+
+
+def _build_historical_rating_master(
+    book: Dict[str, pd.DataFrame],
+    raceday: str,
+) -> Tuple[Optional[pd.DataFrame], int]:
+    """
+    `race_date < RACEDAY` の履歴だけで、予想対象日時点の馬ratingを復元する。
+
+    履歴なし馬は horses.initial_rating へフォールバックし、最新ratingsは
+    RACEDAYが未指定の場合に限って従来互換として使用する。
+    """
+    horses_df = book.get("horses")
+    ratings_df = book.get("ratings")
+    history_df = book.get("ratings_history")
+    races_df = book.get("races")
+    target_date = _normalize_master_date(raceday)
+
+    horse_master = pd.DataFrame(columns=["horse_id", "horse_name", "name_norm", "initial_rating"])
+    if horses_df is not None and not horses_df.empty:
+        horse_master = horses_df.rename(
+            columns={"id": "horse_id", "name": "horse_name"}
+        ).copy()
+        for col in ["horse_id", "horse_name", "initial_rating"]:
+            if col not in horse_master.columns:
+                horse_master[col] = pd.NA
+        horse_master["name_norm"] = horse_master["horse_name"].map(
+            lambda s: (
+                ""
+                if pd.isna(s)
+                else unicodedata.normalize("NFKC", str(s))
+                .replace("　", "")
+                .replace(" ", "")
+                .strip()
+            )
+        )
+        horse_master["initial_rating"] = pd.to_numeric(
+            horse_master["initial_rating"], errors="coerce"
+        )
+        horse_master = horse_master[
+            ["horse_id", "horse_name", "name_norm", "initial_rating"]
+        ].copy()
+
+    # RACEDAY未指定時だけ、従来の最新ratingsを利用する。
+    if pd.isna(target_date):
+        if ratings_df is None or ratings_df.empty:
+            return horse_master, 0
+        latest = ratings_df.copy()
+        for col in [
+            "rating",
+            "start_count",
+            "recent_rating",
+            "rating_confidence",
+            "recent_start_count_180d",
+            "rating_volatility",
+        ]:
+            if col not in latest.columns:
+                latest[col] = pd.NA
+            latest[col] = pd.to_numeric(latest[col], errors="coerce")
+        latest["rating_source"] = "latest_ratings_no_raceday"
+        latest["rating_asof_date"] = pd.NaT
+        return latest, 0
+
+    if (
+        history_df is None
+        or history_df.empty
+        or races_df is None
+        or races_df.empty
+        or "race_id" not in history_df.columns
+        or "race_id" not in races_df.columns
+    ):
+        fallback = horse_master.copy()
+        fallback["rating"] = fallback["initial_rating"]
+        fallback["start_count"] = 0
+        fallback["recent_rating"] = fallback["initial_rating"]
+        fallback["rating_confidence"] = 0.15
+        fallback["recent_start_count_180d"] = 0
+        fallback["rating_volatility"] = pd.NA
+        fallback["rating_source"] = "initial_rating"
+        fallback["rating_asof_date"] = pd.NaT
+        return fallback[
+            [
+                "horse_id",
+                "rating",
+                "start_count",
+                "recent_rating",
+                "rating_confidence",
+                "recent_start_count_180d",
+                "rating_volatility",
+                "rating_source",
+                "rating_asof_date",
+            ]
+        ], 0
+
+    races = races_df[["race_id", "date"]].copy()
+    races["race_date"] = races["date"].map(_normalize_master_date)
+    history = history_df.merge(
+        races[["race_id", "race_date"]], on="race_id", how="left"
+    )
+    future_or_same = history["race_date"].notna() & (
+        history["race_date"] >= target_date
+    )
+    future_excluded_count = int(future_or_same.sum())
+    history = history[
+        history["race_date"].notna() & (history["race_date"] < target_date)
+    ].copy()
+
+    rating_candidates = [
+        "post_overall_rating",
+        "post_rating",
+        "post_surface_rating",
+    ]
+    for col in rating_candidates:
+        if col not in history.columns:
+            history[col] = pd.NA
+        history[col] = pd.to_numeric(history[col], errors="coerce")
+    history["historical_rating"] = history[rating_candidates].bfill(axis=1).iloc[:, 0]
+    history = history.sort_values(
+        ["horse_id", "race_date", "race_id"], kind="mergesort"
+    )
+
+    rows: List[Dict[str, Any]] = []
+    recent_cutoff = target_date - pd.Timedelta(days=180)
+    for horse_id, group in history.groupby("horse_id", sort=False):
+        valid = group.dropna(subset=["historical_rating"])
+        if valid.empty:
+            continue
+        latest = valid.iloc[-1]
+        recent_values = valid.tail(3)["historical_rating"]
+        rating_deltas = valid["historical_rating"].diff().dropna()
+        start_count = int(valid["race_id"].nunique())
+        rows.append(
+            {
+                "horse_id": horse_id,
+                "rating": float(latest["historical_rating"]),
+                "start_count": start_count,
+                "recent_rating": float(recent_values.mean()),
+                "rating_confidence": min(1.0, 0.25 + 0.15 * start_count),
+                "recent_start_count_180d": int(
+                    valid.loc[valid["race_date"] >= recent_cutoff, "race_id"].nunique()
+                ),
+                "rating_volatility": (
+                    float(rating_deltas.std(ddof=0))
+                    if not rating_deltas.empty
+                    else 0.0
+                ),
+                "rating_source": "ratings_history",
+                "rating_asof_date": latest["race_date"],
+            }
+        )
+
+    historical = pd.DataFrame(rows)
+    merged = horse_master.merge(historical, on="horse_id", how="left")
+    no_history = merged["rating"].isna()
+    merged.loc[no_history, "rating"] = merged.loc[no_history, "initial_rating"]
+    merged.loc[no_history, "recent_rating"] = merged.loc[
+        no_history, "initial_rating"
+    ]
+    merged.loc[no_history, "start_count"] = 0
+    merged.loc[no_history, "recent_start_count_180d"] = 0
+    merged.loc[no_history, "rating_confidence"] = 0.15
+    merged.loc[no_history, "rating_source"] = "initial_rating"
+    return merged[
+        [
+            "horse_id",
+            "rating",
+            "start_count",
+            "recent_rating",
+            "rating_confidence",
+            "recent_start_count_180d",
+            "rating_volatility",
+            "rating_source",
+            "rating_asof_date",
+        ]
+    ], future_excluded_count
+
+
+def load_race_levels(path: str, raceday: str = "") -> pd.DataFrame:
     """
     race_levels.xlsx 読み込み（現行フォーマットに合わせて拡張）
 
@@ -44,7 +240,10 @@ def load_race_levels(path: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["rid_str", "race_level"])
 
     try:
-        book = pd.read_excel(path, sheet_name=None, engine="openpyxl")
+        path_abs = os.path.abspath(path)
+        mtime_ns = int(os.stat(path_abs).st_mtime_ns)
+        cached_book = _read_race_level_book_cached(path_abs, mtime_ns)
+        book = {name: frame.copy() for name, frame in cached_book.items()}
     except Exception as e:
         print(f"[WARN] race_levels.xlsx の読み込みに失敗しました: {e}")
         return pd.DataFrame(columns=["rid_str", "race_level"])
@@ -63,6 +262,10 @@ def load_race_levels(path: str) -> pd.DataFrame:
     entries_df = book.get("entries")
     horses_df = book.get("horses")
     ratings_df = book.get("ratings")
+    races_df = book.get("races")
+    rating_master, future_history_excluded_count = _build_historical_rating_master(
+        book, raceday
+    )
 
     # horse_id -> name_norm, rating
     horse_master = None
@@ -73,8 +276,7 @@ def load_race_levels(path: str) -> pd.DataFrame:
         tmp["name_norm"] = tmp["horse_name"].map(_norm_name)
         horse_master = tmp[["horse_id", "horse_name", "name_norm"]]
 
-    rating_master = None
-    if ratings_df is not None:
+    if rating_master is None and ratings_df is not None:
         tmp = ratings_df.rename(columns={"horse_id": "horse_id", "rating": "rating"}).copy()
         rating_cols = [
             "horse_id",
@@ -92,6 +294,31 @@ def load_race_levels(path: str) -> pd.DataFrame:
             if col != "horse_id":
                 tmp[col] = pd.to_numeric(tmp[col], errors="coerce")
         rating_master = tmp[rating_cols].copy()
+
+    # 過去バックテストでは、予想日以降のrace_level自体も参照対象から除外する。
+    target_date = _normalize_master_date(raceday)
+    allowed_race_ids: Optional[set] = None
+    if (
+        pd.notna(target_date)
+        and races_df is not None
+        and not races_df.empty
+        and {"race_id", "date"}.issubset(races_df.columns)
+    ):
+        race_dates = races_df[["race_id", "date"]].copy()
+        race_dates["_race_date"] = race_dates["date"].map(_normalize_master_date)
+        allowed_race_ids = set(
+            race_dates.loc[
+                race_dates["_race_date"].notna()
+                & (race_dates["_race_date"] < target_date),
+                "race_id",
+            ].tolist()
+        )
+        if entries_df is not None and "race_id" in entries_df.columns:
+            entries_df = entries_df[entries_df["race_id"].isin(allowed_race_ids)].copy()
+        if race_levels_df is not None and "race_id" in race_levels_df.columns:
+            race_levels_df = race_levels_df[
+                race_levels_df["race_id"].isin(allowed_race_ids)
+            ].copy()
 
     entries_with_rating = None
     if entries_df is not None and rating_master is not None:
@@ -132,6 +359,8 @@ def load_race_levels(path: str) -> pd.DataFrame:
         )
         if horse_master is not None and rating_master is not None:
             df.attrs["horse_ratings"] = horse_master.merge(rating_master, on="horse_id", how="left")
+        df.attrs["rating_raceday"] = str(raceday or "")
+        df.attrs["future_history_excluded_count"] = future_history_excluded_count
         return df
 
     rl = race_levels_df.copy()
@@ -154,6 +383,8 @@ def load_race_levels(path: str) -> pd.DataFrame:
     out = rl[["rid_str", "race_level", "race_level_score", "pre_mean", "pre_top5_mean"]].copy()
     if horse_master is not None and rating_master is not None:
         out.attrs["horse_ratings"] = horse_master.merge(rating_master, on="horse_id", how="left")
+    out.attrs["rating_raceday"] = str(raceday or "")
+    out.attrs["future_history_excluded_count"] = future_history_excluded_count
     return out
 
 

@@ -80,6 +80,7 @@ from keibayosou_config import (
     SCORING_BLOCK_WEIGHTS,
     SCORING_FEATURE_BLOCKS,
     SCORING_MODEL_VERSION,
+    FIVE_BLOCK_BET_RULE,
 )
 from keibayosou_features import (
     _normalize_rid_series,
@@ -1008,9 +1009,12 @@ def build_roi_focus_bet_sheet(
 
         if score1 is None or dango_2_5 is None:
             continue
-        if not (score1 >= 65.0 and dango_2_5 >= 6.0):
+        if not (
+            score1 >= float(FIVE_BLOCK_BET_RULE["score1_min"])
+            and dango_2_5 >= float(FIVE_BLOCK_BET_RULE["dango_2_5_min"])
+        ):
             continue
-        if gap12 is not None and gap12 < 0.5:
+        if gap12 is not None and gap12 < float(FIVE_BLOCK_BET_RULE["gap12_min"]):
             continue
 
         race_id = row.get("レースID", row.get("rid_str", pd.NA))
@@ -1037,7 +1041,13 @@ def build_roi_focus_bet_sheet(
 
         if rank3_popularity is None or rank3_score is None or rank3_extra_penalty is None:
             continue
-        if not (rank3_popularity <= 5.0 and rank3_extra_penalty < 2.0 and rank3_score >= 57.0):
+        if not (
+            rank3_popularity
+            <= float(FIVE_BLOCK_BET_RULE["rank3_popularity_max"])
+            and rank3_extra_penalty
+            < float(FIVE_BLOCK_BET_RULE["rank3_extra_penalty_max_exclusive"])
+            and rank3_score >= float(FIVE_BLOCK_BET_RULE["rank3_score_min"])
+        ):
             continue
 
         rows.append(
@@ -1060,7 +1070,15 @@ def build_roi_focus_bet_sheet(
                 "4位馬番": rank4,
                 "5位馬番": rank5,
                 "購入判定": "購入",
-                "購入理由": "score1>=65 かつ dango_2_5>=6 かつ gap12>=0.5 かつ surfaceが芝/ダ かつ 3位人気<=5 かつ 3位extra_penalty<2 かつ 3位score>=57",
+                "購入理由": (
+                    f"{FIVE_BLOCK_BET_RULE['version']}: "
+                    f"score1>={FIVE_BLOCK_BET_RULE['score1_min']} かつ "
+                    f"dango_2_5>={FIVE_BLOCK_BET_RULE['dango_2_5_min']} かつ "
+                    f"gap12>={FIVE_BLOCK_BET_RULE['gap12_min']} かつ surfaceが芝/ダ かつ "
+                    f"3位人気<={FIVE_BLOCK_BET_RULE['rank3_popularity_max']} かつ "
+                    f"3位extra_penalty<{FIVE_BLOCK_BET_RULE['rank3_extra_penalty_max_exclusive']} かつ "
+                    f"3位score>={FIVE_BLOCK_BET_RULE['rank3_score_min']}"
+                ),
                 "3連複1点目_馬番1": rank1,
                 "3連複1点目_馬番2": rank3,
                 "3連複1点目_馬番3": rank2,
@@ -1084,7 +1102,7 @@ def build_roi_focus_bet_sheet(
                 "ワイド2点目_馬番2": rank3,
                 "ワイド_点数": 2,
                 "ワイド_金額": 200,
-                "合計購入金額": 700,
+                "合計購入金額": int(FIVE_BLOCK_BET_RULE["max_total_yen"]),
             }
         )
 
@@ -1593,6 +1611,63 @@ def write_features_to_excel(
         weights=default_weights,
         race_col="rid_str",
     )
+    # legacy重みとfive_block重みを同じ列名で見せないよう、診断列を明示的に分離する。
+    feature_health_df = feature_health_df.rename(
+        columns={
+            "現在の重み": "legacy_weight",
+            "ランキングへの実質寄与": "legacy_contribution",
+        }
+    )
+    block_by_feature = {
+        feature: block
+        for block, features in SCORING_FEATURE_BLOCKS.items()
+        for feature in features
+    }
+    five_weight_by_feature = {
+        feature: float(SCORING_BLOCK_WEIGHTS[block]) / max(len(features), 1)
+        for block, features in SCORING_FEATURE_BLOCKS.items()
+        for feature in features
+    }
+    feature_health_df["five_block_block_name"] = feature_health_df["特徴量名"].map(
+        block_by_feature
+    )
+    feature_health_df["five_block_weight"] = (
+        feature_health_df["特徴量名"].map(five_weight_by_feature).fillna(0.0)
+    )
+    five_contribution_map: dict[str, float] = {}
+    for feature, weight in five_weight_by_feature.items():
+        pct_col = f"{feature}_pct"
+        if pct_col not in feat_df.columns:
+            five_contribution_map[feature] = 0.0
+            continue
+        contribution = pd.to_numeric(feat_df[pct_col], errors="coerce") * weight
+        grouped = pd.DataFrame(
+            {"rid_str": feat_df["rid_str"], "value": contribution}
+        ).groupby("rid_str", dropna=True)["value"]
+        race_std = grouped.std(ddof=0)
+        five_contribution_map[feature] = (
+            float(race_std.mean(skipna=True)) if race_std.notna().any() else 0.0
+        )
+    feature_health_df["five_block_contribution"] = (
+        feature_health_df["特徴量名"].map(five_contribution_map).fillna(0.0)
+    )
+    if SCORING_MODEL_VERSION == "five_block":
+        feature_health_df["used_in_final_ranking"] = feature_health_df[
+            "特徴量名"
+        ].map(lambda feature: "Yes" if feature in block_by_feature else "No")
+    else:
+        feature_health_df["used_in_final_ranking"] = feature_health_df[
+            "特徴量名"
+        ].map(
+            lambda feature: (
+                "Yes"
+                if float(default_weights.get(feature, 0.0)) != 0.0
+                else "No"
+            )
+        )
+    if DL_PROB_BLEND == 0 and DL_RANK_BLEND == 0 and DL_SCORE_BONUS == 0:
+        dl_mask = feature_health_df["特徴量名"].astype(str).str.startswith("dl_")
+        feature_health_df.loc[dl_mask, "used_in_final_ranking"] = "No"
     contribution_parts: list[pd.DataFrame] = []
     id_cols = [col for col in ["rid_str", "馬番", "馬名"] if col in feat_df.columns]
     for block, features in SCORING_FEATURE_BLOCKS.items():
@@ -1724,7 +1799,7 @@ def run_pipeline(
     DL_RANK_DF: Optional[pd.DataFrame] = None,
 ) -> None:
     # 各種マスタ読み込み
-    levels_df = load_race_levels(LEVELS_XL)
+    levels_df = load_race_levels(LEVELS_XL, raceday=str(RACEDAY or ""))
     base_time_df = load_base_time(BASE_TIME)
     odds_df = load_odds_csv(ODDS_CSV_PATH, raceday=RACEDAY)
 

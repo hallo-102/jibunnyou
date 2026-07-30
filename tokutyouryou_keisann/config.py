@@ -82,12 +82,16 @@ try:
     PEN_CLOSE_LOSS_K = _keibayosou_config.PEN_CLOSE_LOSS_K
     PEN_CLOSE_LOSS_APPLY_WINRATE_MAX = _keibayosou_config.PEN_CLOSE_LOSS_APPLY_WINRATE_MAX
     EMPIRICAL_WEIGHT_SIGN_GUARD = _keibayosou_config.EMPIRICAL_WEIGHT_SIGN_GUARD
+    PIPE_DISABLED_RANKING_FEATURES = set(
+        _keibayosou_config.DISABLED_RANKING_FEATURES
+    )
     PIPE_FEAT_COLS = _keibayosou_config.FEAT_COLS
     PIPE_FEATURE_WEIGHTS_BASE = _keibayosou_config.FEATURE_WEIGHTS_BASE
 except Exception:
     BASE_TIME_XLSX = PROJECT_ROOT / "data" / "master" / "base_time.xlsx"
     ODDS_CSV = PROJECT_ROOT / "csv"
     EMPIRICAL_WEIGHT_SIGN_GUARD = {}
+    PIPE_DISABLED_RANKING_FEATURES = set()
     PIPE_FEAT_COLS = None
     PIPE_FEATURE_WEIGHTS_BASE = {}
     PIPE_ALPHA = 20.0
@@ -136,7 +140,10 @@ CONFIG: Dict[str, Any] = {
 
     "TRAIN_START_DATE": "20250524",
     "TRAIN_END_DATE": "20260228",
-    "TEST_START_DATE": "20260301",
+    "VALID_START_DATE": "20260301",
+    "VALID_END_DATE": "20260430",
+    "TEST_START_DATE": "20260501",
+    "TEST_END_DATE": "",
     #"TRAIN_START_DATE": "20251213",
     #"TRAIN_END_DATE": "20260228",
     #"TEST_START_DATE": "20260301",
@@ -169,6 +176,23 @@ CONFIG: Dict[str, Any] = {
     "PLACE_SURFACE_BLEND_WITH_PLACE": 0.50,
     "MIN_EVAL_ROWS_PER_RID": 6,
     "MIN_WEAKNESS_GROUP_RACES": 20,
+
+    # 候補重みはVALIDを中心に判定し、TESTは重大悪化確認だけに使う。
+    "ADOPTION_MIN_VALID_RACES": 100,
+    "ADOPTION_RANK1_PLACE_RATIO_MIN": 0.98,
+    "ADOPTION_TOP5_POINT_RATIO_MIN": 1.00,
+    "ADOPTION_TOP3_COMPLETE_RATIO_MIN": 0.98,
+    "ADOPTION_PLACE_IN_TOP5_RATIO_MIN": 1.00,
+    "ADOPTION_MAX_TRAIN_VALID_GAP": 0.10,
+    "ADOPTION_TEST_RANK1_PLACE_RATIO_MIN": 0.95,
+    "ADOPTION_TEST_TOP5_POINT_RATIO_MIN": 0.95,
+    "ADOPTION_TEST_TOP3_COMPLETE_RATIO_MIN": 0.90,
+    "ADOPTION_TEST_RACE_COUNT_RATIO_MIN": 0.95,
+
+    # five_block買い目条件の探索・採用に必要な最低母数。
+    "BET_RULE_MIN_TRAIN_RACES": 100,
+    "BET_RULE_MIN_VALID_RACES": 30,
+    "BET_RULE_MIN_VALID_HITS": 5,
 }
 
 # 今回コース脚質適性関連の特徴量。
@@ -206,6 +230,9 @@ OPTIMIZER_FIXED_ZERO_FEATURES = {
     "time_idx_context_value",
     "dl_rank_score",
 }
+# 本番読込時に0へ戻される特徴量は、最適化メモリ上でも必ず0にする。
+# ここがずれると保存前candidateと本番再読込後candidateが一致しない。
+OPTIMIZER_FIXED_ZERO_FEATURES.update(PIPE_DISABLED_RANKING_FEATURES)
 
 # 本番側 1_keibayosou_config.py の FEAT_COLS と揃える
 FEAT_COLS: List[str] = [

@@ -39,7 +39,7 @@ from typing import Any, Dict
 import pandas as pd
 
 from .common import WeightsMap, _blend_weights, _clip_weight_by_name, _normalize_surface_name
-from .config import CONFIG, FEAT_COLS, FEATURE_WEIGHTS_SEED
+from .config import CONFIG, FEAT_COLS, FEATURE_WEIGHTS_SEED, PLACE_MAP
 from .scoring import build_eval_context, better_by_objective, calc_objective_score, eval_success_and_roi
 
 
@@ -511,6 +511,23 @@ def optimize_placewise_weights(
             "raw_best_objective": place_surface_summary.get("best_objective"),
             "seed_results_json": place_surface_summary.get("seed_results_json", ""),
         })
+
+    # 本番configは全10場のbuiltin重みを先に持ち、外部ファイルを上書きmergeする。
+    # 最適化対象に現れなかった場所もcandidate defaultで明示し、再読込時の
+    # builtin追加による実効重み変化を防ぐ。
+    for place_name in sorted(set(PLACE_MAP.values())):
+        if place_name not in weights_map:
+            weights_map[place_name] = dict(default_w)
+            summary_rows.append({
+                "group_type": "place",
+                "group_key": place_name,
+                "place_name": place_name,
+                "surface_name": "",
+                "rid_count": 0,
+                "used_model": 0,
+                "fallback_target": "__default__",
+                "reason": "not_present_in_train",
+            })
 
     place_summary_df = pd.DataFrame(summary_rows)
     return weights_map, place_summary_df

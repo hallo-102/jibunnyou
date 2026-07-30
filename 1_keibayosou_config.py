@@ -430,6 +430,24 @@ FEAT_COLS = [
 # Phase 11 の未来期間ゲート通過後は five_block を本番既定値とし、環境変数で旧モデルへ戻せる。
 SCORING_MODEL_VERSION = os.getenv("KEIBA_SCORING_MODEL_VERSION", "five_block").strip().lower()
 
+# five_block専用ルールはTRAINデータ不足で採用ゲート未通過のため、本番では
+# 既存条件を維持する。検証済みルールがadoptedになった場合だけversionと閾値を更新する。
+FIVE_BLOCK_BET_RULE = {
+    "version": "legacy_roi_rule_retained_after_timeseries_gate_v1",
+    "decision": "rejected",
+    "axis_method": "five_block",
+    "score1_min": 65.0,
+    "dango_2_5_min": 6.0,
+    "gap12_min": 0.5,
+    "rank3_popularity_max": 5.0,
+    "rank3_extra_penalty_max_exclusive": 2.0,
+    "rank3_score_min": 57.0,
+    "allowed_surfaces": ["芝", "ダ"],
+    "ticket_points": {"3連複": 3, "馬連": 2, "ワイド": 2},
+    "stake_yen_per_point": 100,
+    "max_total_yen": 700,
+}
+
 LOWER_IS_BETTER_FEATURES = {
     "avg_finish",
     "avg_pop",
@@ -829,6 +847,17 @@ def _load_external_feature_weights(base_dir: str):
         print(f"[WARN] 外部重みファイル {Path(path).name} の読み込みに失敗しました: {e}")
         return None, None
 
+
+# 外部bestを適用する前の組み込み値を保持する。
+# 最適化runnerはこのスナップショットへ選択済みbestを同じ規則で統合し、
+# 本番runnerの実効重みと一致することを検証する。
+BUILTIN_FEATURE_WEIGHTS = {
+    key: dict(weights) for key, weights in FEATURE_WEIGHTS.items()
+}
+BUILTIN_FEATURE_WEIGHTS_BY_PLACE_SURFACE = {
+    key: dict(weights)
+    for key, weights in FEATURE_WEIGHTS_BY_PLACE_SURFACE.items()
+}
 
 try:
     _ext_fw, _ext_fw_by_ps = _load_external_feature_weights(str(PY_DIR))

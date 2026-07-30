@@ -1,0 +1,151 @@
+{
+  "metadata": {
+    "created_at": "2026-07-28 22:09:09",
+    "before_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\reports\\evaluation_20260728_211611.json",
+    "after_path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\reports\\evaluation_20260728_220858.json"
+  },
+  "rows": [
+    {
+      "metric": "ranking_1_in_money_rate",
+      "label": "ランキング1位の馬券内率",
+      "before": 0.5630178805058875,
+      "after": 0.5595290013083297,
+      "delta": -0.0034888791975578037,
+      "judgment": "悪化",
+      "direction": "higher"
+    },
+    {
+      "metric": "ranking_1_3_in_money_rate",
+      "label": "ランキング1から3位の馬券内率",
+      "before": 0.47739497019915683,
+      "after": 0.4720162814362553,
+      "delta": -0.00537868876290154,
+      "judgment": "悪化",
+      "direction": "higher"
+    },
+    {
+      "metric": "top5_full_capture_rate",
+      "label": "TOP5完全捕捉率",
+      "before": 0.30658525948539034,
+      "after": 0.2987352812908853,
+      "delta": -0.007849978194505058,
+      "judgment": "悪化",
+      "direction": "higher"
+    },
+    {
+      "metric": "sanrenpuku_15_hit_rate",
+      "label": "3連複想定的中率",
+      "before": 0.30658525948539034,
+      "after": 0.2987352812908853,
+      "delta": -0.007849978194505058,
+      "judgment": "悪化",
+      "direction": "higher"
+    },
+    {
+      "metric": "roi",
+      "label": "回収率",
+      "before": 0.83796191306876,
+      "after": 0.7971594708533217,
+      "delta": -0.04080244221543827,
+      "judgment": "悪化",
+      "direction": "higher"
+    },
+    {
+      "metric": "target_races",
+      "label": "対象レース数",
+      "before": 2293.0,
+      "after": 2293.0,
+      "delta": 0.0,
+      "judgment": "横ばい",
+      "direction": "stable_or_higher"
+    },
+    {
+      "metric": "excluded_races",
+      "label": "除外レース数",
+      "before": 17.0,
+      "after": 17.0,
+      "delta": 0.0,
+      "judgment": "横ばい",
+      "direction": "lower"
+    },
+    {
+      "metric": "missing_horses",
+      "label": "欠損馬数",
+      "before": 99.0,
+      "after": 102.0,
+      "delta": 3.0,
+      "judgment": "悪化",
+      "direction": "lower"
+    },
+    {
+      "metric": "longshot_captured_count",
+      "label": "穴馬を拾えた件数",
+      "before": 635.0,
+      "after": 1546.0,
+      "delta": 911.0,
+      "judgment": "改善",
+      "direction": "higher"
+    },
+    {
+      "metric": "popular_danger_cut_count",
+      "label": "人気馬を危険馬として切れた件数",
+      "before": 1421.0,
+      "after": 1153.0,
+      "delta": -268.0,
+      "judgment": "悪化",
+      "direction": "higher"
+    }
+  ],
+  "judgment": {
+    "overall_judgment": "悪化",
+    "adoption": "見送り候補",
+    "reasons": [
+      "主要指標の悪化: ランキング1位の馬券内率, TOP5完全捕捉率, 3連複想定的中率, 回収率",
+      "欠損馬数が増えている。"
+    ],
+    "next_points": [
+      "軸馬精度とTOP5捕捉のどちらが下がったかを日別に確認する。",
+      "馬名、馬番、馬IDの照合キーを見直す。"
+    ]
+  },
+  "before_summary": {
+    "target_days": 69,
+    "target_races": 2293,
+    "excluded_races": 17,
+    "missing_horses": 99,
+    "ranking_1_in_money_rate": 0.5630178805058875,
+    "ranking_1_3_in_money_rate": 0.47739497019915683,
+    "ranking_1_5_in_money_rate": 0.40933275185346707,
+    "top5_full_capture_rate": 0.30658525948539034,
+    "sanrenpuku_15_hit_rate": 0.30658525948539034,
+    "roi": 0.83796191306876,
+    "total_bet_yen": 3439500.0,
+    "total_payout_yen": 2882170.0,
+    "longshot_captured_count": 635,
+    "popular_danger_cut_count": 1421,
+    "hit_rate_stddev": 0.16006272437851907,
+    "roi_stddev": 0.7747649763278174,
+    "best_day": "20260104",
+    "worst_day": "20260308"
+  },
+  "after_summary": {
+    "target_days": 69,
+    "target_races": 2293,
+    "excluded_races": 17,
+    "missing_horses": 102,
+    "ranking_1_in_money_rate": 0.5595290013083297,
+    "ranking_1_3_in_money_rate": 0.4720162814362553,
+    "ranking_1_5_in_money_rate": 0.404709986916703,
+    "top5_full_capture_rate": 0.2987352812908853,
+    "sanrenpuku_15_hit_rate": 0.2987352812908853,
+    "roi": 0.7971594708533217,
+    "total_bet_yen": 3439500.0,
+    "total_payout_yen": 2741830.0,
+    "longshot_captured_count": 1546,
+    "popular_danger_cut_count": 1153,
+    "hit_rate_stddev": 0.16511873174269923,
+    "roi_stddev": 0.7910928271676697,
+    "best_day": "20260104",
+    "worst_day": "20260308"
+  }
+}

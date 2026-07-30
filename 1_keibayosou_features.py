@@ -868,7 +868,7 @@ def _compute_horse_features_from_race_sheets(
         df["__horse_name__"] = df[c_name].astype(str).str.strip()
 
         def _select_past_rows_for_horse(horse_name_val: Any) -> pd.DataFrame:
-            """今走馬名に対応する過去走行を抽出する。"""
+            """今走馬名に対応し、かつRACEDAYより前の過去走行だけを抽出する。"""
             name_text = str(horse_name_val or "").strip()
             if not name_text:
                 return pd.DataFrame(columns=df.columns)
@@ -877,6 +877,20 @@ def _compute_horse_features_from_race_sheets(
             if selected.empty:
                 key = re.sub(r"\s+", "", name_text)
                 selected = df[df["__horse_name__"].map(lambda x: re.sub(r"\s+", "", str(x))) == key].copy()
+            if now_date is not None:
+                if c_date is None:
+                    # 日付を証明できない行は過去データへ自動混入させない。
+                    return selected.iloc[0:0].copy()
+                past_dates = pd.to_datetime(
+                    selected[c_date].astype(str).str.replace(
+                        r"[^0-9]", "", regex=True
+                    ).str[:8],
+                    format="%Y%m%d",
+                    errors="coerce",
+                )
+                selected = selected.loc[
+                    past_dates.notna() & (past_dates < now_date)
+                ].copy()
             return selected
 
         def _style_lookup_key(horse_name_val: Any, umaban_val: Any) -> Tuple[str, Optional[int]]:
@@ -1547,6 +1561,88 @@ def _exclude_obstacle_races_from_prediction(
     return filtered_merged, filtered_feat
 
 
+def _expand_legacy_now_rows_from_race_sheets(
+    book: Dict[Any, pd.DataFrame],
+    now_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    旧形式の1レース1行「今走レース情報」を1頭1行へ復元する。
+
+    旧形式には馬番・馬名が保存されていないが、各レースIDシートは
+    今走馬の順番で過去走をまとめている。頭数とユニーク馬名数が完全一致する
+    場合だけ、初出順を馬番1..頭数として採用する。曖昧なレースは推測しない。
+    """
+    if now_df is None or now_df.empty:
+        return now_df
+
+    work = now_df.copy()
+    work = _ensure_cols(work, ["馬番", "馬名", "頭数"])
+    work = _ensure_rid_str(work, label="legacy NOW")
+    work["rid_str"] = _normalize_rid_series(work["rid_str"])
+
+    expanded_rows: list[pd.Series] = []
+    expanded_races = 0
+    unresolved: list[str] = []
+    for rid, group in work.groupby("rid_str", sort=False, dropna=False):
+        names = group["馬名"].fillna("").astype(str).str.strip()
+        has_named_horse = names[~names.isin(["", "nan", "<NA>"])].any()
+        if has_named_horse:
+            expanded_rows.extend(row.copy() for _, row in group.iterrows())
+            continue
+
+        rid_str = str(rid)
+        race_sheet = book.get(rid_str)
+        if race_sheet is None or race_sheet.empty:
+            unresolved.append(f"{rid_str}:race_sheet_missing")
+            continue
+
+        name_col = _pick_col(race_sheet, ["馬名"])
+        field_size = pd.to_numeric(group["頭数"], errors="coerce").dropna()
+        expected = int(field_size.iloc[0]) if not field_size.empty else 0
+        if name_col is None or expected <= 0:
+            unresolved.append(f"{rid_str}:name_or_field_size_missing")
+            continue
+
+        horse_names = (
+            race_sheet[name_col]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
+        horse_names = horse_names[
+            ~horse_names.isin(["", "nan", "<NA>"])
+        ].drop_duplicates(keep="first")
+        if len(horse_names) != expected:
+            unresolved.append(
+                f"{rid_str}:horse_count_mismatch({len(horse_names)}!={expected})"
+            )
+            continue
+
+        base_row = group.iloc[0].copy()
+        for horse_number, horse_name in enumerate(horse_names.tolist(), start=1):
+            row = base_row.copy()
+            row["馬番"] = horse_number
+            row["馬名"] = horse_name
+            expanded_rows.append(row)
+        expanded_races += 1
+
+    result = pd.DataFrame(expanded_rows).reset_index(drop=True)
+    if expanded_races:
+        print(
+            "[INFO] 旧形式の今走レース情報をレースIDシートから復元しました: "
+            f"{expanded_races}レース"
+        )
+    if unresolved:
+        preview = ", ".join(unresolved[:10])
+        print(
+            "[WARN] 旧形式で安全に復元できないレースを除外しました: "
+            f"unresolved={len(unresolved)} preview={preview}"
+        )
+    result.attrs["legacy_expanded_race_count"] = expanded_races
+    result.attrs["legacy_unresolved_races"] = unresolved
+    return result
+
+
 def build_features_from_excel(
     src_excel_path: str,
     levels_df: Optional[pd.DataFrame] = None,
@@ -1567,6 +1663,7 @@ def build_features_from_excel(
     if NOW_SHEET not in book:
         raise RuntimeError(f"今走シートが見つかりません: sheet={NOW_SHEET} path={src_excel_path}")
     now_df = book[NOW_SHEET].copy()
+    now_df = _expand_legacy_now_rows_from_race_sheets(book, now_df)
     if "dl_rank" not in now_df.columns:
         now_df["dl_rank"] = np.nan
     now_df["dl_rank"] = pd.to_numeric(now_df["dl_rank"], errors="coerce")

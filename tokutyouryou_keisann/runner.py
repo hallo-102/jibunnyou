@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import argparse
+import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -31,6 +34,18 @@ from .config import (
 from .features import build_features_from_one_file
 from .optimizer import optimize_placewise_weights
 from .scoring import eval_success_and_roi
+from .adoption import evaluate_test_gate, evaluate_valid_gate, split_train_valid_test
+from .baseline import (
+    BASELINE_ERROR_CODE,
+    BaselineWeightError,
+    BaselineWeightInfo,
+    compare_weights_maps,
+    load_effective_weights_file,
+    load_baseline_weights,
+    normalized_weights_sha256,
+    select_baseline_weight_file,
+    sha256_file,
+)
 
 
 def _build_eval_debug_summary(
@@ -752,7 +767,340 @@ def _split_train_test_with_file_exclusion(
     return df_train, df_test, df_exclusion_summary
 
 
-def main() -> None:
+def _write_weights_module(out_path: Path, weights_map) -> None:
+    """候補・採用済みで共通のPython重みモジュールを書き出す。"""
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("# -*- coding: utf-8 -*-\n")
+        f.write('"""自動生成：特徴量重み（時系列採用ゲート対応）"""\n\n')
+        f.write("FEATURE_WEIGHTS = {\n")
+        f.write('    "__default__": {\n')
+        for key in FEAT_COLS:
+            f.write(
+                f'        "{key}": '
+                f'{float(weights_map["__default__"].get(key, 0.0)):.10f},\n'
+            )
+        f.write("    },\n")
+        place_keys = sorted(
+            [
+                place
+                for place in weights_map
+                if isinstance(place, str) and place != "__default__"
+            ]
+        )
+        for place_name in place_keys:
+            f.write(f"    {place_name!r}: {{\n")
+            for key in FEAT_COLS:
+                f.write(
+                    f'        "{key}": '
+                    f'{float(weights_map[place_name].get(key, 0.0)):.10f},\n'
+                )
+            f.write("    },\n")
+        f.write("}\n\n")
+        f.write("FEATURE_WEIGHTS_BY_PLACE_SURFACE = {\n")
+        place_surface_keys = sorted(
+            [
+                key
+                for key in weights_map
+                if isinstance(key, tuple) and len(key) == 2
+            ],
+            key=lambda value: (value[0], value[1]),
+        )
+        for place_name, surface_name in place_surface_keys:
+            f.write(f"    ({place_name!r}, {surface_name!r}): {{\n")
+            for key in FEAT_COLS:
+                f.write(
+                    f'        "{key}": '
+                    f'{float(weights_map[(place_name, surface_name)].get(key, 0.0)):.10f},\n'
+                )
+            f.write("    },\n")
+        f.write("}\n")
+
+
+def _publish_candidate_and_best(
+    candidate_path: Path,
+    best_path: Path,
+    weights_map,
+    decision: str,
+    candidate_already_saved: bool = False,
+) -> tuple[str, list[str], str, bool]:
+    """candidateは保存し、不採用または既存bestありならbestを一切変更しない。"""
+    if not candidate_already_saved:
+        _write_weights_module(candidate_path, weights_map)
+    reasons: list[str] = []
+    adopted_path = ""
+    best_updated = False
+    final_decision = decision
+    if decision == "adopted":
+        if best_path.exists():
+            final_decision = "rejected"
+            reasons.append(
+                f"同日bestファイルが既に存在するため上書きを拒否: {best_path.name}"
+            )
+        else:
+            shutil.copy2(candidate_path, best_path)
+            adopted_path = str(best_path)
+            best_updated = True
+    return final_decision, reasons, adopted_path, best_updated
+
+
+def _prepare_candidate_roundtrip(
+    memory_weights,
+    candidate_path: Path,
+    baseline_info: BaselineWeightInfo | None,
+) -> dict:
+    """candidateを保存・本番同等再読込し、採用評価前の安全判定を返す。"""
+    _write_weights_module(candidate_path, memory_weights)
+    candidate_file_sha256 = sha256_file(candidate_path)
+    reloaded_weights = load_effective_weights_file(candidate_path)
+    comparison = compare_weights_maps(memory_weights, reloaded_weights)
+
+    reason_code = ""
+    reason = ""
+    if not comparison.match:
+        reason_code = "candidate_roundtrip_mismatch"
+        reason = "candidate保存前後の実効重みが一致しません"
+    elif baseline_info is None:
+        reason_code = BASELINE_ERROR_CODE
+        reason = "baselineを本番と同じ方法で読み込めません"
+    elif candidate_file_sha256 == baseline_info.sha256:
+        reason_code = "candidate_identical_to_baseline"
+        reason = "candidateファイルとbaselineファイルのSHA-256が同一です"
+    elif compare_weights_maps(
+        reloaded_weights,
+        baseline_info.weights_map,
+    ).match:
+        reason_code = "candidate_effective_weights_identical_to_baseline"
+        reason = "candidateとbaselineの再読込後実効WeightsMapが同一です"
+
+    return {
+        "candidate_file_sha256": candidate_file_sha256,
+        "reloaded_weights": reloaded_weights,
+        "memory_candidate_normalized_sha256": comparison.left_normalized_sha256,
+        "reloaded_candidate_normalized_sha256": comparison.right_normalized_sha256,
+        "baseline_normalized_sha256": (
+            normalized_weights_sha256(baseline_info.weights_map)
+            if baseline_info is not None
+            else ""
+        ),
+        "candidate_roundtrip_match": comparison.match,
+        "differing_group_count": comparison.differing_group_count,
+        "differing_feature_count": comparison.differing_feature_count,
+        "weight_differences_top100": comparison.differences,
+        "max_absolute_difference": comparison.max_absolute_difference,
+        "keys_missing_after_save": comparison.missing_from_right,
+        "keys_added_on_reload": comparison.added_in_right,
+        "reason_code": reason_code,
+        "reason": reason,
+    }
+
+
+def _rejection_message(reason_code: str) -> str:
+    """採用不可理由をターミナル向けに区別する。"""
+    return {
+        "valid_gate_failed": "VALIDゲート不合格のため既存best重みは変更しません",
+        "test_gate_failed": "TESTゲート不合格のため既存best重みは変更しません",
+        BASELINE_ERROR_CODE: "baseline読込失敗のため既存best重みは変更しません",
+        "candidate_roundtrip_mismatch": (
+            "candidateラウンドトリップ不一致のため既存best重みは変更しません"
+        ),
+        "candidate_identical_to_baseline": (
+            "baselineとcandidateファイルが同一のため更新しません"
+        ),
+        "candidate_effective_weights_identical_to_baseline": (
+            "baselineとcandidateの実効重みが同一のため更新しません"
+        ),
+        "same_day_best_exists": (
+            "採用ゲートは合格しましたが、同日bestファイルが既に存在するため"
+            "上書きを拒否しました。"
+        ),
+        "save_failed": "その他の保存失敗のため既存best重みは変更しません",
+    }.get(reason_code, "その他の理由により既存best重みは変更しません")
+
+
+def _empty_eval_result() -> tuple[float, int, int, int, dict, dict]:
+    """未評価期間をeval_success_and_roiへ渡さず、互換形式だけ用意する。"""
+    stability = {
+        "n_bets": 0,
+        "top5_point_rate": 0.0,
+        "top3_complete_rate": 0.0,
+        "win_in_top5_rate": 0.0,
+        "place_in_top5_rate": 0.0,
+        "rank1_win_rate": 0.0,
+        "rank1_place_rate": 0.0,
+        "roi": 0.0,
+    }
+    return 0.0, 0, 0, 0, {}, stability
+
+
+def _evaluate_adoption_flow(
+    baseline_weights,
+    candidate_weights,
+    df_train: pd.DataFrame,
+    df_valid: pd.DataFrame,
+    df_test: pd.DataFrame,
+    df_res_entries: pd.DataFrame,
+    df_res_payout: pd.DataFrame,
+    baseline_ready: bool,
+    evaluator=eval_success_and_roi,
+) -> dict:
+    """baseline/candidateを同一形式で評価し、VALID不合格ならTESTを呼ばない。"""
+    train_result = evaluator(
+        candidate_weights, df_train, df_res_entries, df_res_payout
+    )
+    valid_result = evaluator(
+        candidate_weights, df_valid, df_res_entries, df_res_payout
+    )
+    if baseline_ready:
+        baseline_train_result = evaluator(
+            baseline_weights, df_train, df_res_entries, df_res_payout
+        )
+        baseline_valid_result = evaluator(
+            baseline_weights, df_valid, df_res_entries, df_res_payout
+        )
+    else:
+        baseline_train_result = _empty_eval_result()
+        baseline_valid_result = _empty_eval_result()
+
+    valid_passed, reasons, gates = evaluate_valid_gate(
+        baseline_valid=baseline_valid_result[5],
+        candidate_valid=valid_result[5],
+        train_candidate=train_result[5],
+        config=CONFIG,
+        baseline_ready=baseline_ready,
+        baseline_error_code=BASELINE_ERROR_CODE if not baseline_ready else "",
+    )
+    baseline_test_result = None
+    candidate_test_result = None
+    test_evaluated = False
+    test_not_evaluated_reason = ""
+    decision = "rejected"
+    if valid_passed:
+        baseline_test_result = evaluator(
+            baseline_weights, df_test, df_res_entries, df_res_payout
+        )
+        candidate_test_result = evaluator(
+            candidate_weights, df_test, df_res_entries, df_res_payout
+        )
+        test_evaluated = True
+        test_passed, test_reasons, test_gates = evaluate_test_gate(
+            baseline_test_result[5], candidate_test_result[5], CONFIG
+        )
+        reasons.extend(test_reasons)
+        gates.update(test_gates)
+        decision = "adopted" if test_passed else "rejected"
+        reason_code = "" if test_passed else "test_gate_failed"
+    else:
+        test_not_evaluated_reason = (
+            BASELINE_ERROR_CODE if not baseline_ready else "valid_gate_failed"
+        )
+        reason_code = test_not_evaluated_reason
+        gates["test_gate_passed"] = False
+        gates["test_evaluated"] = False
+    return {
+        "decision": decision,
+        "reason_code": reason_code,
+        "reasons": reasons,
+        "gates": gates,
+        "valid_passed": valid_passed,
+        "test_evaluated": test_evaluated,
+        "test_not_evaluated_reason": test_not_evaluated_reason,
+        "candidate_train": train_result,
+        "candidate_valid": valid_result,
+        "candidate_test": candidate_test_result,
+        "baseline_train": baseline_train_result,
+        "baseline_valid": baseline_valid_result,
+        "baseline_test": baseline_test_result,
+    }
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """baseline検証と短時間試験用のCLI引数を解釈する。"""
+    parser = argparse.ArgumentParser(description="競馬特徴量重みの時系列最適化")
+    parser.add_argument("--baseline-weight-file", default="")
+    parser.add_argument(
+        "--verify-baseline-only",
+        "--dry-run",
+        action="store_true",
+        dest="verify_baseline_only",
+    )
+    parser.add_argument("--trial-iterations", type=int, default=0)
+    parser.add_argument("--trial-max-files-per-period", type=int, default=0)
+    parser.add_argument(
+        "--validate-train-data-only",
+        action="store_true",
+        help="特徴量とTRAIN品質ゲートだけを確認し、最適化・candidate保存を行わない",
+    )
+    return parser.parse_args(argv)
+
+
+def _verify_split_without_features(files: list[str]) -> dict:
+    """dry-run用に結果実績から期間・重複を読み取り、入力ファイル数を補う。"""
+    entries, _ = load_results_all_sheets(CONFIG["RESULTS_FILE"])
+    rid_to_date = build_rid_to_date_map(CONFIG["RESULTS_FILE"])
+    frame = entries.copy()
+    frame["date"] = frame["rid_str"].astype(str).map(rid_to_date).fillna("")
+    frame["source_file_name"] = ""
+    split = split_train_valid_test(
+        frame,
+        str(CONFIG.get("TRAIN_START_DATE", "") or ""),
+        str(CONFIG.get("TRAIN_END_DATE", "") or ""),
+        str(CONFIG.get("VALID_START_DATE", "") or ""),
+        str(CONFIG.get("VALID_END_DATE", "") or ""),
+        str(CONFIG.get("TEST_START_DATE", "") or ""),
+        str(CONFIG.get("TEST_END_DATE", "") or ""),
+    )
+    summary = split.summary
+    for label, start_key, end_key in (
+        ("train", "TRAIN_START_DATE", "TRAIN_END_DATE"),
+        ("valid", "VALID_START_DATE", "VALID_END_DATE"),
+        ("test", "TEST_START_DATE", "TEST_END_DATE"),
+    ):
+        start = str(CONFIG.get(start_key, "") or "")
+        end = str(CONFIG.get(end_key, "") or "99999999")
+        matching = []
+        for raw_path in files:
+            name = Path(raw_path).name
+            digits = "".join(ch for ch in name if ch.isdigit())
+            date = digits[-8:] if len(digits) >= 8 else ""
+            if date and start <= date <= end:
+                matching.append(name)
+        summary[label]["files"] = len(set(matching))
+    return summary
+
+
+def _limit_trial_files(files: list[str], max_per_period: int) -> list[str]:
+    """期間境界を変えず、短時間試験で各期間の末尾Nファイルだけを選ぶ。"""
+    if max_per_period <= 0:
+        return files
+    periods = (
+        (
+            str(CONFIG.get("TRAIN_START_DATE", "") or ""),
+            str(CONFIG.get("TRAIN_END_DATE", "") or "99999999"),
+        ),
+        (
+            str(CONFIG.get("VALID_START_DATE", "") or ""),
+            str(CONFIG.get("VALID_END_DATE", "") or "99999999"),
+        ),
+        (
+            str(CONFIG.get("TEST_START_DATE", "") or ""),
+            str(CONFIG.get("TEST_END_DATE", "") or "99999999"),
+        ),
+    )
+    buckets: list[list[str]] = [[], [], []]
+    for raw_path in sorted(files):
+        name = Path(raw_path).name
+        digits = "".join(ch for ch in name if ch.isdigit())
+        date = digits[-8:] if len(digits) >= 8 else ""
+        for index, (start, end) in enumerate(periods):
+            if date and start <= date <= end:
+                buckets[index].append(raw_path)
+                break
+    selected = [path for bucket in buckets for path in bucket[-max_per_period:]]
+    return selected
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
     print(f"[INFO] PROJECT_ROOT={PROJECT_ROOT}")
     print(f"[INFO] EXCEL_DIR={EXCEL_DIR}")
     print(f"[INFO] PY_DIR={PY_DIR}")
@@ -764,6 +1112,20 @@ def main() -> None:
     else:
         print("[INFO] penalties.py を使用します。")
 
+    baseline_info: BaselineWeightInfo | None = None
+    baseline_selection = None
+    baseline_error = ""
+    try:
+        baseline_selection = select_baseline_weight_file(args.baseline_weight_file or None)
+        baseline_info = load_baseline_weights(baseline_selection, verify_production=True)
+        print(f"[INFO] baseline_file={baseline_info.path}")
+        print(f"[INFO] baseline_method={baseline_info.method}")
+        print(f"[INFO] baseline_sha256={baseline_info.sha256}")
+        print(f"[INFO] production_weight_match={baseline_info.production_weights_match}")
+    except BaselineWeightError as exc:
+        baseline_error = f"{exc.code}: {exc}"
+        print(f"[ERROR] {baseline_error}")
+
     files = discover_files(CONFIG["DATA_GLOB"])
     if not files:
         raise FileNotFoundError(
@@ -773,10 +1135,57 @@ def main() -> None:
             "  - EXCEL_DIR（xlsx もしくは data/input）にファイルを置く\n"
             "  - もしくは環境変数 KEIBA_EXCEL_DIR を設定する"
         )
+    if args.verify_baseline_only:
+        split_summary = _verify_split_without_features(files)
+        payload = {
+            "mode": "verify-baseline-only",
+            "baseline_ok": baseline_info is not None,
+            "baseline_error": baseline_error,
+            "baseline_file": (
+                str(baseline_info.path)
+                if baseline_info
+                else str(baseline_selection.path) if baseline_selection else ""
+            ),
+            "baseline_sha256": baseline_info.sha256 if baseline_info else "",
+            "baseline_method": baseline_info.method if baseline_info else "",
+            "production_file": str(baseline_info.production_path) if baseline_info else "",
+            "production_sha256": baseline_info.production_sha256 if baseline_info else "",
+            "production_weights_match": (
+                baseline_info.production_weights_match if baseline_info else False
+            ),
+            "common_weight_count": (
+                baseline_info.common_weight_count if baseline_info else 0
+            ),
+            "place_surface_group_count": (
+                baseline_info.place_surface_group_count if baseline_info else 0
+            ),
+            "split_diagnostics": split_summary,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        if baseline_info is None:
+            raise SystemExit(2)
+        return
+
+    if args.trial_iterations > 0:
+        trial_count = max(1, int(args.trial_iterations))
+        CONFIG["N_ITER_DEFAULT"] = trial_count
+        CONFIG["N_ITER_PLACE"] = trial_count
+        CONFIG["N_ITER_PLACE_SURFACE"] = trial_count
+        CONFIG["OPTIMIZER_SEEDS"] = [int(CONFIG.get("RANDOM_SEED", 13))]
+        print(f"[INFO] trial_iterations={trial_count}")
+    if args.trial_max_files_per_period > 0:
+        files = _limit_trial_files(files, int(args.trial_max_files_per_period))
+        print(
+            "[INFO] trial_file_limit="
+            f"{args.trial_max_files_per_period} selected_files={len(files)}"
+        )
 
     train_start_date = str(CONFIG.get("TRAIN_START_DATE", "") or "")
     train_end_date = str(CONFIG.get("TRAIN_END_DATE", "") or "")
+    valid_start_date = str(CONFIG.get("VALID_START_DATE", "") or "")
+    valid_end_date = str(CONFIG.get("VALID_END_DATE", "") or "")
     test_start_date = str(CONFIG.get("TEST_START_DATE", "") or "")
+    test_end_date = str(CONFIG.get("TEST_END_DATE", "") or "")
 
     df_res_entries, df_res_payout = load_results_all_sheets(CONFIG["RESULTS_FILE"])
     rid_to_date = build_rid_to_date_map(CONFIG["RESULTS_FILE"])
@@ -867,13 +1276,37 @@ def main() -> None:
     df_feat_all["surface_name"] = df_feat_all["surface_name"].fillna("").map(_normalize_surface_name)
     df_feat_all["source_file_name"] = df_feat_all["source_file_name"].fillna("").astype(str)
 
-    df_train, df_test, df_file_exclusion_summary = _split_train_test_with_file_exclusion(
+    _, _, df_file_exclusion_summary = _split_train_test_with_file_exclusion(
         df_feat_all=df_feat_all,
         df_file_debug=df_file_debug,
         train_start_date=train_start_date,
         train_end_date=train_end_date,
         test_start_date=test_start_date,
     )
+    excluded_train_files = set()
+    if (
+        df_file_exclusion_summary is not None
+        and not df_file_exclusion_summary.empty
+    ):
+        excluded_train_files = set(
+            df_file_exclusion_summary.loc[
+                df_file_exclusion_summary["exclude_from_train"].eq(1),
+                "file_name",
+            ].astype(str)
+        )
+    period_split = split_train_valid_test(
+        df_feat_all,
+        train_start=train_start_date,
+        train_end=train_end_date,
+        valid_start=valid_start_date,
+        valid_end=valid_end_date,
+        test_start=test_start_date,
+        test_end=test_end_date,
+        excluded_train_files=excluded_train_files,
+    )
+    df_train = period_split.train
+    df_valid = period_split.valid
+    df_test = period_split.test
 
     print(f"[INFO] PAYOUT_CAP_YEN={int(CONFIG.get('PAYOUT_CAP_YEN', 0) or 0)}")
     print(f"[INFO] SKIP_IF_PAYOUT_MISSING={CONFIG['SKIP_IF_PAYOUT_MISSING']}")
@@ -894,8 +1327,16 @@ def main() -> None:
         f"TRAIN_START_DATE={train_start_date} TRAIN_END_DATE={train_end_date}"
     )
     print(
+        f"[INFO] df_valid: {len(df_valid)} 行 / rid数={df_valid['rid_str'].nunique()} "
+        f"VALID_START_DATE={valid_start_date} VALID_END_DATE={valid_end_date}"
+    )
+    print(
         f"[INFO] df_test:  {len(df_test)} 行 / rid数={df_test['rid_str'].nunique()} "
-        f"TEST_START_DATE={test_start_date}"
+        f"TEST_START_DATE={test_start_date} TEST_END_DATE={test_end_date or 'latest'}"
+    )
+    print(
+        "[INFO] 期間分割診断="
+        + json.dumps(period_split.summary, ensure_ascii=False, sort_keys=True)
     )
     print(f"[INFO] MIN_PLACE_RACES={CONFIG['MIN_PLACE_RACES']} / MIN_PLACE_BETS={CONFIG['MIN_PLACE_BETS']}")
     print(
@@ -937,29 +1378,175 @@ def main() -> None:
     clean_train_rid_summary = _print_rid_rows_summary(df_clean_train, "CLEAN TRAIN FEATURES")
     clean_test_rid_summary = _print_rid_rows_summary(df_clean_test, "CLEAN TEST FEATURES")
 
+    remaining_bad_train_files = 0
+    if (
+        df_file_exclusion_summary is not None
+        and not df_file_exclusion_summary.empty
+    ):
+        remaining_bad_train_files = int(
+            pd.to_numeric(
+                df_file_exclusion_summary["exclude_from_train"],
+                errors="coerce",
+            ).fillna(0).sum()
+        )
+    if remaining_bad_train_files:
+        raise RuntimeError(
+            "TRAIN_DATA_QUALITY_BLOCKED: "
+            f"品質不良ファイルが{remaining_bad_train_files}件残っているため、"
+            "本格最適化と本番採用を禁止します"
+        )
+    if args.validate_train_data_only:
+        print(
+            "[OK] TRAINデータ品質ゲート合格: "
+            "最適化・candidate保存・本番採用は実行していません"
+        )
+        return
+
     weights_map, place_summary_df = optimize_placewise_weights(
         df_train=df_train,
         df_res_entries=df_res_entries,
         df_res_payout=df_res_payout,
     )
 
-    train_s, train_t, train_i, train_r, train_det, train_stab = eval_success_and_roi(
-        weights_map, df_train, df_res_entries, df_res_payout
+    PY_DIR.mkdir(parents=True, exist_ok=True)
+    now = datetime.now()
+    today_str = now.strftime("%Y%m%d")
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
+    candidate_py = PY_DIR / f"candidate_feature_weights_{timestamp}.py"
+    adopted_py = PY_DIR / f"best_feature_weights_{today_str}.py"
+    roundtrip = _prepare_candidate_roundtrip(
+        weights_map,
+        candidate_py,
+        baseline_info,
     )
-    test_s, test_t, test_i, test_r, test_det, test_stab = eval_success_and_roi(
-        weights_map, df_test, df_res_entries, df_res_payout
+    print(f"\n[OK] candidate weights saved: {candidate_py}")
+    print(
+        "[INFO] candidate_sha256="
+        f"{roundtrip['candidate_file_sha256']}"
     )
+    print(
+        "[INFO] candidate_roundtrip_match="
+        f"{roundtrip['candidate_roundtrip_match']}"
+    )
+
+    preflight_reason_code = str(roundtrip["reason_code"])
+    if preflight_reason_code:
+        decision_dir = PROJECT_ROOT / "data" / "output" / "weight_adoption"
+        decision_dir.mkdir(parents=True, exist_ok=True)
+        decision_path = decision_dir / f"decision_{timestamp}.json"
+        best_before_hash = (
+            sha256_file(adopted_py) if adopted_py.is_file() else ""
+        )
+        payload = {
+            "decision": "rejected",
+            "adopted": False,
+            "best_weight_updated": False,
+            "reason": [str(roundtrip["reason"])],
+            "reason_code": preflight_reason_code,
+            "reason_codes": [preflight_reason_code],
+            "baseline_weight_file": (
+                str(baseline_info.path) if baseline_info else ""
+            ),
+            "baseline_weight_sha256": (
+                baseline_info.sha256 if baseline_info else ""
+            ),
+            "baseline_normalized_sha256": roundtrip[
+                "baseline_normalized_sha256"
+            ],
+            "baseline_load_error": baseline_error,
+            "candidate_weight_file": str(candidate_py.resolve()),
+            "candidate_weight_sha256": roundtrip["candidate_file_sha256"],
+            "memory_candidate_normalized_sha256": roundtrip[
+                "memory_candidate_normalized_sha256"
+            ],
+            "reloaded_candidate_normalized_sha256": roundtrip[
+                "reloaded_candidate_normalized_sha256"
+            ],
+            "candidate_roundtrip_match": roundtrip[
+                "candidate_roundtrip_match"
+            ],
+            "differing_group_count": roundtrip["differing_group_count"],
+            "differing_feature_count": roundtrip["differing_feature_count"],
+            "weight_differences_top100": roundtrip[
+                "weight_differences_top100"
+            ],
+            "max_absolute_difference": roundtrip[
+                "max_absolute_difference"
+            ],
+            "keys_missing_after_save": roundtrip["keys_missing_after_save"],
+            "keys_added_on_reload": roundtrip["keys_added_on_reload"],
+            "valid_gate_passed": False,
+            "test_evaluated": False,
+            "test_not_evaluated_reason": preflight_reason_code,
+            "best_weight_file": str(adopted_py),
+            "best_weight_sha256_before": best_before_hash,
+            "best_weight_sha256_after": (
+                sha256_file(adopted_py) if adopted_py.is_file() else ""
+            ),
+            "split_diagnostics": period_split.summary,
+            "created_at": now.isoformat(timespec="seconds"),
+        }
+        decision_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        print(f"[INFO] {_rejection_message(preflight_reason_code)}")
+        print(f"[OK] adoption decision saved: {decision_path}")
+        return
+
+    # 採用ゲート以降は、保存前メモリ重みではなく本番同等再読込後の実効重みだけを使う。
+    weights_map = roundtrip["reloaded_weights"]
+    flow = _evaluate_adoption_flow(
+        baseline_weights=baseline_info.weights_map if baseline_info else None,
+        candidate_weights=weights_map,
+        df_train=df_train,
+        df_valid=df_valid,
+        df_test=df_test,
+        df_res_entries=df_res_entries,
+        df_res_payout=df_res_payout,
+        baseline_ready=baseline_info is not None,
+    )
+    train_s, train_t, train_i, train_r, train_det, train_stab = flow["candidate_train"]
+    valid_s, valid_t, valid_i, valid_r, valid_det, valid_stab = flow["candidate_valid"]
+    _, _, _, _, _, baseline_train_stab = flow["baseline_train"]
+    _, _, _, _, _, baseline_valid_stab = flow["baseline_valid"]
+    baseline_test_stab = (
+        flow["baseline_test"][5] if flow["baseline_test"] is not None else None
+    )
+    if flow["candidate_test"] is not None:
+        test_s, test_t, test_i, test_r, test_det, test_stab = flow["candidate_test"]
+    else:
+        test_s, test_t, test_i, test_r, test_det, test_stab = _empty_eval_result()
+    valid_gate_passed = bool(flow["valid_passed"])
+    test_evaluated = bool(flow["test_evaluated"])
+    test_not_evaluated_reason = str(flow["test_not_evaluated_reason"])
+    adoption_decision = str(flow["decision"])
+    adoption_reasons = list(flow["reasons"])
+    adoption_gates = dict(flow["gates"])
+    candidate_all_frame = (
+        df_feat_all
+        if test_evaluated
+        else pd.concat([df_train, df_valid], ignore_index=True)
+    )
+    candidate_clean_all_frame = df_clean_all
+    if not test_evaluated:
+        candidate_clean_all_frame, _ = _filter_clean_eval_df(
+            candidate_all_frame, df_res_entries, min_rows_per_rid=min_eval_rows
+        )
     all_s, all_t, all_i, all_r, all_det, all_stab = eval_success_and_roi(
-        weights_map, df_feat_all, df_res_entries, df_res_payout
+        weights_map, candidate_all_frame, df_res_entries, df_res_payout
     )
     clean_train_s, clean_train_t, clean_train_i, clean_train_r, clean_train_det, clean_train_stab = eval_success_and_roi(
         weights_map, df_clean_train, df_res_entries, df_res_payout
     )
-    clean_test_s, clean_test_t, clean_test_i, clean_test_r, clean_test_det, clean_test_stab = eval_success_and_roi(
-        weights_map, df_clean_test, df_res_entries, df_res_payout
-    )
+    if test_evaluated:
+        clean_test_s, clean_test_t, clean_test_i, clean_test_r, clean_test_det, clean_test_stab = eval_success_and_roi(
+            weights_map, df_clean_test, df_res_entries, df_res_payout
+        )
+    else:
+        clean_test_s, clean_test_t, clean_test_i, clean_test_r, clean_test_det, clean_test_stab = _empty_eval_result()
     clean_all_s, clean_all_t, clean_all_i, clean_all_r, clean_all_det, clean_all_stab = eval_success_and_roi(
-        weights_map, df_clean_all, df_res_entries, df_res_payout
+        weights_map, candidate_clean_all_frame, df_res_entries, df_res_payout
     )
 
     weakness_min_races = int(CONFIG.get("MIN_WEAKNESS_GROUP_RACES", 20) or 20)
@@ -988,13 +1575,25 @@ def main() -> None:
         df_res_payout=df_res_payout,
         weights_map=weights_map,
     )
-    test_debug = _print_eval_debug_summary(
-        label="TEST",
-        df_target=df_test,
+    valid_debug = _print_eval_debug_summary(
+        label="VALID",
+        df_target=df_valid,
         df_res_entries=df_res_entries,
         df_res_payout=df_res_payout,
         weights_map=weights_map,
     )
+    if test_evaluated:
+        test_debug = _print_eval_debug_summary(
+            label="TEST",
+            df_target=df_test,
+            df_res_entries=df_res_entries,
+            df_res_payout=df_res_payout,
+            weights_map=weights_map,
+        )
+    else:
+        test_debug = _build_eval_debug_summary(
+            df_test.iloc[0:0], df_res_entries, df_res_payout, weights_map
+        )
     all_debug = _print_eval_debug_summary(
         label="ALL",
         df_target=df_feat_all,
@@ -1009,16 +1608,21 @@ def main() -> None:
         df_res_payout=df_res_payout,
         weights_map=weights_map,
     )
-    clean_test_debug = _print_eval_debug_summary(
-        label="CLEAN TEST",
-        df_target=df_clean_test,
-        df_res_entries=df_res_entries,
-        df_res_payout=df_res_payout,
-        weights_map=weights_map,
-    )
+    if test_evaluated:
+        clean_test_debug = _print_eval_debug_summary(
+            label="CLEAN TEST",
+            df_target=df_clean_test,
+            df_res_entries=df_res_entries,
+            df_res_payout=df_res_payout,
+            weights_map=weights_map,
+        )
+    else:
+        clean_test_debug = _build_eval_debug_summary(
+            df_clean_test.iloc[0:0], df_res_entries, df_res_payout, weights_map
+        )
     clean_all_debug = _print_eval_debug_summary(
         label="CLEAN ALL",
-        df_target=df_clean_all,
+        df_target=candidate_clean_all_frame,
         df_res_entries=df_res_entries,
         df_res_payout=df_res_payout,
         weights_map=weights_map,
@@ -1069,9 +1673,10 @@ def main() -> None:
     _print_weakness_preview(clean_condition_analysis_df, "CLEAN_TEST", limit=10)
 
     place_eval_rows = []
-    all_places = sorted([p for p in df_feat_all["place_name"].dropna().astype(str).unique().tolist() if p])
+    evaluation_frame = candidate_all_frame
+    all_places = sorted([p for p in evaluation_frame["place_name"].dropna().astype(str).unique().tolist() if p])
     for place_name in all_places:
-        place_df_all = df_feat_all[df_feat_all["place_name"].astype(str) == place_name].copy()
+        place_df_all = evaluation_frame[evaluation_frame["place_name"].astype(str) == place_name].copy()
         if place_df_all.empty:
             continue
 
@@ -1098,7 +1703,7 @@ def main() -> None:
         [
             (str(place_name or "").strip(), _normalize_surface_name(surface_name))
             for place_name, surface_name in (
-                df_feat_all[["place_name", "surface_name"]]
+                evaluation_frame[["place_name", "surface_name"]]
                 .drop_duplicates()
                 .itertuples(index=False, name=None)
             )
@@ -1107,9 +1712,9 @@ def main() -> None:
         key=lambda x: (x[0], x[1]),
     )
     for place_name, surface_name in all_place_surfaces:
-        place_surface_df_all = df_feat_all[
-            (df_feat_all["place_name"].astype(str) == place_name)
-            & (df_feat_all["surface_name"].map(_normalize_surface_name) == surface_name)
+        place_surface_df_all = evaluation_frame[
+            (evaluation_frame["place_name"].astype(str) == place_name)
+            & (evaluation_frame["surface_name"].map(_normalize_surface_name) == surface_name)
         ].copy()
         if place_surface_df_all.empty:
             continue
@@ -1133,44 +1738,168 @@ def main() -> None:
         )
     place_surface_eval_df = pd.DataFrame(place_surface_eval_rows)
 
-    PY_DIR.mkdir(parents=True, exist_ok=True)
-
-    today_str = datetime.now().strftime("%Y%m%d")
-    out_py = PY_DIR / f"best_feature_weights_{today_str}.py"
-
-    with open(out_py, "w", encoding="utf-8") as f:
-        f.write("# -*- coding: utf-8 -*-\n")
-        f.write('"""自動生成：特徴量重み（TOP5命中率 + 場所別 + 場所×芝ダ 最適化）"""\n\n')
-        f.write("FEATURE_WEIGHTS = {\n")
-        f.write('    "__default__": {\n')
-        for k in FEAT_COLS:
-            f.write(f'        "{k}": {float(weights_map["__default__"].get(k, 0.0)):.10f},\n')
-        f.write("    },\n")
-
-        place_keys = sorted([p for p in weights_map.keys() if isinstance(p, str) and p != "__default__"])
-        for place_name in place_keys:
-            f.write(f'    "{place_name}": {{\n')
-            for k in FEAT_COLS:
-                f.write(f'        "{k}": {float(weights_map[place_name].get(k, 0.0)):.10f},\n')
-            f.write("    },\n")
-
-        f.write("}\n\n")
-        f.write("FEATURE_WEIGHTS_BY_PLACE_SURFACE = {\n")
-        place_surface_keys = sorted(
-            [key for key in weights_map.keys() if isinstance(key, tuple) and len(key) == 2],
-            key=lambda x: (x[0], x[1]),
+    best_weight_sha256_before = (
+        sha256_file(adopted_py) if adopted_py.is_file() else ""
+    )
+    requested_decision = adoption_decision if baseline_info is not None else "rejected"
+    adoption_decision, publish_reasons, adopted_weight_file, best_weight_updated = (
+        _publish_candidate_and_best(
+            candidate_py,
+            adopted_py,
+            weights_map,
+            requested_decision,
+            candidate_already_saved=True,
         )
-        for place_name, surface_name in place_surface_keys:
-            f.write(f"    ({place_name!r}, {surface_name!r}): {{\n")
-            for k in FEAT_COLS:
-                f.write(f'        "{k}": {float(weights_map[(place_name, surface_name)].get(k, 0.0)):.10f},\n')
-            f.write("    },\n")
-        f.write("}\n")
+    )
+    adoption_reasons.extend(publish_reasons)
+    candidate_sha256 = str(roundtrip["candidate_file_sha256"])
 
-    print(f"\n[OK] best weights saved: {out_py}")
+    if best_weight_updated:
+        print(f"[OK] adopted weights saved: {adopted_py}")
+    else:
+        if requested_decision == "adopted" and adopted_py.exists():
+            final_reason_code = "same_day_best_exists"
+        else:
+            final_reason_code = str(flow["reason_code"] or "save_failed")
+        print(f"[INFO] {_rejection_message(final_reason_code)}")
+
+    decision_dir = PROJECT_ROOT / "data" / "output" / "weight_adoption"
+    decision_dir.mkdir(parents=True, exist_ok=True)
+    decision_path = decision_dir / f"decision_{timestamp}.json"
+    baseline_record_path = (
+        baseline_info.path
+        if baseline_info
+        else baseline_selection.path if baseline_selection else None
+    )
+    baseline_record_hash = ""
+    baseline_record_mtime = ""
+    if baseline_record_path is not None and baseline_record_path.is_file():
+        baseline_record_hash = sha256_file(baseline_record_path)
+        baseline_record_mtime = datetime.fromtimestamp(
+            baseline_record_path.stat().st_mtime
+        ).astimezone().isoformat()
+    decision_payload = {
+        "decision": adoption_decision,
+        "adopted": adoption_decision == "adopted",
+        "best_weight_updated": best_weight_updated,
+        "reason": adoption_reasons,
+        "reason_code": (
+            ""
+            if best_weight_updated
+            else final_reason_code
+        ),
+        "reason_codes": (
+            []
+            if best_weight_updated
+            else [final_reason_code]
+        ),
+        "baseline_weight_file": str(baseline_record_path or ""),
+        "baseline_weight_file_name": (
+            baseline_record_path.name if baseline_record_path else ""
+        ),
+        "baseline_weight_modified_at": (
+            baseline_info.modified_at if baseline_info else baseline_record_mtime
+        ),
+        "baseline_weight_sha256": (
+            baseline_info.sha256 if baseline_info else baseline_record_hash
+        ),
+        "baseline_acquisition_method": (
+            baseline_info.method
+            if baseline_info
+            else baseline_selection.method if baseline_selection else ""
+        ),
+        "baseline_common_weight_count": (
+            baseline_info.common_weight_count if baseline_info else 0
+        ),
+        "baseline_common_group_count": (
+            baseline_info.common_group_count if baseline_info else 0
+        ),
+        "baseline_place_surface_group_count": (
+            baseline_info.place_surface_group_count if baseline_info else 0
+        ),
+        "baseline_production_file": (
+            str(baseline_info.production_path) if baseline_info else ""
+        ),
+        "baseline_production_sha256": (
+            baseline_info.production_sha256 if baseline_info else ""
+        ),
+        "baseline_production_weights_match": (
+            baseline_info.production_weights_match if baseline_info else False
+        ),
+        "baseline_load_error": baseline_error,
+        "candidate_weight_file": str(candidate_py.resolve()),
+        "candidate_weight_sha256": candidate_sha256,
+        "memory_candidate_normalized_sha256": roundtrip[
+            "memory_candidate_normalized_sha256"
+        ],
+        "reloaded_candidate_normalized_sha256": roundtrip[
+            "reloaded_candidate_normalized_sha256"
+        ],
+        "baseline_normalized_sha256": roundtrip[
+            "baseline_normalized_sha256"
+        ],
+        "candidate_roundtrip_match": roundtrip[
+            "candidate_roundtrip_match"
+        ],
+        "differing_group_count": roundtrip["differing_group_count"],
+        "differing_feature_count": roundtrip["differing_feature_count"],
+        "weight_differences_top100": roundtrip[
+            "weight_differences_top100"
+        ],
+        "max_absolute_difference": roundtrip[
+            "max_absolute_difference"
+        ],
+        "keys_missing_after_save": roundtrip["keys_missing_after_save"],
+        "keys_added_on_reload": roundtrip["keys_added_on_reload"],
+        "adopted_weight_file": adopted_weight_file,
+        "best_weight_file": str(adopted_py),
+        "best_weight_sha256_before": best_weight_sha256_before,
+        "best_weight_sha256_after": (
+            sha256_file(adopted_py) if adopted_py.is_file() else ""
+        ),
+        "train_period": {
+            "start": train_start_date,
+            "end": train_end_date,
+            **period_split.summary["train"],
+        },
+        "valid_period": {
+            "start": valid_start_date,
+            "end": valid_end_date,
+            **period_split.summary["valid"],
+        },
+        "test_period": {
+            "start": test_start_date,
+            "end": test_end_date,
+            **period_split.summary["test"],
+        },
+        "baseline_metrics": {
+            "train": baseline_train_stab,
+            "valid": baseline_valid_stab,
+            "test": baseline_test_stab,
+        },
+        "candidate_metrics": {
+            "train": train_stab,
+            "valid": valid_stab,
+            "test": test_stab if valid_gate_passed else None,
+        },
+        "valid_gate_passed": valid_gate_passed,
+        "test_evaluated": test_evaluated,
+        "test_not_evaluated_reason": test_not_evaluated_reason,
+        "gate_results": adoption_gates,
+        "split_diagnostics": period_split.summary,
+        "created_at": now.isoformat(timespec="seconds"),
+    }
+    decision_path.write_text(
+        json.dumps(decision_payload, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    print(f"[OK] adoption decision saved: {decision_path}")
 
     EXCEL_DIR.mkdir(parents=True, exist_ok=True)
-    out_xlsx = EXCEL_DIR / f"success_report_top5hit_{today_str}.xlsx"
+    if args.trial_iterations > 0 or args.trial_max_files_per_period > 0:
+        out_xlsx = EXCEL_DIR / f"success_report_top5hit_trial_{timestamp}.xlsx"
+    else:
+        out_xlsx = EXCEL_DIR / f"success_report_top5hit_{today_str}.xlsx"
 
     meta_map = df_meta.set_index("rid_str").to_dict(orient="index")
     rows = []
@@ -1199,6 +1928,7 @@ def main() -> None:
     debug_summary_df = pd.DataFrame(
         [
             {"mode": "TRAIN", **train_debug},
+            {"mode": "VALID", **valid_debug},
             {"mode": "TEST", **test_debug},
             {"mode": "ALL", **all_debug},
             {"mode": "CLEAN_TRAIN", **clean_train_debug},
@@ -1237,6 +1967,7 @@ def main() -> None:
 
     eval_summary_rows = [
         ("TRAIN", train_s, train_t, train_stab),
+        ("VALID", valid_s, valid_t, valid_stab),
         ("TEST", test_s, test_t, test_stab),
         ("ALL", all_s, all_t, all_stab),
         ("CLEAN_TRAIN", clean_train_s, clean_train_t, clean_train_stab),
