@@ -426,9 +426,19 @@ FEAT_COLS = [
     "dl_rank_score",
 ]
 
-# Phase 3・4・10: レース内尺度統一後に5ブロックへまとめる候補モデル。
-# Phase 11 の未来期間ゲート通過後は five_block を本番既定値とし、環境変数で旧モデルへ戻せる。
-SCORING_MODEL_VERSION = os.getenv("KEIBA_SCORING_MODEL_VERSION", "five_block").strip().lower()
+# 本番最終順位モデル。互換名 legacy は旧重みではなく、外部から読み込む現行の
+# best_feature_weights_YYYYMMDD.py（101特徴量の新best重みモデル）を指す。
+# five_block は比較・緊急切戻し用として環境変数で明示選択できる。
+SCORING_MODEL_ALLOWED_VERSIONS = {"legacy", "five_block"}
+_scoring_model_requested = os.getenv("KEIBA_SCORING_MODEL_VERSION", "legacy").strip().lower()
+if _scoring_model_requested not in SCORING_MODEL_ALLOWED_VERSIONS:
+    print(
+        "[WARN] KEIBA_SCORING_MODEL_VERSION="
+        f"{_scoring_model_requested!r} は無効です。安全側の新best重みモデル（legacy）へ戻します"
+    )
+    SCORING_MODEL_VERSION = "legacy"
+else:
+    SCORING_MODEL_VERSION = _scoring_model_requested
 
 # five_block専用ルールはTRAINデータ不足で採用ゲート未通過のため、本番では
 # 既存条件を維持する。検証済みルールがadoptedになった場合だけversionと閾値を更新する。
@@ -860,8 +870,12 @@ BUILTIN_FEATURE_WEIGHTS_BY_PLACE_SURFACE = {
 }
 
 try:
+    ACTIVE_FEATURE_WEIGHTS_FILE: Optional[str] = None
     _ext_fw, _ext_fw_by_ps = _load_external_feature_weights(str(PY_DIR))
     if _ext_fw is not None:
+        _active_weights_candidate = _find_latest_weights_module(str(PY_DIR))
+        if _active_weights_candidate is not None:
+            ACTIVE_FEATURE_WEIGHTS_FILE = Path(_active_weights_candidate[1]).name
         FEATURE_WEIGHTS = _merge_feature_weights(FEATURE_WEIGHTS, _ext_fw)
     FEATURE_WEIGHTS = _enforce_empirical_weight_signs(FEATURE_WEIGHTS)
     if _ext_fw_by_ps is not None:
@@ -873,6 +887,26 @@ try:
     FEATURE_WEIGHTS_BY_PLACE_SURFACE = _enforce_empirical_weight_signs(FEATURE_WEIGHTS_BY_PLACE_SURFACE)
 except Exception as e:
     print(f"[WARN] 外部重み読込時にエラーが発生しました: {e}")
+
+
+def print_scoring_model_status() -> None:
+    """本番最終順位へ使うモデルと参照スコアの状態を端末へ表示する。"""
+
+    if SCORING_MODEL_VERSION == "legacy":
+        selected = "新best重みモデル（legacy）"
+        reference = "5ブロックモデル=参考列として計算"
+        overwrite = "OFF"
+    else:
+        selected = "5ブロックモデル（five_block）"
+        reference = "新best重みモデル=比較用列として保持"
+        overwrite = "ON"
+    loaded_file = ACTIVE_FEATURE_WEIGHTS_FILE or "なし（組み込み重み）"
+    print("[INFO] ===== 本番ランキングモデル =====")
+    print(f"[INFO] SCORING_MODEL_VERSION={SCORING_MODEL_VERSION}")
+    print(f"[INFO] 本番最終順位モデル={selected}")
+    print(f"[INFO] 読込重みファイル={loaded_file}")
+    print(f"[INFO] {reference}")
+    print(f"[INFO] 最終total/score/rankへの5ブロック上書き={overwrite}")
 
 
 def print_active_feature_weights() -> None:

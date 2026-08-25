@@ -81,6 +81,7 @@ from keibayosou_config import (
     SCORING_FEATURE_BLOCKS,
     SCORING_MODEL_VERSION,
     FIVE_BLOCK_BET_RULE,
+    print_scoring_model_status,
 )
 from keibayosou_features import (
     _normalize_rid_series,
@@ -237,11 +238,19 @@ def compute_scores_with_pipeline_logic(
     )
     out["score"] = out.groupby("rid_str")["total"].transform(normalize_score).round(2)
     out["rank"] = out.groupby("rid_str")["score"].rank("dense", ascending=False).astype(int)
+
+    # legacy は旧重みではなく、現行の外部best重みモデルを指す互換列名。
+    # モデル切替後も比較可能なよう、新bestの値を明示列と互換列の両方へ常時保存する。
+    out["best_weight_total"] = out["total"]
+    out["best_weight_score"] = out["score"]
+    out["best_weight_rank"] = out["rank"]
+    out["legacy_total"] = out["best_weight_total"]
+    out["legacy_score"] = out["best_weight_score"]
+    out["legacy_rank"] = out["best_weight_rank"]
+
+    # 5ブロックは常に計算して参照列へ残し、明示選択時だけ最終順位を上書きする。
     out = compute_five_block_scores(out)
     if SCORING_MODEL_VERSION == "five_block":
-        out["legacy_total"] = out["total"]
-        out["legacy_score"] = out["score"]
-        out["legacy_rank"] = out["rank"]
         out["total"] = out["five_block_raw_score"]
         out["score"] = out["five_block_score"]
         out["rank"] = out["five_block_rank"]
@@ -1798,6 +1807,8 @@ def run_pipeline(
     RACEDAY: str | None = None,
     DL_RANK_DF: Optional[pd.DataFrame] = None,
 ) -> None:
+    print_scoring_model_status()
+
     # 各種マスタ読み込み
     levels_df = load_race_levels(LEVELS_XL, raceday=str(RACEDAY or ""))
     base_time_df = load_base_time(BASE_TIME)
@@ -1828,6 +1839,15 @@ def run_pipeline(
         for c in [
             "score",
             "rank",
+            "best_weight_total",
+            "best_weight_score",
+            "best_weight_rank",
+            "legacy_total",
+            "legacy_score",
+            "legacy_rank",
+            "five_block_raw_score",
+            "five_block_score",
+            "five_block_rank",
             "favorite_risk",
             "extra_penalty",
             "rest_dist_risk",
@@ -1975,6 +1995,15 @@ def run_pipeline(
     _cols_to_add = [
         "score",
         "rank",
+        "best_weight_total",
+        "best_weight_score",
+        "best_weight_rank",
+        "legacy_total",
+        "legacy_score",
+        "legacy_rank",
+        "five_block_raw_score",
+        "five_block_score",
+        "five_block_rank",
         "favorite_risk",
         "extra_penalty",
         "rest_dist_risk",
