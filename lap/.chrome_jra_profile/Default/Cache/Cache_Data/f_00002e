@@ -1,0 +1,979 @@
+if (typeof Jst == "undefined") {
+	var Jst = {};
+}
+Jst.jraHpSite = {
+	playerWindow: {},
+	playerWindowName: 'subwin',
+	hostsSpSite: ["sp.jra.jp", "jrahp-spken.turf.jp"],
+	qsParamNames: {
+		eleType: "videotype",	// Player Race Type
+		eleWidth: "width",		// Player Width
+		eleHeight: "height",		// Player Height
+		elePcUrl: "pcurl",		// PC Browser using movie URL
+		eleAndUrl: "andurl",		// Android 2.x/3.x device using movie URL
+		eleIosUrl: "iosurl",		// iOS device using movie URL
+		eleAnd4Url: "and4url",	// Android 4.x device using movie URL
+		eleThumbUrl: "thumburl",	// Thumbnail image URL
+		eleVersion: "version"
+	},
+	content: {
+		baseUrl: {
+			defPcUrl: "//jra-fms.hls.wseod.stream.ne.jp/www11/jra-fms/_definst_/mp4:",
+			defAndUrl: "//jra-fms.hls.wseod.stream.ne.jp/www11/jra-fms/_definst_/mp4:",
+			defIosUrl: "//jra-fms.hls.wseod.stream.ne.jp/www11/jra-fms/_definst_/mp4:",
+			defAnd4Url: "//jra-fms.hls.wseod.stream.ne.jp/www11/jra-fms/_definst_/mp4:",
+			defPcHlsUrl: "//jra-fms.hls.wseod.stream.ne.jp/www11/jra-fms/_definst_/mp4:"
+		}
+	},
+	isSpSite: function (url) {
+		'use strict'; // Function-level strict mode syntax
+		var res = false;
+		if (typeof url === "undefined") {
+			return res;
+		}
+		var hosts = this.hostsSpSite;
+		var hostsCount = hosts.length;
+		for (var i = 0; i < hostsCount; i++) {
+			if (url.indexOf(hosts[i]) !== -1) {
+				res = true;
+				break;
+			}
+		}
+		i = null;
+		url = null;
+		hosts = null;
+		hostsCount = null;
+		return res;
+	},
+	isJraDbPage: function (url) { /* 「(通称)動的ページ」かどうかの判定 */
+		'use strict'; // Function-level strict mode syntax
+		var res = false;
+		if (url.indexOf('/JRADB/') !== -1) {
+			res = true;
+		}
+		return res;
+	},
+	dispPlayerWindow: function (playerUrl) {
+		'use strict'; // Function-level strict mode syntax
+		if (!this.playerWindow) {
+			this.playerWindow.close();
+			this.playerWindow = {};
+		}
+
+		if (jst.common.env.os.name == 'Android') {
+			this.playerWindow = window.open('', this.playerWindowName, 'scrollbars=0,resizable=0,fullscreen=1');
+		} else {
+			this.playerWindow = window.open('', this.playerWindowName, 'scrollbars=0,resizable=0,width=480,height=270');
+		}
+
+		if (playerUrl) {
+			this.playerWindow.location.href = playerUrl;
+		}
+		playerUrl = null;
+
+		if (navigator.appVersion.charAt(0) >= 3) {
+			this.playerWindow.focus();
+		}
+	},
+	isSupported: function () {
+		'use strict'; // Function-level strict mode syntax
+		var res = true;
+		/*
+				Windows Phone 非対応
+				Android 2.1以下　非対応
+				ガラケー非対応(BlackBerryの2G端末も)
+				上記以外は全て対応扱い。
+		*/
+
+		if (jst.common.env.os.name == 'Windows Phone') {
+			res = false;
+		}
+		if (jst.common.env.os.name == 'Android') {
+			if (jst.common.util.checkVersion('2.2.0', jst.common.env.os.version) === -1) {/* Android2.2未満(＝Android2.1.x以前)はFlashもHTML5-VIDEOも対応してないので非対応とする */
+				res = false;
+			}
+		}
+		if (jst.common.env.os.name == 'BlackBerry') {
+			res = false;
+		}
+		if (jst.common.env.os.name == 'DoCoMo') {
+			res = false;
+		}
+		if (jst.common.env.os.name == 'KDDI') {
+			res = false;
+		}
+		if (jst.common.env.os.name == 'SoftBank') {
+			res = false;
+		}
+
+		return res;
+	},
+	convPcHlsJsUrl: function (url) {
+
+		var res = url;
+		url = null;
+		if (res.match(/jra_seiseki/)) {
+			var regExp = new RegExp("jra_seiseki", "g");
+			res = res.replace(regExp, "pc_seiseki");
+		}
+		regExp = null;
+		return res;
+	},
+	convSmartPhoneUrl: function (ver, url) {
+		// 1=AMS-HLS, 2=Wowza-HLS
+		var res = url;
+		if (ver == 2) {
+			res = url.replace(".mp4.m3u8", ".mp4");
+		} else {
+			res = url.replace("/index.m3u8", ".mp4");
+		}
+		ver = null;
+		url = null;
+
+		return res;
+	},
+	convDefUrl: function (ver) {
+		if (ver == 2) {
+			var base = this.content.baseUrl;
+			base.defIosUrl = base.defPcHlsUrl;
+			base.defAnd4Url = base.defPcHlsUrl;
+			base = null;
+		}
+		ver = null;
+	},
+	makeUrl: function (argType, argMovieUrl) {
+
+		var movieUrl = argMovieUrl;
+		var base = this.content.baseUrl;
+
+		switch (argType) {
+			case 1:
+				movieUrl = base.defPcUrl + argMovieUrl + '/playlist.m3u8';
+				break;
+
+			case 2:
+			case 3:
+				movieUrl = base.defPcHlsUrl + argMovieUrl + '/playlist.m3u8';
+				break;
+
+			case 4:
+				movieUrl = base.defAnd4Url + argMovieUrl + '/playlist.m3u8';
+				break;
+
+			default:
+				break;
+		}
+		base = null;
+		return movieUrl;
+
+	},
+	dispError: function () {
+		var doc = document.getElementById("strobeMediaPlayback");
+		doc.innerHTML = "申し訳ありません、システムエラーが発生しています。しばらくたってから再度お試しください。";
+		doc = null;
+	},
+	createContentUrl: function (qs) {
+
+		if (Jst.jraHpSite.isSupported() === false) {
+			/* サイト自体の対象外環境 */
+			setErrorStyle("本端末では動画を再生できません。");
+		}
+		//		if( Jst.player.isSupported() === false ){
+		/* プレイヤーの対象外環境 */
+		//			setErrorStyle("本端末では動画を再生できません。");
+		//		}
+
+		var qParams = new Array;
+		qParams = jst.common.url.parseQueryString(qs);
+		var qsParamNames = this.qsParamNames;
+
+		var ver = qParams[qsParamNames.eleVersion];
+		this.convDefUrl(ver); // 環境別のデフォルトのURLの置き換え（スマホ用）
+
+		var contentType = qParams[qsParamNames.eleType];
+		if (!contentType || (contentType <= 0 || contentType >= 5)) {
+			this.dispError();
+			return false;
+		}
+
+		var moviePath = '';
+		var movieBaseUrl = '';
+		var flgConvSmartPhoneUrl = false;
+		var flgConvPcHlsUrlUrl = false;
+		var playerWindowType = '';
+		var modeJraHpEnvType = '';
+
+		if (jst.common.env.os.name == 'iOS') {
+			// iOSのデフォルト値
+			movieBaseUrl = this.content.baseUrl.defIosUrl;
+			moviePath = qParams[qsParamNames.eleIosUrl];
+			flgConvSmartPhoneUrl = true;
+			flgConvPcHlsUrlUrl = false;
+			playerWindowType = 'native';
+			modeJraHpEnvType = 4;
+			// 以下、必要であれば、ブラウザやバージョン別に差分のみ適用
+
+			// iOS-Chromeだと、元のページ以前に戻れなくなる（戻ると動画が表示される）ので、対策として、VideoだけのHTML(５）に飛ばす
+			if (jst.common.env.browser.name == 'Chrome') {
+				playerWindowType = 'self';
+				modeJraHpEnvType = 5;
+			} else if (jst.common.env.browser.name == 'Safari') {
+				// iOS13-Safariもネイティブプレイヤーがうまく表示されないので、同様に対処
+				ua = window.navigator.userAgent;
+				if (ua.indexOf('OS 13') !== -1) {
+					playerWindowType = 'self';
+					modeJraHpEnvType = 5;
+				}
+			}
+
+		} else if (jst.common.env.os.name == 'Android') {
+			// Androidのデフォルト設定
+			movieBaseUrl = this.content.baseUrl.defAnd4Url;
+			moviePath = qParams[qsParamNames.eleAnd4Url];
+			flgConvSmartPhoneUrl = true;
+			flgConvPcHlsUrlUrl = false;
+			playerWindowType = 'self';
+			modeJraHpEnvType = 4;
+			/* 以下、デフォルトと異なる環境のみ、値を差し替え */
+
+			if (jst.common.env.hls_js.isReady === true) {
+				/* HLS.jsがOKなら、デフォルト値のまま */
+			} else if (jst.common.env.flash_player.isReady === true) {
+				if (jst.common.util.checkVersion('10.1.106', jst.common.env.flash_player.version) >= 0) {/* 視聴環境のバージョンが指定以上ならFlash */
+					movieBaseUrl = this.content.baseUrl.defAndUrl;
+					moviePath = qParams[qsParamNames.eleAndUrl];
+					flgConvSmartPhoneUrl = false;
+					modeJraHpEnvType = 1;
+				} else {
+					/* ここまで落ちてきた環境は、ネイティブのプレイヤーが拾ってくれることを期待して勝手にAタグにする */
+					playerWindowType = 'native';
+				}
+			} else {
+				/* ここまで落ちてきた環境は、ネイティブのプレイヤーが拾ってくれることを期待して勝手にAタグにする */
+				playerWindowType = 'native';
+			}
+		} else {
+			// PCのデフォルト設定
+			movieBaseUrl = this.content.baseUrl.defPcUrl;
+			moviePath = qParams[qsParamNames.elePcUrl];
+			flgConvSmartPhoneUrl = false;
+			flgConvPcHlsUrlUrl = true;
+			playerWindowType = 'popup';
+			modeJraHpEnvType = 2;
+			/* 以下、デフォルトと異なる環境のみ、値を差し替え */
+
+			if (jst.common.env.browser.name == 'Internet Explorer') {
+				var diffIe11 = jst.common.util.checkVersion('11', jst.common.env.browser.version);
+				if (diffIe11 === -1) { /* IE11未満(=IE10以前)であれば、Flash */
+					modeJraHpEnvType = 1; // 1=PCのFlash用の設定
+				} else if (diffIe11 === 0) { /* IE11で、Windows7(=NT6.1)以下であれば、Flash */
+					if (jst.common.env.os.name == 'Windows') {
+						var diffWin7 = jst.common.util.checkVersion('6.1', jst.common.env.os.version);
+						if (diffWin7 === -1 || diffWin7 === 0) {
+							modeJraHpEnvType = 1; // 1=PCのFlash用の設定
+						}
+					}
+				}
+				diffIe11 = null;
+			} else if (jst.common.env.browser.name == 'Safari') {
+				modeJraHpEnvType = 3; // 3=PCのSafari用の設定
+			} else if (jst.common.env.hls_js.isReady !== true) {
+				flgConvPcHlsUrlUrl = false; // FlashHLSを使うので、変換不要
+				modeJraHpEnvType = 1; // 1=FlashHlsで再生
+			}
+
+		}
+		if (!moviePath) {
+			this.dispError();
+			return false;
+		}
+		if (flgConvSmartPhoneUrl) {
+			moviePath = this.convSmartPhoneUrl(ver, moviePath);
+		}
+		if (flgConvPcHlsUrlUrl) {
+			moviePath = this.convPcHlsJsUrl(moviePath);
+		}
+
+		/*	modeJraHpEnvType : 1=Flash,2=PcNormal,3=PcSafari,4=Android,5=inline100%*/
+		var movieUrl = this.makeUrl(modeJraHpEnvType, moviePath);
+		var playerUrl = jst.playerButton.wow.player.url + '?movie=' + moviePath + '&type=2&thum=&id=' + modeJraHpEnvType;
+		if (modeJraHpEnvType == 5) {
+			movieUrl = moviePath + '/playlist.m3u8';
+			playerUrl = jst.playerButton.wow.player.url2 + '?movie=' + movieUrl + '';
+		}
+
+		return { 'player': playerUrl, 'movie': movieUrl, 'contentType': contentType, 'playerWindowType': playerWindowType };
+
+	}
+};
+
+Jst.playerButton = {
+	conf: [
+		{},
+		/* patrolvideo */
+		{
+			pc: {
+				img: { normal: "./img/se_video.gif", hover: "./img/se_video2.gif", width: 148, height: 23 },
+				a: { txt: '裁決パトロール', 'class': 'btn-def btn-sm btn-block' }
+			},
+			sp: {
+				img: { normal: "./img/patrol_video.gif", hover: "", width: 37, height: 30 },
+				a: { txt: '裁決パトロール', 'class': 'btn-def btn-sm btn-block' }
+			}
+		},
+		/* allpatrol */
+		{
+			pc: {
+				img: { normal: "./img/se_pat.gif", hover: "./img/se_pat2.gif", width: 148, height: 23 },
+				a: { txt: '全周パトロール', 'class': 'btn-def btn-sm btn-block' }
+			},
+			sp: {
+				img: { normal: "./img/allpatrol.gif", hover: "", widht: 37, height: 30 },
+				a: { txt: '全周パトロール', 'class': 'btn-def btn-sm btn-block' }
+			}
+		},
+		/* interviewvideo */
+		{
+			pc: {
+				img: { normal: "./img/se_intv.gif", hover: "./img/se_intv2.gif", width: 138, height: 23 },
+				a: { txt: '騎手インタビュー', 'class': 'btn-def btn-sm btn-block' }
+			},
+			sp: {
+				img: { normal: "./img/interview_video.gif", hover: "", width: 37, height: 30 },
+				a: { txt: '騎手インタビュー', 'class': 'btn-def btn-sm btn-block' }
+			}
+		},
+		/* racevideo */
+		{
+			pc: {
+				img: { normal: "./img/se_race1.gif", hover: "./img/se_race12.gif", width: 100, height: 16 },
+				a: { txt: 'PLAY', 'class': 'btn-def btn-sm green btn-block' }
+			},
+			sp: {
+				img: { normal: "./img/Race_video.gif", hover: "", width: 37, height: 30 },
+				a: { txt: 'PLAY', 'class': 'btn-def btn-sm green btn-block' }
+			}
+		}
+	],
+	wow: {
+		player: {
+			url: '//web-cache.stream.ne.jp/web/jra/onetag2020/subwindow.html',
+			url2: '//web-cache.stream.ne.jp/web/jra/onetag2020/playerWindow.html',
+			windowName: 'subwin'
+		},
+		setIframeId: function () {
+			'use strict'; // Function-level strict mode syntax
+			var iframes = document.getElementsByTagName('iframe');
+			var iframeId = '';
+			var iframeIds = new Array();
+			/* iframeのURLが旧ボタン用のものがあれば、IDを振り出す */
+			var url = '';
+			for (var i = 0; i < iframes.length; i++) {
+				url = iframes[i].src;
+				if (url.indexOf('stream.ne.jp') !== -1 && url.indexOf('onetag.html') !== -1) {
+					iframes[i].setAttribute('style', 'overflow:hidden;');
+					iframes[i].setAttribute('scrolling', 'no');
+					if (url.indexOf('&ifid=') == -1) {
+						iframeId = 'jst_playerButton_' + Jst.common.util.generateUuid();
+						iframeIds.push(iframeId);
+						//						url += '&ifid='+iframeId;
+						iframes[i].setAttribute('id', iframeId);
+						iframeId = '';
+						//						iframes[i].src = url;
+
+					}
+				}
+				url = '';
+			}
+			url = null;
+			iframes = null;
+
+			var url = '';
+			var queryString = '';
+			for (var i = 0; i < iframeIds.length; i++) {
+				url = document.getElementById(iframeIds[i]).src;
+				queryString = Jst.common.url.splitQueryString(url);
+				this.replaceIframe2Link(iframeIds[i], queryString);
+				queryString = '';
+			}
+			queryString = null;
+			iframeIds = null;
+
+		},
+		replaceIframe2Link: function (ifid, queryString) {
+			'use strict'; // Function-level strict mode syntax
+			var contentUrl = jst.jraHpSite.createContentUrl(queryString);
+
+			var playerUrl = contentUrl.player;
+			var movieUrl = contentUrl.movie;
+			var contentType = contentUrl.contentType;
+			var playerWindowType = contentUrl.playerWindowType;
+
+			var playerButton = jst.playerButton.wow.create_2018(contentType, movieUrl, playerUrl, playerWindowType);
+			this.replaceIframe2Button(ifid, playerButton);
+			ifid = null;
+			playerButton = null;
+		},
+		searchIframeBySrc: function (id) {
+			'use strict'; // Function-level strict mode syntax
+			if (!id) {
+				return false;
+			}
+			var iframe = {};
+			iframe = document.getElementById(id);
+			return iframe;
+		},
+		replaceIframe2Button: function (id, button) {
+			'use strict'; // Function-level strict mode syntax
+
+			var iframe = this.searchIframeBySrc(id);
+			id = null;
+			if (typeof iframe !== 'object') {
+				iframe = null;
+				return false;
+			}
+
+			/* ボタンオブジェクトの作成 */
+
+			iframe.parentNode.insertBefore(button, iframe.nextSibling);
+			/* 表示位置の特定のため、必ず、iframeを消す前に、iframeタグのすぐ後ろにボタンを作る */
+			button = null;
+
+			/* scriptとiframeの削除 */
+			if (iframe.previousSibling.tagName == 'SCRIPT') {
+				if (iframe.parentNode.removeChild(iframe.previousSibling) === 'undefined') {
+				}
+			}
+			if (iframe.parentNode.removeChild(iframe) === 'undefined') {
+			}
+			iframe = null;
+
+		},
+		create_2018: function (contentType, movieUrl, playerUrl, playerWindowType) {
+			'use strict'; // Function-level strict mode syntax
+			var res = {};
+			var siteType = 'pc';
+			if (jst.jraHpSite.isSpSite(document.referrer) == true) {
+				siteType = 'sp';
+			}
+			var conf = jst.playerButton.conf[contentType][siteType].a;
+
+			/* aタグ作る */
+			var objA = document.createElement('a');
+			var objA_attrs = {};
+			if (playerWindowType == 'popup') {/* ポップアップ表示用（別ウィンドウ(別タブ)で表示する形式) */
+				objA_attrs = {
+					'target': this.player.windowName,
+					'href': "#",
+					'onClick': String("jst.jraHpSite.dispPlayerWindow('" + playerUrl + "'); return false;"),
+					'jraHpPlayerWindow': 'popup' /* 出力状態の確認のために追加。挙動制御等には使わない */
+				};
+			} else if (playerWindowType == 'self') {/* ページ遷移用（Aタグのhrefで遷移し、プレイヤーを最大表示する形式) */
+				objA_attrs = {
+					'target': '_top',
+					'href': playerUrl,
+					'jraHpPlayerWindow': 'self' /* 出力状態の確認のために追加。挙動制御等には使わない */
+				};
+			} else if (playerWindowType == 'native') {/* Nativeプレイヤー用（Aタグのhrefでm3u8を指定する形式) */
+				objA_attrs = {
+					'target': "_parent",
+					'href': movieUrl,
+					'type': 'application/vnd.apple.mpegURL',
+					'jraHpPlayerWindow': 'native' /* 出力状態の確認のために追加。挙動制御等には使わない */
+				};
+			} else {
+				/* error */
+				return false;
+			}
+			playerUrl = null;
+			movieUrl = null;
+
+			objA_attrs['class'] = conf['class'];
+			objA_attrs['jraHpMovieType'] = contentType;
+			objA_attrs['jraHpPlayerButton'] = '2018';
+
+			for (var key in objA_attrs) {
+				objA.setAttribute(key, objA_attrs[key]);
+			}
+			key = null;
+			objA_attrs = null;
+
+			/* iタグ作る */
+			var objI = document.createElement('i');
+			var objI_attrs = {
+				'class': 'fa fa-video-camera',
+				'aria-hidden': 'true',
+				'jraHpMovieType': contentType
+			};
+			for (var key in objI_attrs) {
+				objI.setAttribute(key, objI_attrs[key]);
+			}
+			key = null;
+			objI_attrs = null;
+
+			/* aの中に各素材を入れて、ボタンの完成 */
+			objA.appendChild(objI);
+			objA.innerHTML += conf['txt'];
+			objI = null;
+
+			/* 裁決パトロール、全周パトロール、騎手インタビューの場合は、liが必要なので追加 */
+			var objX = {};
+			if (contentType >= 1 && contentType <= 3) {
+				objX = document.createElement('li');
+				objX.setAttribute('jraHpMovieType', contentType); /* 出力状態の確認のために追加。挙動制御等には使わない */
+				objX.appendChild(objA);
+			} else {
+				objX = objA;
+			}
+			contentType = null;
+			objA = null;
+
+			return objX;
+
+		},
+		create_2016: function (contentType, movieUrl, playerUrl, mode) {
+			'use strict'; // Function-level strict mode syntax
+			var objA_attrs = {};
+			if (mode == 'popup') {/* ポップアップ表示用（別ウィンドウ(別タブ)で表示する形式) */
+				objA_attrs = {
+					'target': playerWindowName,
+					'onClick': String("jst.jraHpSite.dispPlayerWindow('" + playerUrl + "'); return false;"),
+					'jraHpPlayerWindow': 'popup'
+				};
+			} else if (mode == 'self') {/* ページ遷移用（Aタグのhrefで遷移し、プレイヤーを最大表示する形式) */
+				objA_attrs = {
+					'target': '_top',
+					'href': playerUrl,
+					'jraHpPlayerWindow': 'self'
+				};
+			} else if (mode == 'native') {/* Nativeプレイヤー用（Aタグのhrefでm3u8を指定する形式) */
+				objA_attrs = {
+					'target': "_parent",
+					'href': movieUrl,
+					'type': 'application/vnd.apple.mpegURL',
+					'jraHpPlayerWindow': 'native'
+				};
+			} else {
+				/* error */
+				return false;
+			}
+			movieUrl = null;
+			playerUrl = null;
+			mode = null;
+
+			objA_attrs['jraHpPlayerButton'] = '2016';
+
+			/* Aタグ */
+			var objA = jst.common.util.createElm('a', objA_attrs);
+			objA_attrs = null;
+
+			var siteType = 'pc';
+			if (jst.jraHpSite.isSpSite(document.referrer) == true) {
+				siteType = 'sp';
+			}
+			var conf = jst.playerButton.conf[contentType][siteType].img;
+			contentType = null;
+
+			var objImg_attrs = {
+				src: conf.normal,
+				width: conf.width,
+				height: conf.height,
+				border: 0
+			};
+			if (siteType == 'pc') {
+				objImg_attrs.onMouseOver = "this.src='" + conf.hover + "';";
+				objImg_attrs.onMouseOut = "this.src='" + conf.normal + "';";
+			}
+			siteType = null;
+
+			/* IMGタグ */
+			var objI = jst.common.util.createElm('img', objImg_attrs);
+			objImg_attrs = null;
+			objA.appendChild(objI);
+			objI = null;
+
+			return objA;
+
+		},
+	}
+};
+
+/* 汎用 */
+Jst.common = {
+	env: {
+		scriptBase: {
+			url: '',
+			get: function () {
+				var myUrl = '';
+				if (typeof document.currentScript !== 'undefined') {
+					if (typeof document.currentScript.src !== 'undefined') {
+						myUrl = document.currentScript.src;
+					}
+				}
+				if (myUrl == '') {
+					var elmScripts = document.getElementsByTagName('script');
+					if (typeof elmScripts !== 'undefined') {
+						if ((-1 in elmScripts) === true) {
+							if (('src' in elmScripts[-1]) === true) {
+								myUrl = elmScripts[-1].src;
+							}
+						}
+					}
+				}
+				this.url = myUrl.replace(/([^\/]+)$/, '');
+			},
+		},
+		getNameVersion: function (ua, patterns) {
+			if (!ua) {
+				ua = window.navigator.userAgent;
+			}
+			var settings = patterns;
+			var settingsLength = settings.length;
+
+			/* settingsの中の上から順に判定。先勝ちにする */
+			var contains = [];
+			var containsLength = [];
+			var name = '';
+			var version = '';
+			var verTmp = '';
+			for (var i = 0; i < settingsLength; i++) {
+				contains = settings[i].contains;
+				containsLength = contains.length;
+				for (var j = 0; j < containsLength; j++) {
+					verTmp = [];
+					verTmp = ua.match(contains[j]);
+					if (verTmp === null) {
+						continue;
+					}
+					name = settings[i].name;
+					if ((1 in verTmp) === true) {
+						version = verTmp[1];
+					}
+					break;
+				}
+				contains = [];
+				containsLength = null;
+				if (verTmp !== null) {
+					break;
+				}
+			}
+			ua = null;
+			settings = null;
+			settingsLength = null;
+
+			return { 'name': name, 'version': version };
+		},
+		browser: {
+			name: undefined,
+			version: undefined,
+			patterns: [
+				{ name: 'Edge', contains: [/Edge\/([0-9\.]+)/, /EdgA\/([0-9\.]+)/, /EdgiOS\/([0-9\.]+)/] }, /* Internet Explorer doesn't put its name in the BrowserName/VersionNumber format */
+				{ name: 'Internet Explorer', contains: [/; MSIE ([0-9\.]+);/, /Trident\/.* rv:([0-9\.]+)/] }, /* Internet Explorer doesn't put its name in the BrowserName/VersionNumber format */
+				{ name: 'Opera', contains: [/OPR\/([0-9\.]+)/, /OPiOS\/([0-9\.]+)/, /Opera Mini\/([0-9\.]+)/, /Opera\/([0-9\.]+)/] }, /* exists "Chrome" "Safari" */ /*[1] Opera 15+ (Blink-based engine), [2] Opera 12- (Presto-based engine) */
+				/*					{ name:'Chromium', contain:[/Chromium\/([0-9\.]+)/] }, */ /* exists "Chrome","Safari" */
+				{ name: 'Chrome', contains: [/CriOS\/([0-9\.]+)/, /Chrome\/([0-9\.]+)/] }, /* exists "Safari" */
+				{ name: 'BlackBerry', contains: [/\(BB.* Version\/([0-9.]+);/, /\(BlackBerry; .* Version\/([0-9\.]+)/] }, /* exists Safari */
+				{ name: 'Android Browser', contains: [/Android.* Version\/([0-9\.]+) Mobile Safari/] },
+				{ name: 'Safari', contains: [/Version\/([0-9\.]+) Safari\/[0-9\.]+/, /Version\/([0-9\.]+) Mobile\/[0-9a-zA-Z]+ Safari\/[0-9\.]+/] }, /* Safari gives two version number, one technical in the Safari/xyz token, one user-friendly in a Version/xyz token */
+				/*					{ name:'Seamonkey', contain:[/Seamonkey\/([0-9\.]+)/] }, */ /* exists "Firefox" */
+				{ name: 'Firefox', contains: [/FxiOS\/([0-9a-zA-Z\.]+)/, /Firefox\/([0-9\.]+)/] },
+				{ name: 'DoCoMo', contains: [/^DoCoMo\/([0-9\.]+)/] },
+				{ name: 'KDDI', contains: [/^KDDI-.* UP\.Browser\/([0-9\.]+)/, /^UP\.Browser\/([0-9\.]+)/] },
+				{ name: 'SoftBank', contains: [/^SoftBank\//, /^Vodafone\//, /^J-PHONE\//] }
+			],
+			get: function (ua) {
+				var res = jst.common.env.getNameVersion(ua, this.patterns);
+				ua = null;
+				this.name = res.name;
+				this.version = res.version;
+				res = null;
+				return true;
+			}
+		},
+		renderingEngine: { /* 書きかけ */
+			name: undefined,
+			version: undefined,
+		},
+		os: {
+			name: undefined,
+			version: undefined,
+			patterns: [
+				{ name: 'Windows Phone', contains: [/Windows Phone ([0-9\.]+)/] },
+				{ name: 'Windows', contains: [/Windows NT ([0-9\.]+)/] },
+				{ name: 'iOS', contains: [/\(iPhone; .* OS ([0-9_]+) like Mac OS X/, /\(iPad; .* OS ([0-9_]+) like Mac OS X/, /\(iPod; .* OS ([0-9_]+) like Mac OS X/] },
+				{ name: 'Mac OS X', contains: [/Mac OS X ([0-9\._]+)/] },
+				{ name: 'Android', contains: [/Android ([0-9\.]+)/] },
+				{ name: 'BlackBerry', contains: [/\(BB.* Version\/([0-9\.]+)/, /\(BlackBerry; .* Version\/([0-9\.]+)/] },
+				{ name: 'DoCoMo', contains: [/^DoCoMo\//] },
+				{ name: 'KDDI', contains: [/^KDDI-/, /^UP\.Browser\//] },
+				{ name: 'SoftBank', contains: [/^SoftBank\//, /^Vodafone\//, /^J-PHONE\//] }
+			],
+			get: function (ua) {
+				var res = jst.common.env.getNameVersion(ua, this.patterns);
+				ua = null;
+				this.name = res.name;
+				this.version = String(res.version).replace(/_/g, '.'); /* デリミタが_の場合.に変換 */
+				res = null;
+				return true;
+			}
+		},
+		device: { /* 書きかけ。*/
+			type: undefined,
+			name: undefined,
+			version: undefined,
+			patterns: [
+				{ name: 'FeaturePhone', contains: [/^Docomo\//, /^KDDI-/, /^UP\.Browser\//, /^SoftBank\//, /^Vodafone\//, /^J-PHONE\//, / Profile\/MIDP-/] }, /* Backberryの非スマホはMIDPで判定 */
+				{ name: 'SmartPhone', contains: [/Windows Phone/] },
+				{ name: 'Tablet', contains: [/\(iPad; .* like Mac OS X/] }
+			],
+			get: function (ua) {
+				var res = jst.common.env.getNameVersion(ua, this.patterns);
+				ua = null;
+				this.name = res.name;
+				this.version = res.version;
+				res = null;
+				return true;
+			}
+		},
+		model: {
+			type: undefined,
+			name: undefined,
+			build: undefined,
+			modelPatterns: [
+				{ name: 'SmartPhone', contains: [/Android [0-9\.]+; ([0-9a-zA-Z\-\_\.\ ]+) Build/, /^[^\(]+\((iPhone|iPad|iPod); CPU .* like Mac OS X/] },
+			],
+			buildPatterns: [
+				{ name: 'SmartPhone', contains: [/Build\/([0-9a-zA-Z\.]+)/, /Mobile\/([0-9a-zA-Z\.]+)/] },
+			],
+			get: function (ua) {
+				var res = {};
+				res = jst.common.env.getNameVersion(ua, this.modelPatterns);
+				this.name = res.version;
+				res = {};
+				res = jst.common.env.getNameVersion(ua, this.buildPatterns);
+				this.build = res.version;
+				ua = null;
+				res = null;
+				return true;
+			}
+		},
+		hls_js: {
+			isReady: false
+		},
+		flash_player: {
+			isReady: false,
+			version: undefined
+		}
+	},
+	url: {
+		splitQueryString: function (url) {
+			'use strict'; // Function-level strict mode syntax
+			var res = '?';
+			if (url.length > 0) {
+				var parts = url.split("?", 2);
+				url = null;
+				if (parts.length == 2) {
+					res += parts[1];
+				}
+				parts = null;
+			}
+			return res;
+		},
+		parseQueryString: function (qs) {
+			'use strict'; // Function-level strict mode syntax
+			var res = {};
+			qs = qs.substr(1);
+			if (qs.length > 0) {
+				var params = qs.split("&");
+				qs = null;
+				for (var i = 0; i < params.length; i++) {
+					var param = params[i].split("=");
+					if (0 in param) {
+						res[param[0]] = '';
+						if (1 in param) {
+							res[param[0]] = param[1];
+						}
+					}
+					param = null;
+				}
+				params = null;
+			}
+			return res;
+		}
+	},
+	util: {
+		generateUuid: function () {
+			'use strict'; // Function-level strict mode syntax
+			// https://github.com/GoogleChrome/chrome-platform-analytics/blob/master/src/internal/identifier.js
+			// const FORMAT: string = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx";
+			var chars = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".split("");
+			for (var i = 0, len = chars.length; i < len; i++) {
+				switch (chars[i]) {
+					case "x":
+						chars[i] = Math.floor(Math.random() * 16).toString(16);
+						break;
+					case "y":
+						chars[i] = (Math.floor(Math.random() * 4) + 8).toString(16);
+						break;
+				}
+			}
+			i = null;
+			return chars.join("");
+		},
+		loadScript: function (src, callback) {
+			'use strict'; // Function-level strict mode syntax
+			var done = false;
+			var head = document.getElementsByTagName('head')[0];
+			var script = document.createElement('script');
+			script.src = src;
+			src = null;
+			// Attach handlers for all browsers
+			script.onload = script.onreadystatechange = function () {
+				if (!done && (!this.readyState || this.readyState === "loaded" || this.readyState === "complete")) {
+					done = true;
+					callback();
+					callback = null;
+					// Handle memory leak in IE
+					script.onload = script.onreadystatechange = null;
+					if (head && script.parentNode) {
+						head.removeChild(script);
+						script = null;
+					}
+				}
+			};
+			head.appendChild(script);
+			head = null;
+		},
+		createElm: function (name, attrs) {
+			'use strict'; // Function-level strict mode syntax
+			var elm = document.createElement(name);
+			name = null;
+			for (var key in attrs) {
+				elm.setAttribute(key, attrs[key]);
+				key = null;
+			}
+			attrs = null;
+			return elm;
+		},
+		diffVal: function (threshold, seed) {
+			'use strict'; // Function-level strict mode syntax
+			var res = ''; /* -1=threashold > seed, 0=threashold==seed, 1=threashold < sheed */
+			if (threshold.match(/^[0-9]+$/) == -1) {
+				return '';
+			}
+			if (seed.match(/^[0-9]+$/) == -1) {
+				return '';
+			}
+
+			threshold = parseInt(threshold);
+			seed = parseInt(seed);
+
+			if (threshold > seed) {
+				res = -1;
+			}
+			if (threshold == seed) {
+				res = 0;
+			}
+			if (threshold < seed) {
+				res = 1;
+			}
+			threshold = null;
+			seed = null;
+			return res;
+		},
+		checkVersion: function (thresholdVer, seedVer) { /* 0.0.0 形式で閾値を入力される想定。閾値に対して、実行環境のバージョンが古いか、同じか、新しいかをチェックする  */
+			'use strict'; // Function-level strict mode syntax
+			var res = ''; /* -1=seedVer < thresholdVer, 0=equal, 1=thresholdVer < seedVer */
+			if (thresholdVer.match(/^[0-9\.]+$/) == -1) {
+				return '';
+			}
+			if (seedVer.match(/^[0-9\.]+$/) == -1) {
+				return '';
+			}
+
+			var thresholdVers = thresholdVer.toString().split('\.');
+			var seedVers = seedVer.toString().split('\.');
+
+			var diff = '';
+			for (var i = 0; i < thresholdVers.length; i++) {
+				diff = this.diffVal(thresholdVers[i], seedVers[i]);
+				if (diff == 0) {
+					res = diff;
+				} else if (diff == -1 || diff == 1) {
+					res = diff;
+					break;
+				} else {
+					break;
+				}
+				diff = null;
+			}
+			diff = null;
+			i = null;
+			thresholdVer = null;
+			seedVer = null;
+			return res;
+		},
+		addEListener: function (eventName, eventHandler) {
+			if (window.addEventListener) {
+				window.addEventListener(eventName, function (e) { eventHandler(e); }, false);
+				return true;
+			} else if (window.attachEvent) {
+				window.attachEvent('on' + eventName, function (e) { eventHandler(e); });
+				return true;
+			} else {
+				return false;
+			}
+		}
+	}
+};
+/* ========================================================================== */
+/* JS読込時に実行 */
+/* ========================================================================== */
+if (typeof jst === 'undefined') {
+	jst = new Object(Jst);
+}
+(function () {
+	jst.common.env.browser.get(); /* ブラウザ名・バージョンの取得 */
+	jst.common.env.os.get(); /* OS名・バージョンの取得 */
+	jst.common.env.model.get(); /* 機種名の取得 */
+	jst.common.env.scriptBase.get(); /* JS自身のベースURL */
+	jst.common.util.loadScript(jst.common.env.scriptBase.url + 'hls.js/hls.min.js', function () {
+		if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+			jst.common.env.hls_js.isReady = true;
+		} else {
+			jst.common.util.loadScript(jst.common.env.scriptBase.url + 'swf/swfobject.js', function () {
+				var version = '';
+				if (typeof swfobject !== 'undefined') {
+					version = swfobject.getFlashPlayerVersion();
+				}
+				if (version) {
+					jst.common.env.flash_player.isReady = true;
+					var lev = '';
+					var verStr = '';
+					lev = 'major';
+					if (lev in version && version[lev] >= 1) {
+						verStr = version[lev].toString();
+						lev = 'minor';
+						if (lev in version) {
+							verStr += ('\.' + version[lev]).toString();
+							lev = 'release';
+							if (lev in version) {
+								verStr += ('\.' + version[lev]).toString();
+							}
+						}
+					}
+					jst.common.env.flash_player.version = verStr;
+					lev = null;
+					verStr = null;
+				}
+				version = null;
+			});
+		}
+	});
+	jstBaseUrl = null;
+	/* onetag.html でなければ、iFrameの置き換えをする */
+	if (location.href.indexOf('/onetag.html') == -1 && location.href.indexOf('/subwindow.html') == -1 && location.href.indexOf('/playerWindow.html') == -1) {
+		/* 環境判定して、JRADBであり、かつ、スマホサイトでなければ、iFrameの置き換えイベントをセットする */
+		jst.common.util.addEListener('load', function () { jst.playerButton.wow.setIframeId(); });
+	}
+})();

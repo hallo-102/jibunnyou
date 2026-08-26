@@ -265,7 +265,10 @@ def parse_trio(page) -> Dict[str, str]:
 #────────────────────────────────────────────
 # メインスクレイパー
 #────────────────────────────────────────────
-def scrape_odds(headless: bool = HEADLESS, out_dir: str = r"C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026\\data\\ozzu_csv") -> Path:
+def scrape_odds(
+    headless: bool = HEADLESS,
+    out_dir: str = str(Path(__file__).resolve().parents[1] / "data" / "ozzu_csv"),
+) -> Path:
     out_csv = Path(out_dir) / f"OZZU_{DATE_STR}.csv"
     headers = ["date", "racecourse", "race", "name", "bet_type", "combination", "odds"]
     rows_to_save: List[List[str]] = []

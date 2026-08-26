@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from model_registry import load_model_spec, model_metadata
+
 from .common import (
     _coalesce_merge_columns,
     _normalize_surface_name,
@@ -17,6 +19,7 @@ from .common import (
     discover_files,
     load_results_all_sheets,
     parse_rid_meta,
+    resolve_duplicate_feature_races,
 )
 from .config import (
     COURSE_STYLE_FEATURE_COLS,
@@ -1118,13 +1121,42 @@ def main(argv: list[str] | None = None) -> None:
     try:
         baseline_selection = select_baseline_weight_file(args.baseline_weight_file or None)
         baseline_info = load_baseline_weights(baseline_selection, verify_production=True)
+        print(f"[INFO] production_weight_file_name={baseline_info.production_path.name}")
+        print(f"[INFO] production_weight_file={baseline_info.production_path}")
+        print(f"[INFO] production_weight_resolved={baseline_info.production_path.resolve()}")
+        print(f"[INFO] baseline_file_name={baseline_info.path.name}")
         print(f"[INFO] baseline_file={baseline_info.path}")
+        print(f"[INFO] baseline_resolved={baseline_info.path.resolve()}")
         print(f"[INFO] baseline_method={baseline_info.method}")
-        print(f"[INFO] baseline_sha256={baseline_info.sha256}")
+        print(f"[INFO] production_file_sha256={baseline_info.production_sha256}")
+        print(f"[INFO] baseline_file_sha256={baseline_info.sha256}")
+        print(
+            "[INFO] production_effective_weight_sha256="
+            f"{baseline_info.production_effective_sha256}"
+        )
+        print(f"[INFO] baseline_effective_weight_sha256={baseline_info.effective_sha256}")
+        print(
+            "[INFO] effective_weight_counts "
+            f"production_groups={baseline_info.production_group_count} "
+            f"production_elements={baseline_info.production_weight_count} "
+            f"baseline_groups={baseline_info.effective_group_count} "
+            f"baseline_elements={baseline_info.effective_weight_count}"
+        )
+        print(f"[INFO] baseline_transformations={baseline_info.transform_stats}")
+        print(
+            "[INFO] production_transformations="
+            f"{baseline_info.production_transform_stats}"
+        )
+        print(
+            "[INFO] normalization_application_difference="
+            f"{baseline_info.transform_stats != baseline_info.production_transform_stats}"
+        )
         print(f"[INFO] production_weight_match={baseline_info.production_weights_match}")
     except BaselineWeightError as exc:
         baseline_error = f"{exc.code}: {exc}"
         print(f"[ERROR] {baseline_error}")
+        if not args.verify_baseline_only:
+            raise
 
     files = discover_files(CONFIG["DATA_GLOB"])
     if not files:
@@ -1147,9 +1179,15 @@ def main(argv: list[str] | None = None) -> None:
                 else str(baseline_selection.path) if baseline_selection else ""
             ),
             "baseline_sha256": baseline_info.sha256 if baseline_info else "",
+            "baseline_effective_sha256": (
+                baseline_info.effective_sha256 if baseline_info else ""
+            ),
             "baseline_method": baseline_info.method if baseline_info else "",
             "production_file": str(baseline_info.production_path) if baseline_info else "",
             "production_sha256": baseline_info.production_sha256 if baseline_info else "",
+            "production_effective_sha256": (
+                baseline_info.production_effective_sha256 if baseline_info else ""
+            ),
             "production_weights_match": (
                 baseline_info.production_weights_match if baseline_info else False
             ),
@@ -1275,6 +1313,16 @@ def main(argv: list[str] | None = None) -> None:
     df_feat_all["place_name"] = df_feat_all["place_name"].fillna("").astype(str).str.strip()
     df_feat_all["surface_name"] = df_feat_all["surface_name"].fillna("").map(_normalize_surface_name)
     df_feat_all["source_file_name"] = df_feat_all["source_file_name"].fillna("").astype(str)
+
+    df_feat_all, duplicate_race_summary = resolve_duplicate_feature_races(df_feat_all)
+    if not duplicate_race_summary.empty:
+        print("\n=== [DUPLICATE RACE SOURCE RESOLUTION] ===")
+        print(duplicate_race_summary.to_string(index=False))
+        print(
+            "[INFO] 結果確定日と一致しない重複入力を除外 "
+            f"races={len(duplicate_race_summary)} "
+            f"rows={int(duplicate_race_summary['excluded_rows'].sum())}"
+        )
 
     _, _, df_file_exclusion_summary = _split_train_test_with_file_exclusion(
         df_feat_all=df_feat_all,
@@ -1781,6 +1829,16 @@ def main(argv: list[str] | None = None) -> None:
     decision_payload = {
         "decision": adoption_decision,
         "adopted": adoption_decision == "adopted",
+        # candidate判定とbestファイル保存は本番昇格ではない。
+        # 昇格はtools/promote_production_model.pyの明示操作でのみ行う。
+        "production_promoted": False,
+        "production_model": model_metadata(
+            load_model_spec(
+                PROJECT_ROOT,
+                PROJECT_ROOT / "config" / "production_model.json",
+                expected_role="production",
+            )
+        ),
         "best_weight_updated": best_weight_updated,
         "reason": adoption_reasons,
         "reason_code": (

@@ -56,11 +56,12 @@ UA = (
 HTTP_TIMEOUT = 20
 SELENIUM_TIMEOUT = 40
 
-# ★credentials.ini の場所（ユーザー指定）
-CREDENTIALS_INI = r"C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026\config\credentials.ini"
+# ★credentials.ini の場所
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+CREDENTIALS_INI = os.path.join(PROJECT_ROOT, "config", "credentials.ini")
 
-# ★出力先（ユーザー指定）
-BASE_XLSX_DIR = r"C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026\data\input"
+# ★出力先
+BASE_XLSX_DIR = os.path.join(PROJECT_ROOT, "data", "input")
 
 
 # ============================================================

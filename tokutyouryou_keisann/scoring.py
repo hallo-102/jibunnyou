@@ -41,6 +41,10 @@ try:
 except Exception:
     DL_SCORE_BONUS = 10.0
 
+# 本番と評価で順位の同点解消・連番付与を同じ関数へ統一する。
+_keibayosou_ranking = importlib.import_module("1_keibayosou_ranking")
+create_unique_rank_series = _keibayosou_ranking.create_unique_rank_series
+
 
 def summarize_stability(
     total_bets: int,
@@ -166,9 +170,12 @@ class EvalContext:
     feature_matrix: np.ndarray
     rid_array: np.ndarray
     name_norm_array: np.ndarray
+    horse_number_array: np.ndarray
     place_array: np.ndarray
     surface_array: np.ndarray
     favorite_risk: np.ndarray
+    tie_risk_score: np.ndarray
+    data_confidence: np.ndarray
     rest_dist_risk: np.ndarray
     extra_penalty_fixed: Optional[np.ndarray]
     extra_penalty_seed: np.ndarray
@@ -214,14 +221,6 @@ def _normalize_score_array(values: np.ndarray) -> np.ndarray:
         return np.full(values.shape, 50.0, dtype=float)
     z = (values - mean_val) / std_val
     return np.clip(50.0 + 10.0 * z, 0.0, 100.0)
-
-
-def _dense_rank_desc(values: np.ndarray) -> np.ndarray:
-    if values.size == 0:
-        return np.array([], dtype=int)
-    unique_desc = np.sort(np.unique(values))[::-1]
-    rank_map = {float(v): i + 1 for i, v in enumerate(unique_desc.tolist())}
-    return np.array([rank_map[float(v)] for v in values], dtype=int)
 
 
 def _weight_vector(weights: Dict[str, float]) -> np.ndarray:
@@ -332,9 +331,17 @@ def build_eval_context(
     feat_df["surface_name"] = feat_df["surface_name"].fillna("").map(_normalize_surface_name)
     feat_df["name_norm"] = feat_df["name_norm"].fillna("").astype(str)
 
+    horse_number_col = next((c for c in ["馬番", "馬 番", "umaban"] if c in feat_df.columns), None)
+    if horse_number_col is None:
+        raise ValueError("評価順位の一意化に必要な馬番列がありません")
+    horse_number_series = pd.to_numeric(feat_df[horse_number_col], errors="coerce")
+    if horse_number_series.isna().any():
+        raise ValueError("評価順位の一意化に使う馬番へ欠損または非数値があります")
+
     feature_matrix = feat_df[FEAT_COLS].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype=float)
     rid_array = feat_df["rid_str"].to_numpy(dtype=object, copy=False)
     name_norm_array = feat_df["name_norm"].to_numpy(dtype=object, copy=False)
+    horse_number_array = horse_number_series.to_numpy(dtype=float, copy=False)
     place_array = feat_df["place_name"].to_numpy(dtype=object, copy=False)
     surface_array = feat_df["surface_name"].to_numpy(dtype=object, copy=False)
 
@@ -344,6 +351,13 @@ def build_eval_context(
         else pd.Series(0.0, index=feat_df.index, dtype=float)
     )
     favorite_risk = favorite_series.fillna(0.0).to_numpy(dtype=float)
+    tie_risk_series = (
+        pd.to_numeric(feat_df["risk_score"], errors="coerce")
+        if "risk_score" in feat_df.columns
+        else favorite_series
+    )
+    tie_risk_score = tie_risk_series.to_numpy(dtype=float, copy=False)
+    data_confidence = _first_present_numeric_frame(feat_df, ["data_confidence", "データ信頼度"])
 
     if "rest_dist_risk" in feat_df.columns:
         rest_dist_risk = pd.to_numeric(feat_df["rest_dist_risk"], errors="coerce").to_numpy(dtype=float)
@@ -444,9 +458,12 @@ def build_eval_context(
         feature_matrix=feature_matrix,
         rid_array=rid_array,
         name_norm_array=name_norm_array,
+        horse_number_array=horse_number_array,
         place_array=place_array,
         surface_array=surface_array,
         favorite_risk=favorite_risk,
+        tie_risk_score=tie_risk_score,
+        data_confidence=data_confidence,
         rest_dist_risk=rest_dist_risk,
         extra_penalty_fixed=extra_penalty_fixed,
         extra_penalty_seed=extra_penalty_seed,
@@ -499,7 +516,7 @@ def _compute_score_rank_from_context(
     context: EvalContext,
     total_raw: np.ndarray,
     extra_penalty: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     # 本番 pipeline に合わせて dl_bonus も反映
     total = (
         total_raw
@@ -508,17 +525,36 @@ def _compute_score_rank_from_context(
         - PIPE_EXTRA_ALPHA * extra_penalty
     )
 
-    score = np.zeros_like(total, dtype=float)
-    rank = np.zeros(total.shape[0], dtype=int)
+    score_raw = np.zeros_like(total, dtype=float)
 
     for rid in context.race_ids:
         idx = context.race_indices[rid]
         race_total = total[idx]
         race_score = _normalize_score_array(race_total)
-        score[idx] = np.round(race_score, 2)
-        rank[idx] = _dense_rank_desc(score[idx])
+        score_raw[idx] = race_score
 
-    return total, score, rank
+    # 丸め前scoreを使い、本番と同じ共通関数で全レースの一意順位を作る。
+    ranking_df = pd.DataFrame(
+        {
+            "rid_str": context.rid_array,
+            "馬番": context.horse_number_array,
+            "score_raw": score_raw,
+            "risk_score": context.tie_risk_score,
+            "extra_penalty": extra_penalty,
+            "data_confidence": context.data_confidence,
+        }
+    )
+    rank = create_unique_rank_series(
+        df=ranking_df,
+        race_id_col="rid_str",
+        raw_score_col="score_raw",
+        risk_score_col="risk_score",
+        extra_penalty_col="extra_penalty",
+        data_confidence_col="data_confidence",
+        horse_number_col="馬番",
+    ).to_numpy(dtype=int, copy=False)
+    score = np.round(score_raw, 2)
+    return total, score_raw, score, rank
 
 
 def compute_scores_with_optimizer_weights(
@@ -535,7 +571,7 @@ def compute_scores_with_optimizer_weights(
     out = context.feat_df.copy()
     total_raw = _compute_total_raw_from_context(context, weights_map)
     extra_penalty = _compute_extra_penalty_from_context(context, total_raw)
-    total, score, rank = _compute_score_rank_from_context(context, total_raw, extra_penalty)
+    total, score_raw, score, rank = _compute_score_rank_from_context(context, total_raw, extra_penalty)
 
     out["favorite_risk"] = context.favorite_risk
     out["rest_dist_risk"] = context.rest_dist_risk
@@ -546,6 +582,7 @@ def compute_scores_with_optimizer_weights(
     out["dl_bonus"] = context.dl_bonus
     out["total_raw"] = total_raw
     out["total"] = total
+    out["score_raw"] = score_raw
     out["score"] = score
     out["rank"] = rank
     return out
@@ -569,7 +606,7 @@ def eval_success_and_roi(
     context = eval_context or build_eval_context(df_feat, df_res_entries, df_res_payout)
     total_raw = _compute_total_raw_from_context(context, weights_map)
     extra_penalty = _compute_extra_penalty_from_context(context, total_raw)
-    _, score, _ = _compute_score_rank_from_context(context, total_raw, extra_penalty)
+    _, _, score, rank = _compute_score_rank_from_context(context, total_raw, extra_penalty)
 
     total_points = 0.0
     total_races = 0
@@ -583,10 +620,10 @@ def eval_success_and_roi(
 
     for rid in context.race_ids:
         idx = context.race_indices[rid]
-        race_scores = score[idx]
         race_names = context.name_norm_array[idx]
 
-        order = np.lexsort((race_names.astype(str), -race_scores))
+        # 共通関数が確定した一意順位だけを使い、評価側で別順位を再計算しない。
+        order = np.argsort(rank[idx], kind="stable")
         pred_names = [str(name) for name in race_names[order[: int(CONFIG["TOP_K"])]]]
 
         pred_top_idx = int(idx[order[0]]) if len(order) >= 1 else -1

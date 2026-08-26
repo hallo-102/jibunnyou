@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import os
 import re
@@ -51,6 +52,7 @@ def _register_renamed_keibayosou_modules() -> None:
         ("keibayosou_loaders", "1_keibayosou_loaders"),
         ("keibayosou_features", "1_keibayosou_features"),
         ("keibayosou_penalties", "1_keibayosou_penalties"),
+        ("keibayosou_ranking", "1_keibayosou_ranking"),
         ("keibayosou_pipeline", "1_keibayosou_pipeline"),
         ("keibayosou_pace", "1_keibayosou_pace"),
     ]
@@ -65,6 +67,7 @@ from keibayosou_config import BASE_DIR, HORSE_RESULTS_DIR, RACE_LEVEL_XLSX, BASE
 from keibayosou_loaders import load_odds_csv
 from keibayosou_pipeline import append_roi_focus_bet_sheet_to_excel, run_pipeline
 from keibayosou_pace import append_pace_prediction_sheet_to_excel
+from keibayosou_ranking import create_unique_rank_series
 from keibayosou_utils import _normalize_place
 
 
@@ -408,7 +411,17 @@ def _canonical_prediction_frame(df: pd.DataFrame) -> pd.DataFrame:
     if c_rank is not None:
         out["予想順位"] = pd.to_numeric(out[c_rank], errors="coerce")
     elif out["score"].notna().any():
-        out["予想順位"] = out.groupby("rid_str")["score"].rank(ascending=False, method="dense")
+        # 保存順位が無い場合もdense順位を作らず、丸め前scoreを優先して一意化する。
+        raw_score_col = _pick_col(out, ["score_raw", "total", "five_block_score_raw", "score"])
+        out["予想順位"] = create_unique_rank_series(
+            df=out,
+            race_id_col="rid_str",
+            raw_score_col=str(raw_score_col),
+            risk_score_col=_pick_col(out, ["risk_score", "リスクスコア", "favorite_risk"]),
+            extra_penalty_col=_pick_col(out, ["extra_penalty"]),
+            data_confidence_col=_pick_col(out, ["data_confidence", "データ信頼度"]),
+            horse_number_col="馬番",
+        )
     else:
         out["予想順位"] = np.nan
 
@@ -2670,7 +2683,20 @@ def _create_dl_rank_df(pred_path: Path) -> pd.DataFrame:
 # main
 # ============================================================
 def main() -> None:
-    raceday_str = input("対象レース日付を YYYYMMDD 形式で入力してください（空Enterなら全日対象）: ").strip()
+    parser = argparse.ArgumentParser(
+        description="明示本番モデルで予想し、結果確定前シャドー比較を分離保存します。"
+    )
+    parser.add_argument(
+        "--raceday",
+        help="対象開催日（YYYYMMDD）。省略時は対話入力します。",
+    )
+    args = parser.parse_args()
+    if args.raceday is None:
+        raceday_str = input(
+            "対象レース日付を YYYYMMDD 形式で入力してください（空Enterなら全日対象）: "
+        ).strip()
+    else:
+        raceday_str = str(args.raceday).strip()
     if raceday_str == "":
         raceday_str = None
     elif not re.fullmatch(r"\d{8}", raceday_str):
@@ -2711,7 +2737,7 @@ def main() -> None:
     # 2回目: 1回目のwith_feat + メモリ上のDL順位データ -> 最終 with_feat
     # --------------------------------------------------------
     print("[INFO] ===== 2回目の予想処理を開始します =====")
-    run_pipeline(
+    shadow_output_paths = run_pipeline(
         SRC_EXCEL=actual_first_out,
         OUT_EXCEL=actual_first_out,
         LEVELS_XL=RACE_LEVEL_XLSX,
@@ -2719,6 +2745,7 @@ def main() -> None:
         ODDS_CSV_PATH=ODDS_CSV,
         RACEDAY=raceday_str,
         DL_RANK_DF=dl_rank_df,
+        ENABLE_SHADOW=True,
     )
 
     actual_final_out = _pick_actual_out_excel(actual_first_out)
@@ -2736,6 +2763,8 @@ def main() -> None:
 
     print("[INFO] ===== すべて完了しました =====")
     print(f"[INFO] 最終出力: {actual_final_out}")
+    for shadow_output_path in shadow_output_paths:
+        print(f"[INFO] シャドー出力: {shadow_output_path}")
 
 
 if __name__ == "__main__":

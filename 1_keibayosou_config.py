@@ -19,6 +19,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 import importlib.util  # best_feature_weights_YYYYMMDD.py 動的読込用
 
+from model_registry import (
+    ModelConfigError,
+    load_model_spec,
+    model_metadata,
+    validate_effective_weights,
+)
+
 # ================================================================
 # パス等の基本設定
 # ================================================================
@@ -45,6 +52,9 @@ OUT_COLS = [
 ]
 
 CODE_DIR = Path(__file__).resolve().parent
+PRODUCTION_MODEL_CONFIG_PATH = CODE_DIR / "config" / "production_model.json"
+SHADOW_MODEL_CONFIG_PATH = CODE_DIR / "config" / "shadow_model.json"
+FORWARD_VALIDATION_CONFIG_PATH = CODE_DIR / "config" / "forward_validation.json"
 
 # データ配置ルート（あなたの環境に合わせて固定）
 DATA_ROOT = Path(r"C:\Users\okino\OneDrive\ドキュメント\my_python_cursor")
@@ -811,51 +821,47 @@ def _enforce_empirical_weight_signs(
     return fixed
 
 
-def _load_external_feature_weights(base_dir: str):
-    """
-    best_feature_weights_YYYYMMDD.py を動的 import して FEATURE_WEIGHTS を取得する。
-    戻り値: (FEATURE_WEIGHTS, FEATURE_WEIGHTS_BY_PLACE_SURFACE)
-    見つからなければ (None, None)
-    """
-    latest = _find_latest_weights_module(base_dir)
-    if latest is None:
-        print("[INFO] best_feature_weights_YYYYMMDD.py が見つからなかったので組み込み重みを使用します")
-        return None, None
-
-    day, path = latest
-    module_name = f"_best_feature_weights_{day}"
-
+def _load_feature_weights_from_explicit_path(path: str | Path):
+    """明示設定済みの1ファイルだけを厳格に読み、失敗時はfallbackせず停止する。"""
+    explicit_path = Path(path).resolve()
+    module_name = f"_production_feature_weights_{explicit_path.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, explicit_path)
+    if spec is None or spec.loader is None:
+        raise ModelConfigError(
+            f"本番重みPythonモジュールを作成できません: {explicit_path}"
+        )
+    module = importlib.util.module_from_spec(spec)
     try:
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"spec_from_file_location が None を返しました: {path}")
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise ModelConfigError(
+            f"本番重みPythonモジュールを読み込めません: {explicit_path}: {exc}"
+        ) from exc
 
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
+    raw_fw = getattr(module, "FEATURE_WEIGHTS", None)
+    if not isinstance(raw_fw, dict):
+        raise ModelConfigError(
+            f"本番重みにFEATURE_WEIGHTS dictがありません: {explicit_path}"
+        )
+    fw = _normalize_weights_mapping(dict(raw_fw))
 
-        raw_fw = getattr(module, "FEATURE_WEIGHTS", None)
-        raw_fw_by_ps = getattr(module, "FEATURE_WEIGHTS_BY_PLACE_SURFACE", None)
-
-        if raw_fw is None:
-            print(f"[WARN] {Path(path).name} に FEATURE_WEIGHTS が定義されていないため無視します")
-            return None, None
-
-        fw = _normalize_weights_mapping(dict(raw_fw))
-
-        fw_by_ps_norm: Optional[Dict[Tuple[str, str], Dict[str, float]]] = None
-        if isinstance(raw_fw_by_ps, dict):
-            fw_by_ps_norm = {}
-            for k, v in raw_fw_by_ps.items():
-                if not isinstance(k, tuple) or len(k) != 2:
-                    continue
-                fw_by_ps_norm[(str(k[0]), str(k[1]))] = _normalize_weight_object(v)
-
-        print(f"[INFO] 外部重みファイル {Path(path).name} を読み込みました（最新日付={day}）")
-        return fw, fw_by_ps_norm
-
-    except Exception as e:
-        print(f"[WARN] 外部重みファイル {Path(path).name} の読み込みに失敗しました: {e}")
-        return None, None
+    raw_fw_by_ps = getattr(module, "FEATURE_WEIGHTS_BY_PLACE_SURFACE", {})
+    if raw_fw_by_ps is None:
+        raw_fw_by_ps = {}
+    if not isinstance(raw_fw_by_ps, dict):
+        raise ModelConfigError(
+            "FEATURE_WEIGHTS_BY_PLACE_SURFACEがdictではありません: "
+            f"{explicit_path}"
+        )
+    fw_by_ps: Dict[Tuple[str, str], Dict[str, float]] = {}
+    for key, value in raw_fw_by_ps.items():
+        if not isinstance(key, tuple) or len(key) != 2:
+            raise ModelConfigError(
+                "FEATURE_WEIGHTS_BY_PLACE_SURFACEのkeyが不正です: "
+                f"path={explicit_path} key={key!r}"
+            )
+        fw_by_ps[(str(key[0]), str(key[1]))] = _normalize_weight_object(value)
+    return fw, fw_by_ps
 
 
 # 外部bestを適用する前の組み込み値を保持する。
@@ -869,42 +875,66 @@ BUILTIN_FEATURE_WEIGHTS_BY_PLACE_SURFACE = {
     for key, weights in FEATURE_WEIGHTS_BY_PLACE_SURFACE.items()
 }
 
-try:
-    ACTIVE_FEATURE_WEIGHTS_FILE: Optional[str] = None
-    _ext_fw, _ext_fw_by_ps = _load_external_feature_weights(str(PY_DIR))
-    if _ext_fw is not None:
-        _active_weights_candidate = _find_latest_weights_module(str(PY_DIR))
-        if _active_weights_candidate is not None:
-            ACTIVE_FEATURE_WEIGHTS_FILE = Path(_active_weights_candidate[1]).name
-        FEATURE_WEIGHTS = _merge_feature_weights(FEATURE_WEIGHTS, _ext_fw)
-    FEATURE_WEIGHTS = _enforce_empirical_weight_signs(FEATURE_WEIGHTS)
-    if _ext_fw_by_ps is not None:
-        FEATURE_WEIGHTS_BY_PLACE_SURFACE = _merge_feature_weights_by_place_surface(
-            FEATURE_WEIGHTS_BY_PLACE_SURFACE,
-            _ext_fw_by_ps,
-            FEATURE_WEIGHTS.get("__default__", {}),
-        )
-    FEATURE_WEIGHTS_BY_PLACE_SURFACE = _enforce_empirical_weight_signs(FEATURE_WEIGHTS_BY_PLACE_SURFACE)
-except Exception as e:
-    print(f"[WARN] 外部重み読込時にエラーが発生しました: {e}")
+PRODUCTION_MODEL_SPEC = load_model_spec(
+    CODE_DIR,
+    PRODUCTION_MODEL_CONFIG_PATH,
+    expected_role="production",
+)
+ACTIVE_FEATURE_WEIGHTS_FILE = PRODUCTION_MODEL_SPEC.weight_file
+_ext_fw, _ext_fw_by_ps = _load_feature_weights_from_explicit_path(
+    PRODUCTION_MODEL_SPEC.resolved_weight_path
+)
+FEATURE_WEIGHTS = _merge_feature_weights(FEATURE_WEIGHTS, _ext_fw)
+FEATURE_WEIGHTS = _enforce_empirical_weight_signs(FEATURE_WEIGHTS)
+FEATURE_WEIGHTS_BY_PLACE_SURFACE = _merge_feature_weights_by_place_surface(
+    FEATURE_WEIGHTS_BY_PLACE_SURFACE,
+    _ext_fw_by_ps,
+    FEATURE_WEIGHTS.get("__default__", {}),
+)
+FEATURE_WEIGHTS_BY_PLACE_SURFACE = _enforce_empirical_weight_signs(
+    FEATURE_WEIGHTS_BY_PLACE_SURFACE
+)
+_production_effective_weights = {
+    **{key: dict(weights) for key, weights in FEATURE_WEIGHTS.items()},
+    **{
+        key: dict(weights)
+        for key, weights in FEATURE_WEIGHTS_BY_PLACE_SURFACE.items()
+    },
+}
+PRODUCTION_MODEL_VALIDATION = validate_effective_weights(
+    PRODUCTION_MODEL_SPEC,
+    _production_effective_weights,
+    scoring_model_version=SCORING_MODEL_VERSION,
+)
+PRODUCTION_MODEL_METADATA = model_metadata(PRODUCTION_MODEL_SPEC)
 
 
 def print_scoring_model_status() -> None:
     """本番最終順位へ使うモデルと参照スコアの状態を端末へ表示する。"""
 
     if SCORING_MODEL_VERSION == "legacy":
-        selected = "新best重みモデル（legacy）"
+        selected = "明示設定済み本番重みモデル（legacy）"
         reference = "5ブロックモデル=参考列として計算"
         overwrite = "OFF"
     else:
         selected = "5ブロックモデル（five_block）"
-        reference = "新best重みモデル=比較用列として保持"
+        reference = "明示設定済み本番重みモデル=比較用列として保持"
         overwrite = "ON"
-    loaded_file = ACTIVE_FEATURE_WEIGHTS_FILE or "なし（組み込み重み）"
     print("[INFO] ===== 本番ランキングモデル =====")
     print(f"[INFO] SCORING_MODEL_VERSION={SCORING_MODEL_VERSION}")
     print(f"[INFO] 本番最終順位モデル={selected}")
-    print(f"[INFO] 読込重みファイル={loaded_file}")
+    print(f"[INFO] production_model_name={PRODUCTION_MODEL_SPEC.model_name}")
+    print(f"[INFO] production_weight_file={PRODUCTION_MODEL_SPEC.weight_file}")
+    print(f"[INFO] production_file_sha256={PRODUCTION_MODEL_SPEC.file_sha256}")
+    print(
+        "[INFO] production_effective_sha256="
+        f"{PRODUCTION_MODEL_SPEC.effective_sha256}"
+    )
+    print(
+        "[INFO] production_weight_shape="
+        f"groups={PRODUCTION_MODEL_VALIDATION['group_count']} "
+        f"elements={PRODUCTION_MODEL_VALIDATION['element_count']}"
+    )
     print(f"[INFO] {reference}")
     print(f"[INFO] 最終total/score/rankへの5ブロック上書き={overwrite}")
 

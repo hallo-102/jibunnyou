@@ -27,7 +27,7 @@ import pandas as pd
 
 pd.set_option("future.no_silent_downcasting", True)
 
-BASE_DIR = Path("C:/Users/okino/OneDrive/ドキュメント/my_python_cursor/keiba_yosou_2026/data/master")
+BASE_DIR = Path(__file__).resolve().parents[1] / "data" / "master"
 PLACE_BABA_TIME_PATH = BASE_DIR / "場所_馬場_タイム.xlsx"
 GRADE_RACE_MASTER_PATH = BASE_DIR / "grade_race_master.csv"
 
@@ -2170,7 +2170,7 @@ def main():
     parser.add_argument("--out", required=False, default=None, help="出力: race_levels.xlsx のパス")
     args = parser.parse_args()
 
-    base_dir = Path("C:/Users/okino/OneDrive/ドキュメント/my_python_cursor/keiba_yosou_2026/data/master")
+    base_dir = BASE_DIR
     default_src = base_dir / "racedata_results.xlsx"
     default_dst = base_dir / "race_levels.xlsx"
 

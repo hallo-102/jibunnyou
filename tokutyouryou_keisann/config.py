@@ -143,7 +143,8 @@ CONFIG: Dict[str, Any] = {
     "VALID_START_DATE": "20260301",
     "VALID_END_DATE": "20260430",
     "TEST_START_DATE": "20260501",
-    "TEST_END_DATE": "",
+    # 2026-08-22以降は前向きシャドー検証とし、重み最適化に戻さない。
+    "TEST_END_DATE": "20260821",
     #"TRAIN_START_DATE": "20251213",
     #"TRAIN_END_DATE": "20260228",
     #"TEST_START_DATE": "20260301",

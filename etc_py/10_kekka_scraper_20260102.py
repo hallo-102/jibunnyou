@@ -29,11 +29,9 @@ from configparser import ConfigParser
 from tqdm import tqdm
 
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.edge.options import Options
 from selenium.webdriver.edge.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import JavascriptException, TimeoutException
 
 # ───────────────────────────────
@@ -43,12 +41,12 @@ from selenium.common.exceptions import JavascriptException, TimeoutException
 # BASE_DIR   : my_python_cursor
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# racedata_results.xlsx を保存するフォルダ（固定パス）
-OUTPUT_DIR = Path(r"C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026\data\master")
+# racedata_results.xlsx を保存するフォルダ
+OUTPUT_DIR = BASE_DIR / "data" / "master"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# credentials.ini の場所（固定パス）
-CREDENTIALS_PATH = Path(r"C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026\config\credentials.ini")
+# credentials.ini の場所
+CREDENTIALS_PATH = BASE_DIR / "config" / "credentials.ini"
 
 # ───────────────────────────────
 # ① 資格情報（パス固定）
@@ -142,39 +140,59 @@ JS_SCROLL_TO = "window.scrollTo(0, arguments[0]);"
 def get_race_ids_for_date(driver: webdriver.Edge, race_list_url: str) -> List[str]:
     driver.get(race_list_url)
 
-    # ページ読み込み完了待ち
-    WebDriverWait(driver, 15).until(lambda d: d.execute_script(JS_READY_STATE))
-
-    # ▼クリック可能なレースリンク(<a>)が現れるまで待機
-    anchor_selector = 'a[href*="race_id="]'
+    # レース一覧は広告などの影響で readyState が complete にならない場合がある。
+    # タイムアウトしても、取得済みの HTML を使って処理を続ける。
     try:
-        WebDriverWait(driver, 20).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, anchor_selector))
+        WebDriverWait(driver, 15).until(
+            lambda d: d.execute_script(JS_READY_STATE)
         )
     except TimeoutException:
-        # 念のためスクロールで読み込みを促す
-        last_height = 0
+        print("⚠️ ページ読み込み完了待ちが時間切れになりました。取得済みHTMLを確認します。")
+
+    # リンクは画面外や非表示でも HTML から取得できるため、
+    # element_to_be_clickable は使わず race_id の出現を直接待つ。
+    race_ids: List[str] = []
+    wait_limit = time.monotonic() + 20
+    while time.monotonic() < wait_limit:
+        race_ids = extract_race_ids_from_html(driver.page_source)
+        if race_ids:
+            break
+        time.sleep(0.5)
+
+    # 遅延読み込み対策としてスクロールし、各回で HTML を再確認する。
+    if not race_ids:
+        last_height = -1
         for _ in range(SCROLL_MAX):
             try:
                 height = driver.execute_script(JS_SCROLL_HEIGHT)
+                driver.execute_script(JS_SCROLL_TO, height)
             except JavascriptException:
-                time.sleep(1.0)
-                continue
+                # JavaScriptを実行できなくても、最後にHTMLは確認する。
+                break
+
+            time.sleep(SCROLL_PAUSE)
+            race_ids = extract_race_ids_from_html(driver.page_source)
+            if race_ids:
+                break
             if height == last_height:
                 break
-            driver.execute_script(JS_SCROLL_TO, height)
-            time.sleep(SCROLL_PAUSE)
             last_height = height
-        # 最後にもう一度 element_to_be_clickable を待つ
-        WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, anchor_selector))
+
+    # レースがない日やアクセス制限時も例外終了させず、呼び出し元へ空リストを返す。
+    if not race_ids:
+        page_text = bs(driver.page_source, "html.parser").get_text(
+            " ", strip=True
         )
-
-    # HTML解析
-    soup = bs(driver.page_source, "html.parser")
-    html_text = str(soup)
-
-    race_ids = extract_race_ids_from_html(html_text)
+        if "ログイン" in page_text and "パスワード" in page_text:
+            reason = "ログイン画面へ戻されています"
+        elif "HTTP ERROR 400" in page_text:
+            reason = "レース一覧URLがHTTP 400エラーを返しました"
+        elif any(word in page_text.lower() for word in ("access denied", "cloudflare")):
+            reason = "アクセス制限ページが表示されています"
+        else:
+            reason = "対象日に開催レースがないか、レース一覧を取得できませんでした"
+        print(f"⚠️ {reason}。URL: {driver.current_url}", file=sys.stderr)
+        return []
 
     if len(race_ids) < 5:
         print(
@@ -328,8 +346,10 @@ def main():
     if not re.fullmatch(r"\d{8}", race_date):
         raise ValueError("対象レース日付は YYYYMMDD の8桁で入力してください")
 
+    # PC版の旧URLはHTTP 400を返すため、現在利用できるレース一覧URLを使う。
     race_list_url = (
-        f"https://race.netkeiba.com/top/race_list.html?kaisai_date={race_date}"
+        "https://race.sp.netkeiba.com/"
+        f"?kaisai_date={race_date}&pid=race_list"
     )
     user, pw = load_credentials()
     driver = setup_browser()

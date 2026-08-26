@@ -1,66 +1,266 @@
+# ============================================================
+# keiba_yosou_2026-2
+# GitHub管理用 .gitignore
+# 方針:
+# - ソースコード、設定コード、テストコード、ドキュメントは管理
+# - データ、出力結果、秘密情報、一時ファイル、仮想環境は除外
+# ============================================================
+
+
+# ============================================================
+# Python キャッシュ・ビルド生成物
+# ============================================================
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 *.pyo
 *.pyd
+*.so
 
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+build/
+dist/
+*.egg-info/
+.eggs/
+
+
+# ============================================================
+# Python 仮想環境
+# ============================================================
 .venv/
 venv/
 env/
+ENV/
 
+
+# ============================================================
+# 秘密情報・認証情報
+# ============================================================
 .env
 .env.*
 !.env.example
 
-data/
-config/
-codex/
-etc_py/*/
-nas_tokutyouryou_keisann/
-oid_py/
-py_explanation_md/
-races_review/
-scripts/
-src/
-tests/
-!backend/tests/
-!backend/tests/**/*.py
-!frontend/tests/
-!frontend/tests/**/*.mjs
-tokutyouryou_keisann/*/
-yosou_py/
-yosou_py_backup_20260412/
-yosou_py_backup_20260419/
+*.pem
+*.key
+*.p12
+*.pfx
 
-*.xlsx
-*.csv
-*.log
-
-# Local credentials
+# 個別認証ファイル
 config/credentials.ini
+config/secrets.ini
+config/private.ini
 
-# Node.js / pnpm
-node_modules/
-**/node_modules/
-.pnpm-store/
-.next/
-**/.next/
 
-# reports配下のnode_modulesを明示的に除外
-reports/node_modules/
-
-# Codex auto-backtest local implementation and run artifacts
-docs/auto_backtest_design_spec.md
-reports/auto_backtest_runs/
-reports/backtest_history.jsonl
-reports/*.png
-.backups/
-
-# Python
-__pycache__/
-*.pyc
-
-# VSCode不要なら
-.vscode/
+# ============================================================
+# Excel / CSV / 実データ
+# ============================================================
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+*.csv
+*.tsv
 
 # Excel一時ファイル
 ~$*.xlsx
+~$*.xls
+~$*.xlsm
+
+
+# ============================================================
+# データ保存フォルダ
+# ============================================================
+data/
+
+# 必要ならフォルダだけ残せるようにする
+!data/.gitkeep
+
+
+# ============================================================
+# 実行結果・生成物
+# ============================================================
+outputs/
+output/
+results/
+result/
+
+# 一時生成物
+tmp/
+temp/
+.codex_tmp/
+.backups/
+backup/
+backups/
+
+
+# ============================================================
+# ログ
+# ============================================================
+*.log
+logs/
+
+
+# ============================================================
+# レポート・バックテスト生成物
+# ============================================================
+reports/auto_backtest_runs/
+reports/backtest_history.jsonl
+
+# 自動生成画像
+reports/*.png
+reports/*.jpg
+reports/*.jpeg
+
+# 自動生成JSON
+reports/prediction_run_*.json
+reports/evaluation_*.json
+reports/comparison_*.json
+reports/target_dates_*.json
+reports/timeseries_prediction_run_*.json
+reports/manual_inmoney_evaluation_*.json
+reports/rank*_summary*.json
+reports/rank*_closeness*.json
+
+# 自動生成バックテスト結果
+reports/parallel_prediction_run_*/
+reports/phase11_precision_candidates_*/
+
+
+# ============================================================
+# エラー時キャプチャ
+# ============================================================
+errshot_dom/
+errshot_img/
+
+
+# ============================================================
+# 動画・キャプチャ
+# ============================================================
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+video_analysis/output/
+video_analysis/outputs/
+lap/output/
+lap/outputs/
+
+
+# ============================================================
+# 画像などの生成成果物
+# ============================================================
+*.tmp
+*.bak
+
+# コードマップ等をGit管理したい場合は
+# *.png 全体を無視しないこと
+#
+# そのため画像は必要な生成先フォルダだけ除外する
+
+
+# ============================================================
+# Node.js
+# ============================================================
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+.next/
+**/.next/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+# ============================================================
+# VS Code / IDE
+# ============================================================
+.vscode/
+
+.idea/
+
+*.code-workspace
+
+
+# ============================================================
+# OS固有ファイル
+# ============================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+
+# ============================================================
+# Jupyter
+# ============================================================
+.ipynb_checkpoints/
+
+
+# ============================================================
+# SQLite / DB
+# ============================================================
+*.db
+*.sqlite
+*.sqlite3
+
+
+# ============================================================
+# PID / ロックファイル
+# ============================================================
+*.pid
+*.lock
+
+
+# ============================================================
+# 一時テキスト・デバッグ
+# ============================================================
+*.ndjson
+
+# 必要なtxtはGit管理したいため *.txt 全体は除外しない
+
+
+# ============================================================
+# NAS / ローカル専用生成物
+# ============================================================
+nas_tokutyouryou_keisann/output/
+nas_tokutyouryou_keisann/outputs/
+
+
+# ============================================================
+# credentialを含み得るローカル設定
+# ============================================================
+*.secret
+*.secrets
+credentials.*
+secrets.*
+
+
+# ============================================================
+# Git管理したいもの
+#
+# 以下は「無視しない」
+# ============================================================
+#
+# config/
+# tests/
+# yosou_py/
+# tokutyouryou_keisann/
+# etc_py/
+# lap/
+# tools/
+# docs/
+# scripts/
+#
+# これらはPythonコード・テスト・設定・設計資料なので、
+# 原則GitHub管理対象とする

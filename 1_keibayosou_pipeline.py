@@ -32,7 +32,8 @@ import shutil
 import sys
 import unicodedata
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 
 def _register_renamed_keibayosou_modules() -> None:
@@ -44,6 +45,7 @@ def _register_renamed_keibayosou_modules() -> None:
         ("keibayosou_loaders", "1_keibayosou_loaders"),
         ("keibayosou_features", "1_keibayosou_features"),
         ("keibayosou_penalties", "1_keibayosou_penalties"),
+        ("keibayosou_ranking", "1_keibayosou_ranking"),
     ]
     for old_name, new_name in module_aliases:
         if old_name not in sys.modules:
@@ -81,6 +83,8 @@ from keibayosou_config import (
     SCORING_FEATURE_BLOCKS,
     SCORING_MODEL_VERSION,
     FIVE_BLOCK_BET_RULE,
+    PRODUCTION_MODEL_METADATA,
+    PRODUCTION_MODEL_SPEC,
     print_scoring_model_status,
 )
 from keibayosou_features import (
@@ -102,6 +106,15 @@ from keibayosou_utils import (
     build_feature_health_diagnostics,
     normalize_features_within_race,
 )
+from keibayosou_ranking import (
+    create_unique_rank_series,
+    select_top5_predictions,
+    validate_prediction_ranks,
+)
+from model_registry import write_json_atomic
+
+
+MODEL_METADATA_SHEET = "モデル情報"
 
 
 def compute_five_block_scores(feat_df: pd.DataFrame) -> pd.DataFrame:
@@ -152,11 +165,19 @@ def compute_five_block_scores(feat_df: pd.DataFrame) -> pd.DataFrame:
         + out["recent_form_score"] * SCORING_BLOCK_WEIGHTS["recent_form"]
         - out["risk_score"] * SCORING_BLOCK_WEIGHTS["risk"]
     )
-    out["five_block_score"] = out.groupby("rid_str")["five_block_raw_score"].transform(normalize_score).round(2)
-    out["five_block_rank"] = out.groupby("rid_str")["five_block_score"].rank(
-        "dense", ascending=False
-    ).astype(int)
     out["data_confidence"] = (1.0 - out[missing_cols].mean(axis=1)).clip(0.0, 1.0) * 100.0
+    # 順位決定用の丸め前scoreを保持し、表示用scoreは順位計算後にだけ丸める。
+    out["five_block_score_raw"] = out.groupby("rid_str")["five_block_raw_score"].transform(normalize_score)
+    out["five_block_rank"] = create_unique_rank_series(
+        df=out,
+        race_id_col="rid_str",
+        raw_score_col="five_block_score_raw",
+        risk_score_col="risk_score",
+        extra_penalty_col="extra_penalty",
+        data_confidence_col="data_confidence",
+        horse_number_col="馬番",
+    )
+    out["five_block_score"] = out["five_block_score_raw"].round(2)
 
     block_labels = {
         "ability_score": "能力",
@@ -184,18 +205,47 @@ def compute_scores_with_pipeline_logic(
     calc_fav_risk,
     alpha: float = ALPHA,
     extra_alpha: float = EXTRA_ALPHA,
+    weights_map: Optional[Mapping[Any, Mapping[str, float]]] = None,
 ) -> pd.DataFrame:
     """pipeline 本番と同じ式で total / score / rank を計算する。"""
     out = feat_df.copy()
 
-    out["total_raw"] = out.apply(
-        lambda r: score_sum(
-            apply_weights(
-                {k: r.get(k) for k in FEAT_COLS},
-                place=_normalize_place(place_map.get(str(r.get("rid_str", "")))),
-                surface=_normalize_surface(surface_map.get(str(r.get("rid_str", "")))),
+    def _select_explicit_weights(place: str, surface: str) -> Mapping[str, float]:
+        """明示指定したモデルの重みを本番と同じ優先順で選ぶ。"""
+        if weights_map is None:
+            return {}
+        normalized_place = _normalize_place(place)
+        normalized_surface = _normalize_surface(surface)
+        if normalized_place and normalized_surface:
+            by_place_surface = weights_map.get(
+                (normalized_place, normalized_surface)
             )
-        ),
+            if isinstance(by_place_surface, Mapping) and by_place_surface:
+                return by_place_surface
+        if normalized_place:
+            by_place = weights_map.get(normalized_place)
+            if isinstance(by_place, Mapping) and by_place:
+                return by_place
+        default = weights_map.get("__default__")
+        return default if isinstance(default, Mapping) else {}
+
+    def _weighted_features(row: pd.Series) -> Dict[str, float]:
+        """本番または明示モデルのみを使って重み付けする。"""
+        race_id = str(row.get("rid_str", ""))
+        place = _normalize_place(place_map.get(race_id))
+        surface = _normalize_surface(surface_map.get(race_id))
+        features = {key: row.get(key) for key in FEAT_COLS}
+        if weights_map is None:
+            return apply_weights(features, place=place, surface=surface)
+        return apply_weights(
+            features,
+            weights=dict(_select_explicit_weights(place, surface)),
+            place=place,
+            surface=surface,
+        )
+
+    out["total_raw"] = out.apply(
+        lambda row: score_sum(_weighted_features(row)),
         axis=1,
     )
 
@@ -236,8 +286,20 @@ def compute_scores_with_pipeline_logic(
         - alpha * out["favorite_risk"]
         - extra_alpha * out["extra_penalty"]
     )
-    out["score"] = out.groupby("rid_str")["total"].transform(normalize_score).round(2)
-    out["rank"] = out.groupby("rid_str")["score"].rank("dense", ascending=False).astype(int)
+    out["score_raw"] = out.groupby("rid_str")["total"].transform(normalize_score)
+
+    # 5ブロック側で作るリスク・信頼度も、新bestの完全同点解消にだけ利用する。
+    out = compute_five_block_scores(out)
+    out["rank"] = create_unique_rank_series(
+        df=out,
+        race_id_col="rid_str",
+        raw_score_col="score_raw",
+        risk_score_col="risk_score",
+        extra_penalty_col="extra_penalty",
+        data_confidence_col="data_confidence",
+        horse_number_col="馬番",
+    )
+    out["score"] = out["score_raw"].round(2)
 
     # legacy は旧重みではなく、現行の外部best重みモデルを指す互換列名。
     # モデル切替後も比較可能なよう、新bestの値を明示列と互換列の両方へ常時保存する。
@@ -248,10 +310,10 @@ def compute_scores_with_pipeline_logic(
     out["legacy_score"] = out["best_weight_score"]
     out["legacy_rank"] = out["best_weight_rank"]
 
-    # 5ブロックは常に計算して参照列へ残し、明示選択時だけ最終順位を上書きする。
-    out = compute_five_block_scores(out)
+    # 5ブロックは常に参照列へ残し、明示選択時だけ最終順位を上書きする。
     if SCORING_MODEL_VERSION == "five_block":
         out["total"] = out["five_block_raw_score"]
+        out["score_raw"] = out["five_block_score_raw"]
         out["score"] = out["five_block_score"]
         out["rank"] = out["five_block_rank"]
     return out
@@ -1346,7 +1408,7 @@ def _build_bet_sheet(
     買い目_レース別1行 を作る。
 
     ここでのポイント（過去出力の互換）：
-    - score1/score2/gap12 は「上位2頭（同点含む）」で計算
+    - score1/score2/gap12 は「一意化済み順位の上位2頭」で計算
     - dango_2_5 は「rank2 と rank5 の score差」で計算（rank不足なら 999）
     """
 
@@ -1414,8 +1476,8 @@ def _build_bet_sheet(
     bet_rows: list[dict] = []
 
     for rid, sub in ft.groupby("rid_str", sort=True):
-        # 上位馬番（同点は馬番昇順）を取る
-        sub2 = sub.sort_values(["score", "馬番"], ascending=[False, True], kind="mergesort")
+        # TARGET・評価と同じ一意化済み順位だけを使って上位馬を取る。
+        sub2 = sub.sort_values(["rank"], ascending=[True], kind="mergesort")
         top7 = sub2.head(7)
         top1_row = top7.iloc[0] if not top7.empty else pd.Series(dtype=object)
 
@@ -1430,7 +1492,7 @@ def _build_bet_sheet(
         gap12 = round(float(score1 - score2), 2) if (score1 is not None and score2 is not None) else 0.0
 
         # dango_2_5：rank2とrank5のscore差（rank不足なら999）
-        rank_score = sub2.dropna(subset=["rank", "score"]).groupby("rank")["score"].max().sort_index()
+        rank_score = sub2.dropna(subset=["rank", "score"]).set_index("rank")["score"].sort_index()
         if 2 in rank_score.index and 5 in rank_score.index:
             dango_2_5 = round(float(rank_score.loc[2] - rank_score.loc[5]), 2)
         else:
@@ -1596,6 +1658,32 @@ def write_features_to_excel(
     """もとの EXCEL をコピーし、TARGET シートと今走シートを上書き。
     さらに過去版互換で 買い目_レース別1行 も作成する。
     """
+    # 異常な順位を含むExcelを作らないよう、コピーや書き込みより先に全モデルを検証する。
+    if not feat_df.empty:
+        validate_prediction_ranks(
+            feat_df,
+            rank_col="rank",
+            score_col="score",
+            raw_score_col="score_raw",
+            model_name="最終",
+        )
+        validate_prediction_ranks(
+            feat_df,
+            rank_col="best_weight_rank",
+            score_col="best_weight_score",
+            raw_score_col="score_raw",
+            model_name="新best",
+        )
+        validate_prediction_ranks(
+            feat_df,
+            rank_col="five_block_rank",
+            score_col="five_block_score",
+            raw_score_col="five_block_score_raw",
+            model_name="5ブロック",
+        )
+        # TOP5抽出も共通順位を通し、1レース最大5頭であることを保存前に確認する。
+        select_top5_predictions(feat_df, raw_score_col="score_raw")
+
     print(f"[INFO] 特徴量を {out_excel} に出力します")
 
     src_abs = os.path.normcase(os.path.abspath(src_excel))
@@ -1713,6 +1801,7 @@ def write_features_to_excel(
         ).drop(columns=["_rid_sort", "_rank_sort"])
 
     now_export = now_df.copy()
+    model_metadata_df = pd.DataFrame([dict(PRODUCTION_MODEL_METADATA)])
 
     # ★追加：買い目シートを生成
     try:
@@ -1729,6 +1818,7 @@ def write_features_to_excel(
         feature_health_df.to_excel(writer, sheet_name=FEATURE_HEALTH_SHEET, index=False)
         feature_correlation_df.to_excel(writer, sheet_name=FEATURE_CORRELATION_SHEET, index=False)
         feature_contribution_df.to_excel(writer, sheet_name=FEATURE_CONTRIBUTION_SHEET, index=False)
+        model_metadata_df.to_excel(writer, sheet_name=MODEL_METADATA_SHEET, index=False)
 
         if not bet_df.empty:
             bet_df.to_excel(writer, sheet_name=BET_SHEET, index=False)
@@ -1736,6 +1826,17 @@ def write_features_to_excel(
     if not bet_df.empty:
         _write_bet_rank_readme_to_excel(out_excel)
         append_roi_focus_bet_sheet_to_excel(out_excel)
+
+    metadata_json_path = Path(out_excel).with_suffix(".model.json")
+    write_json_atomic(
+        metadata_json_path,
+        {
+            **dict(PRODUCTION_MODEL_METADATA),
+            "prediction_excel": Path(out_excel).name,
+            "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        },
+    )
+    print(f"[INFO] 本番モデル識別JSONを出力しました: {metadata_json_path}")
 
 
 def append_success_report(df: pd.DataFrame, report_path: str) -> None:
@@ -1747,6 +1848,7 @@ def append_success_report(df: pd.DataFrame, report_path: str) -> None:
         "日付": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "レース数": n_races,
         "頭数": n_horses,
+        **dict(PRODUCTION_MODEL_METADATA),
     }
 
     if os.path.exists(report_path):
@@ -1795,6 +1897,184 @@ def _merge_dl_rank_override(merged: pd.DataFrame, dl_rank_df: Optional[pd.DataFr
     return out
 
 
+def _run_shadow_comparison(
+    *,
+    scoring_input_df: pd.DataFrame,
+    production_predictions: pd.DataFrame,
+    production_now_df: pd.DataFrame,
+    place_map: Dict[str, str],
+    surface_map: Dict[str, str],
+    calc_fav_risk,
+    odds_df: Optional[pd.DataFrame],
+    raceday: str | None,
+    score_columns: list[str],
+) -> list[Path]:
+    """本番DataFrameを変更せず、シャドーの結果確定前JSONだけを保存する。"""
+    from shadow_validation import (
+        build_shadow_pre_payload,
+        load_forward_validation_policy,
+        load_shadow_runtime,
+        write_shadow_pre_payload,
+    )
+
+    policy = load_forward_validation_policy()
+    runtime = load_shadow_runtime()
+    print(f"[INFO] shadow_model_name={runtime.spec.model_name}")
+    print(f"[INFO] shadow_weight_file={runtime.spec.weight_file}")
+    print(f"[INFO] shadow_file_sha256={runtime.spec.file_sha256}")
+    print(f"[INFO] shadow_effective_sha256={runtime.spec.effective_sha256}")
+    print(
+        "[INFO] shadow_weight_shape="
+        f"groups={runtime.spec.expected_group_count} "
+        f"elements={runtime.spec.expected_element_count}"
+    )
+    production_prediction_snapshot = production_predictions.copy(deep=True)
+    production_now_snapshot = production_now_df.copy(deep=True)
+
+    shadow_predictions = compute_scores_with_pipeline_logic(
+        scoring_input_df.copy(deep=True),
+        place_map=place_map,
+        surface_map=surface_map,
+        calc_fav_risk=calc_fav_risk,
+        weights_map=runtime.weights_map,
+    )
+    shadow_now_base = production_now_df.drop(
+        columns=[column for column in score_columns if column in production_now_df.columns],
+        errors="ignore",
+    )
+    shadow_now_df = pd.merge(
+        shadow_now_base,
+        shadow_predictions[["rid_str", "馬番", *score_columns]],
+        on=["rid_str", "馬番"],
+        how="left",
+    )
+
+    production_bets = _build_bet_sheet(
+        feat_export=production_predictions,
+        now_export=production_now_df,
+        odds_df=odds_df,
+    )
+    production_bets_snapshot = production_bets.copy(deep=True)
+    production_roi_bets = build_roi_focus_bet_sheet(
+        bet_df=production_bets,
+        now_df=production_now_df,
+    )
+    production_roi_snapshot = production_roi_bets.copy(deep=True)
+    shadow_bets = _build_bet_sheet(
+        feat_export=shadow_predictions,
+        now_export=shadow_now_df,
+        odds_df=odds_df,
+    )
+    shadow_roi_bets = build_roi_focus_bet_sheet(
+        bet_df=shadow_bets,
+        now_df=shadow_now_df,
+    )
+
+    # シャドー計算前後で本番予測・買い目が1セルも変わっていないことを強制する。
+    pd.testing.assert_frame_equal(
+        production_predictions,
+        production_prediction_snapshot,
+        check_exact=True,
+    )
+    pd.testing.assert_frame_equal(
+        production_now_df,
+        production_now_snapshot,
+        check_exact=True,
+    )
+    pd.testing.assert_frame_equal(
+        production_bets,
+        production_bets_snapshot,
+        check_exact=True,
+    )
+    pd.testing.assert_frame_equal(
+        production_roi_bets,
+        production_roi_snapshot,
+        check_exact=True,
+    )
+
+    race_ids = production_predictions["rid_str"].astype(str)
+    if raceday and re.fullmatch(r"\d{8}", str(raceday)):
+        comparison_dates = [str(raceday)]
+    else:
+        comparison_dates = sorted(
+            {
+                match.group(1)
+                for race_id in race_ids
+                if (match := re.search(r"(\d{8})", race_id)) is not None
+            }
+        )
+    if not comparison_dates:
+        raise RuntimeError("シャドー比較の開催日をレースIDから特定できません")
+
+    start_date = str(policy["start_date"])
+    output_paths: list[Path] = []
+    for comparison_date in comparison_dates:
+        if comparison_date < start_date:
+            print(
+                "[INFO] 前向き検証開始日前のためシャドー保存をスキップします: "
+                f"date={comparison_date} start={start_date}"
+            )
+            continue
+        if raceday:
+            production_day = production_predictions.copy()
+            shadow_day = shadow_predictions.copy()
+            production_bets_day = production_bets.copy()
+            shadow_bets_day = shadow_bets.copy()
+            production_roi_day = production_roi_bets.copy()
+            shadow_roi_day = shadow_roi_bets.copy()
+        else:
+            production_mask = production_predictions["rid_str"].astype(str).str.contains(
+                comparison_date,
+                regex=False,
+            )
+            shadow_mask = shadow_predictions["rid_str"].astype(str).str.contains(
+                comparison_date,
+                regex=False,
+            )
+            production_day = production_predictions.loc[production_mask].copy()
+            shadow_day = shadow_predictions.loc[shadow_mask].copy()
+            production_bets_day = production_bets[
+                production_bets["レースID"].astype(str).str.contains(
+                    comparison_date,
+                    regex=False,
+                )
+            ].copy()
+            shadow_bets_day = shadow_bets[
+                shadow_bets["レースID"].astype(str).str.contains(
+                    comparison_date,
+                    regex=False,
+                )
+            ].copy()
+            production_roi_day = production_roi_bets[
+                production_roi_bets["レースID"].astype(str).str.contains(
+                    comparison_date,
+                    regex=False,
+                )
+            ].copy()
+            shadow_roi_day = shadow_roi_bets[
+                shadow_roi_bets["レースID"].astype(str).str.contains(
+                    comparison_date,
+                    regex=False,
+                )
+            ].copy()
+
+        payload = build_shadow_pre_payload(
+            comparison_date=comparison_date,
+            production_spec=PRODUCTION_MODEL_SPEC,
+            shadow_spec=runtime.spec,
+            production_predictions=production_day,
+            shadow_predictions=shadow_day,
+            production_bets=production_bets_day,
+            shadow_bets=shadow_bets_day,
+            production_roi_bets=production_roi_day,
+            shadow_roi_bets=shadow_roi_day,
+        )
+        output_path = write_shadow_pre_payload(runtime, payload)
+        output_paths.append(output_path)
+        print(f"[INFO] 結果確定前シャドー比較JSONを保存しました: {output_path}")
+    return output_paths
+
+
 # ================================================================
 # メイン処理
 # ================================================================
@@ -1806,7 +2086,8 @@ def run_pipeline(
     ODDS_CSV_PATH: str = str(ODDS_CSV),
     RACEDAY: str | None = None,
     DL_RANK_DF: Optional[pd.DataFrame] = None,
-) -> None:
+    ENABLE_SHADOW: bool = False,
+) -> list[Path]:
     print_scoring_model_status()
 
     # 各種マスタ読み込み
@@ -1837,6 +2118,7 @@ def run_pipeline(
 
         # score系の列が無いと後続や出力で困るので、念のため空列を作る
         for c in [
+            "score_raw",
             "score",
             "rank",
             "best_weight_total",
@@ -1846,6 +2128,7 @@ def run_pipeline(
             "legacy_score",
             "legacy_rank",
             "five_block_raw_score",
+            "five_block_score_raw",
             "five_block_score",
             "five_block_rank",
             "favorite_risk",
@@ -1869,7 +2152,7 @@ def run_pipeline(
             odds_df=odds_df,
         )
         append_success_report(out_df, str(SUCCESS_REPORT))
-        return
+        return []
 
     # 場所・馬場を rid_str ごとに取得
     place_map: Dict[str, str] = {}
@@ -1982,6 +2265,7 @@ def run_pipeline(
     )
     feat_df = feat_df.drop(columns=["頭数"], errors="ignore")
 
+    scoring_input_df = feat_df.copy(deep=True)
     feat_df = compute_scores_with_pipeline_logic(
         feat_df,
         place_map=place_map,
@@ -1993,6 +2277,7 @@ def run_pipeline(
     # pandas merge が suffix（_x/_y）を付ける際に列名が衝突して MergeError になることがあります。
     # ここでは「今回あらためて計算した列」で上書きする前提で、古い同名列を削除してから結合します。
     _cols_to_add = [
+        "score_raw",
         "score",
         "rank",
         "best_weight_total",
@@ -2002,6 +2287,7 @@ def run_pipeline(
         "legacy_score",
         "legacy_rank",
         "five_block_raw_score",
+        "five_block_score_raw",
         "five_block_score",
         "five_block_rank",
         "favorite_risk",
@@ -2027,6 +2313,20 @@ def run_pipeline(
         how="left",
     )
 
+    shadow_output_paths: list[Path] = []
+    if ENABLE_SHADOW:
+        shadow_output_paths = _run_shadow_comparison(
+            scoring_input_df=scoring_input_df,
+            production_predictions=feat_df,
+            production_now_df=out_df,
+            place_map=place_map,
+            surface_map=surface_map,
+            calc_fav_risk=calc_fav_risk,
+            odds_df=odds_df,
+            raceday=RACEDAY,
+            score_columns=_cols_to_add,
+        )
+
     # Excel 出力
     write_features_to_excel(
         src_excel=SRC_EXCEL,
@@ -2038,3 +2338,4 @@ def run_pipeline(
 
     # 集計
     append_success_report(out_df, str(SUCCESS_REPORT))
+    return shadow_output_paths

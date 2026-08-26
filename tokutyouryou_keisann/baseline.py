@@ -9,7 +9,7 @@ import importlib.util
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -54,6 +54,14 @@ class BaselineWeightInfo:
     place_surface_group_count: int
     production_path: Path
     production_sha256: str
+    effective_sha256: str
+    production_effective_sha256: str
+    effective_group_count: int
+    effective_weight_count: int
+    production_group_count: int
+    production_weight_count: int
+    transform_stats: WeightTransformStats
+    production_transform_stats: WeightTransformStats
     production_weights_match: bool
 
 
@@ -70,6 +78,17 @@ class WeightMapComparison:
     missing_from_right: list[dict[str, str]]
     added_in_right: list[dict[str, str]]
     max_absolute_difference: float
+
+
+@dataclass(frozen=True)
+class WeightTransformStats:
+    """本番共通処理で適用した補完・符号補正・0固定の件数。"""
+
+    missing_common_group_completion_count: int
+    missing_place_surface_group_completion_count: int
+    missing_feature_completion_count: int
+    empirical_sign_correction_count: int
+    disabled_feature_zero_count: int
 
 
 def sha256_file(path: Path) -> str:
@@ -129,14 +148,16 @@ def _latest_adopted_best() -> Path | None:
 
 
 def production_best_path() -> Path:
-    """本番configが実際に選ぶ最新bestファイルを返す。"""
+    """明示的な本番モデル設定が参照するbestファイルを返す。"""
     production_config = importlib.import_module("1_keibayosou_config")
-    latest = production_config._find_latest_weights_module(str(PY_DIR))
-    if latest is None:
-        raise BaselineWeightError("本番runnerが読み込むbestファイルが存在しません")
-    path = Path(latest[1]).resolve()
+    spec = getattr(production_config, "PRODUCTION_MODEL_SPEC", None)
+    if spec is None:
+        raise BaselineWeightError("本番モデル設定が読み込まれていません")
+    path = Path(spec.resolved_weight_path).resolve()
     if not _is_best_file(path):
         raise BaselineWeightError(f"本番runnerの重みファイル名が不正です: {path}")
+    if not path.is_file():
+        raise BaselineWeightError(f"本番runnerの重みファイルが存在しません: {path}")
     return path
 
 
@@ -155,22 +176,9 @@ def select_baseline_weight_file(
             )
         return BaselineSelection(path, "cli")
 
-    adopted_path = _latest_adopted_best()
-    if adopted_path is not None:
-        return BaselineSelection(adopted_path, "latest_adopted_decision_json")
-
-    try:
-        return BaselineSelection(production_best_path(), "production_runner")
-    except BaselineWeightError:
-        pass
-
-    latest_files = sorted(
-        (path.resolve() for path in PY_DIR.iterdir() if path.is_file() and _is_best_file(path)),
-        key=lambda path: BEST_FILE_PATTERN.fullmatch(path.name).group(1),  # type: ignore[union-attr]
-    ) if PY_DIR.exists() else []
-    if latest_files:
-        return BaselineSelection(latest_files[-1], "latest_best_file_fallback")
-    raise BaselineWeightError("baseline用best_feature_weights_YYYYMMDD.pyが存在しません")
+    # 採用履歴JSONやファイル名の日付は、本番選択の根拠にしない。
+    # 設定不備時も最新ファイルへfallbackせず、安全に停止する。
+    return BaselineSelection(production_best_path(), "production_model_config")
 
 
 def _load_module(path: Path) -> Any:
@@ -240,8 +248,10 @@ def _strict_external_maps(module: Any) -> tuple[dict[str, dict[str, float]], dic
     return common, by_surface
 
 
-def _effective_map_from_file(path: Path) -> tuple[WeightsMap, int, int, int]:
-    """本番と同じ統合・符号補正規則でWeightsMapを構築する。"""
+def _effective_map_from_file_with_stats(
+    path: Path,
+) -> tuple[WeightsMap, int, int, int, WeightTransformStats]:
+    """本番と同じ統合・符号補正規則でWeightsMapと適用件数を構築する。"""
     if not path.exists() or not path.is_file():
         raise BaselineWeightError(f"baselineファイルが存在しません: {path}")
     module = _load_module(path)
@@ -252,13 +262,48 @@ def _effective_map_from_file(path: Path) -> tuple[WeightsMap, int, int, int]:
         production_config.BUILTIN_FEATURE_WEIGHTS,
         external_common,
     )
-    common = production_config._enforce_empirical_weight_signs(common)
     by_surface = production_config._merge_feature_weights_by_place_surface(
         production_config.BUILTIN_FEATURE_WEIGHTS_BY_PLACE_SURFACE,
         external_by_surface,
         common.get("__default__", {}),
     )
+    common_before_enforcement = {
+        key: dict(weights) for key, weights in common.items()
+    }
+    by_surface_before_enforcement = {
+        key: dict(weights) for key, weights in by_surface.items()
+    }
+    common = production_config._enforce_empirical_weight_signs(common)
     by_surface = production_config._enforce_empirical_weight_signs(by_surface)
+
+    missing_feature_completion_count = 0
+    for key, weights in common_before_enforcement.items():
+        source = external_common.get(key, {})
+        missing_feature_completion_count += len(set(weights) - set(source))
+    for key, weights in by_surface_before_enforcement.items():
+        source = external_by_surface.get(key, {})
+        missing_feature_completion_count += len(set(weights) - set(source))
+
+    empirical_sign_correction_count = 0
+    disabled_feature_zero_count = 0
+    before_maps: dict[Any, dict[str, float]] = {
+        **common_before_enforcement,
+        **by_surface_before_enforcement,
+    }
+    after_maps: dict[Any, dict[str, float]] = {**common, **by_surface}
+    disabled_features = set(production_config.DISABLED_RANKING_FEATURES)
+    sign_guard = dict(production_config.EMPIRICAL_WEIGHT_SIGN_GUARD)
+    for key, before_weights in before_maps.items():
+        after_weights = after_maps[key]
+        for feature, before_value in before_weights.items():
+            after_value = float(after_weights.get(feature, 0.0))
+            before_float = float(before_value)
+            if feature in disabled_features:
+                if before_float != 0.0 and after_value == 0.0:
+                    disabled_feature_zero_count += 1
+            elif feature in sign_guard and before_float != after_value:
+                empirical_sign_correction_count += 1
+
     weights_map: WeightsMap = {
         key: dict(weights) for key, weights in common.items()
     }
@@ -266,7 +311,24 @@ def _effective_map_from_file(path: Path) -> tuple[WeightsMap, int, int, int]:
         key: dict(weights) for key, weights in by_surface.items()
     })
     common_count = len(common.get("__default__", {}))
-    return weights_map, common_count, len(common), len(by_surface)
+    stats = WeightTransformStats(
+        missing_common_group_completion_count=len(set(common) - set(external_common)),
+        missing_place_surface_group_completion_count=len(
+            set(by_surface) - set(external_by_surface)
+        ),
+        missing_feature_completion_count=missing_feature_completion_count,
+        empirical_sign_correction_count=empirical_sign_correction_count,
+        disabled_feature_zero_count=disabled_feature_zero_count,
+    )
+    return weights_map, common_count, len(common), len(by_surface), stats
+
+
+def _effective_map_from_file(path: Path) -> tuple[WeightsMap, int, int, int]:
+    """既存呼出し向けに実効WeightsMapとgroup件数を返す。"""
+    weights_map, common_count, common_groups, by_surface_groups, _ = (
+        _effective_map_from_file_with_stats(path)
+    )
+    return weights_map, common_count, common_groups, by_surface_groups
 
 
 def load_effective_weights_file(path: str | Path) -> WeightsMap:
@@ -427,23 +489,123 @@ def weights_equal(left: WeightsMap, right: WeightsMap, tolerance: float = 1e-12)
     ).match
 
 
+def _format_weight_mismatch_diagnostics(
+    *,
+    selection: BaselineSelection,
+    production_path: Path,
+    baseline_weights: WeightsMap,
+    production_weights: WeightsMap,
+    comparison: WeightMapComparison,
+    transform_stats: WeightTransformStats,
+    production_transform_stats: WeightTransformStats,
+) -> str:
+    """不一致時に必要なパス・SHA・key差分・正規化処理差を整形する。"""
+    baseline_group_count = len(baseline_weights)
+    production_group_count = len(production_weights)
+    baseline_weight_count = sum(len(group) for group in baseline_weights.values())
+    production_weight_count = sum(len(group) for group in production_weights.values())
+    baseline_stats = asdict(transform_stats)
+    production_stats = asdict(production_transform_stats)
+    return "\n".join(
+        [
+            "選択baselineのパスまたは実効重みが本番runnerと一致しません",
+            f"production_file_name={production_path.name}",
+            f"production_path={production_path}",
+            f"production_resolved_path={production_path.resolve()}",
+            f"baseline_file_name={selection.path.name}",
+            f"baseline_path={selection.path}",
+            f"baseline_resolved_path={selection.path.resolve()}",
+            f"production_file_sha256={sha256_file(production_path)}",
+            f"baseline_file_sha256={sha256_file(selection.path)}",
+            f"production_effective_sha256={comparison.right_normalized_sha256}",
+            f"baseline_effective_sha256={comparison.left_normalized_sha256}",
+            f"production_group_count={production_group_count}",
+            f"baseline_group_count={baseline_group_count}",
+            f"production_weight_count={production_weight_count}",
+            f"baseline_weight_count={baseline_weight_count}",
+            f"differing_group_count={comparison.differing_group_count}",
+            f"differing_feature_count={comparison.differing_feature_count}",
+            "weight_differences="
+            + json.dumps(comparison.differences, ensure_ascii=False, sort_keys=True),
+            "missing_from_production="
+            + json.dumps(comparison.missing_from_right, ensure_ascii=False, sort_keys=True),
+            "added_to_production="
+            + json.dumps(comparison.added_in_right, ensure_ascii=False, sort_keys=True),
+            "baseline_transformations="
+            + json.dumps(baseline_stats, ensure_ascii=False, sort_keys=True),
+            "production_transformations="
+            + json.dumps(production_stats, ensure_ascii=False, sort_keys=True),
+            f"normalization_application_difference={baseline_stats != production_stats}",
+        ]
+    )
+
+
 def load_baseline_weights(
     selection: BaselineSelection,
     verify_production: bool = True,
 ) -> BaselineWeightInfo:
     """選択ファイルを読み、本番と不一致なら安全側で失敗させる。"""
-    weights_map, common_count, common_groups, by_surface_groups = _effective_map_from_file(
-        selection.path
-    )
+    (
+        weights_map,
+        common_count,
+        common_groups,
+        by_surface_groups,
+        transform_stats,
+    ) = _effective_map_from_file_with_stats(selection.path)
     production_path = production_best_path()
     production_weights = active_production_weights()
+    (
+        production_file_weights,
+        _,
+        _,
+        _,
+        production_transform_stats,
+    ) = _effective_map_from_file_with_stats(production_path)
+    production_internal_comparison = compare_weights_maps(
+        production_file_weights,
+        production_weights,
+        tolerance=0.0,
+        difference_limit=100,
+    )
+    if not production_internal_comparison.match:
+        raise BaselineWeightError(
+            "本番runnerの選択ファイルから再構築した実効重みがimport済み本番重みと一致しません\n"
+            + _format_weight_mismatch_diagnostics(
+                selection=BaselineSelection(production_path, "production_internal_check"),
+                production_path=production_path,
+                baseline_weights=production_file_weights,
+                production_weights=production_weights,
+                comparison=production_internal_comparison,
+                transform_stats=production_transform_stats,
+                production_transform_stats=production_transform_stats,
+            )
+        )
+    comparison = compare_weights_maps(
+        weights_map,
+        production_weights,
+        tolerance=0.0,
+        difference_limit=100,
+    )
+    effective_sha_match = (
+        comparison.left_normalized_sha256
+        == comparison.right_normalized_sha256
+    )
     matches = (
         selection.path.resolve() == production_path.resolve()
-        and weights_equal(weights_map, production_weights)
+        and comparison.match
+        and effective_sha_match
     )
     if verify_production and not matches:
         raise BaselineWeightError(
-            "選択baselineのパスまたは実効重みが本番runnerと一致しません"
+            _format_weight_mismatch_diagnostics(
+                selection=selection,
+                production_path=production_path,
+                baseline_weights=weights_map,
+                production_weights=production_weights,
+                comparison=comparison,
+                transform_stats=transform_stats,
+                production_transform_stats=production_transform_stats,
+            )
         )
     modified_at = datetime.fromtimestamp(
         selection.path.stat().st_mtime, tz=timezone.utc
@@ -459,5 +621,15 @@ def load_baseline_weights(
         place_surface_group_count=by_surface_groups,
         production_path=production_path,
         production_sha256=sha256_file(production_path),
+        effective_sha256=comparison.left_normalized_sha256,
+        production_effective_sha256=comparison.right_normalized_sha256,
+        effective_group_count=len(weights_map),
+        effective_weight_count=sum(len(group) for group in weights_map.values()),
+        production_group_count=len(production_weights),
+        production_weight_count=sum(
+            len(group) for group in production_weights.values()
+        ),
+        transform_stats=transform_stats,
+        production_transform_stats=production_transform_stats,
         production_weights_match=matches,
     )
