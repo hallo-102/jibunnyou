@@ -130,6 +130,45 @@ def extract_race_ids_from_html(html: str) -> List[str]:
         ids.add(m)
     return sorted(ids)
 
+
+def validate_race_ids_not_used_on_other_dates(
+    race_ids: List[str],
+    race_date: str,
+    workbook_path: Path,
+) -> None:
+    """同じrace_idが別日付シートですでに保存済みなら停止する。"""
+    if not workbook_path.exists() or not race_ids:
+        return
+
+    race_id_set = {str(rid) for rid in race_ids}
+    xls = pd.ExcelFile(workbook_path, engine="openpyxl")
+    conflicts: list[tuple[str, str]] = []
+    try:
+        for sheet in xls.sheet_names:
+            sheet_str = str(sheet)
+            if sheet_str == str(race_date) or not re.fullmatch(r"\d{8}", sheet_str):
+                continue
+            try:
+                df = pd.read_excel(xls, sheet_name=sheet, usecols=lambda c: str(c).replace(" ", "") in {"レースID", "ﾚｰｽID"})
+            except Exception:
+                df = pd.read_excel(xls, sheet_name=sheet)
+            race_col = next((c for c in df.columns if str(c).replace(" ", "") in {"レースID", "ﾚｰｽID"}), None)
+            if race_col is None:
+                continue
+            existing = set(df[race_col].dropna().astype(str).str.replace(r"\.0$", "", regex=True))
+            for rid in sorted(race_id_set & existing):
+                conflicts.append((sheet_str, rid))
+    finally:
+        xls.close()
+
+    if conflicts:
+        preview = ", ".join(f"{date}:{rid}" for date, rid in conflicts[:20])
+        raise RuntimeError(
+            "取得したrace_idが別開催日シートですでに使用されています。"
+            " 誤ったレース一覧を保存する事故を防ぐため処理を停止します。"
+            f" target_date={race_date} conflicts={len(conflicts)} preview={preview}"
+        )
+
 # ───────────────────────────────
 # ④ レースID 一括取得（待機強化＋抽出ロジック強化）
 # ───────────────────────────────
@@ -357,6 +396,13 @@ def main():
         login(driver, user, pw)
         race_ids = get_race_ids_for_date(driver, race_list_url)
         print(f"▶ レースID取得: {len(race_ids)} 件")
+
+        # 既存の別日付シートで同じrace_idが使われていないことを保存前に強制確認する。
+        validate_race_ids_not_used_on_other_dates(
+            race_ids,
+            race_date,
+            OUTPUT_DIR / "racedata_results.xlsx",
+        )
 
         all_dfs: List[pd.DataFrame] = []
         for rid in tqdm(race_ids, desc="各レース取得"):
