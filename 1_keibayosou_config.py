@@ -295,6 +295,7 @@ FEATURE_WEIGHTS_BY_PLACE_SURFACE: Dict[Tuple[str, str], Dict[str, float]] = {}
 # data/output/current_weight_backtest/feature_diagnostics_current_weight_backtest.xlsx
 # の weight_corr_mismatch シートで確認した corr_top3 の向きを採用する。
 EMPIRICAL_WEIGHT_SIGN_GUARD: Dict[str, int] = {
+    "field_size_adjusted_finish": 1,
     "avg_last3f": -1,
     "avg_time_idx": 1,
     "avg_pop": -1,
@@ -332,6 +333,7 @@ EMPIRICAL_WEIGHT_SIGN_GUARD: Dict[str, int] = {
 # 使う特徴量（列名）
 FEAT_COLS = [
     "avg_finish",
+    "field_size_adjusted_finish",
     "avg_pop",
     "dist_diff",
     "days_off",
@@ -566,6 +568,7 @@ REST_DIST_RISK_K = 0.8
 # ================================================================
 JAPANESE_FEATURE_NAMES: Dict[str, str] = {
     "avg_finish": "平均着順",
+    "field_size_adjusted_finish": "頭数補正平均着順",
     "avg_pop": "平均人気",
     "dist_diff": "距離差",
     "days_off": "休養日数",
@@ -944,6 +947,7 @@ def print_active_feature_weights() -> None:
 
     check_features = [
         "avg_finish",
+        "field_size_adjusted_finish",
         "avg_pop",
         "dist_diff",
         "days_off",
