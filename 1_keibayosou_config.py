@@ -295,7 +295,6 @@ FEATURE_WEIGHTS_BY_PLACE_SURFACE: Dict[Tuple[str, str], Dict[str, float]] = {}
 # data/output/current_weight_backtest/feature_diagnostics_current_weight_backtest.xlsx
 # の weight_corr_mismatch シートで確認した corr_top3 の向きを採用する。
 EMPIRICAL_WEIGHT_SIGN_GUARD: Dict[str, int] = {
-    "avg_finish": -1,
     "field_size_adjusted_finish": 1,
     "avg_last3f": -1,
     "avg_time_idx": 1,
