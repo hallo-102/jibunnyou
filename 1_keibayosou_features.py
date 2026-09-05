@@ -21,6 +21,7 @@ from __future__ import annotations
   - ラップから簡易ペース(slow/mid/fast)を判定
   - その条件一致の中で「上がり3Fの価値」を作る
 - 今走のペース列がある場合はそれも条件一致に使う
+- 過去走の着順を各レース頭数で正規化する field_size_adjusted_finish を追加
 修正必要箇所以外は既存のまま
 """
 
@@ -985,6 +986,15 @@ def _compute_horse_features_from_race_sheets(
 
             ta_n = float(len(one)) if not one.empty else 0.0
             avg_finish = float(finish_s.mean()) if not finish_s.dropna().empty else np.nan
+            field_size_adjusted_finish = np.nan
+            past_field_size_s = pd.to_numeric(one["__field_size__"], errors="coerce")
+            valid_field_size_finish = finish_s.notna() & past_field_size_s.notna() & past_field_size_s.gt(1.0)
+            if valid_field_size_finish.any():
+                normalized_finish = 1.0 - (
+                    (finish_s[valid_field_size_finish] - 1.0)
+                    / (past_field_size_s[valid_field_size_finish] - 1.0)
+                )
+                field_size_adjusted_finish = float(normalized_finish.clip(lower=0.0, upper=1.0).mean())
             avg_pop = float(pop_s.mean()) if not pop_s.dropna().empty else np.nan
             win_rate = float((finish_s == 1).mean()) if not finish_s.dropna().empty else np.nan
             avg_last3f = float(last3_s.mean()) if not last3_s.dropna().empty else np.nan
@@ -1201,6 +1211,7 @@ def _compute_horse_features_from_race_sheets(
                     "馬番": int(umaban) if pd.notna(umaban) else pd.NA,
                     "馬名": horse_name,
                     "avg_finish": avg_finish,
+                    "field_size_adjusted_finish": field_size_adjusted_finish,
                     "avg_pop": avg_pop,
                     "dist_diff": dist_diff,
                     "days_off": days_off,
