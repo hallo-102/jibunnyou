@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import re
@@ -107,9 +108,45 @@ def load_shadow_runtime() -> ShadowRuntime:
     return ShadowRuntime(spec=spec, weights_map=weights_map, output_dir=output_dir)
 
 
+def _git_blob_sha1(path: Path) -> str:
+    """Gitがファイル(blob)に使うSHA-1を作る。GitHub Contents APIのshaと一致する。"""
+    data = path.read_bytes()
+    header = f"blob {len(data)}\0".encode("utf-8")
+    return hashlib.sha1(header + data).hexdigest()
+
+
+def _select_forward_validation_generation(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """schema v1はそのまま、schema v2はactive_generationだけを実行対象として返す。"""
+    schema_version = int(payload.get("schema_version", 1) or 1)
+    if schema_version == 1:
+        return dict(payload)
+    if schema_version != 2:
+        raise ModelConfigError(f"未対応の前向き検証schema_versionです: {schema_version}")
+
+    active_generation = payload.get("active_generation")
+    generations = payload.get("generations")
+    if not isinstance(active_generation, str) or not active_generation.strip():
+        raise ModelConfigError("前向き検証active_generationが未設定です")
+    if not isinstance(generations, dict) or not generations:
+        raise ModelConfigError("前向き検証generationsが未設定です")
+    selected = generations.get(active_generation)
+    if not isinstance(selected, dict):
+        raise ModelConfigError(
+            f"active_generationに対応する世代設定がありません: {active_generation}"
+        )
+
+    policy = dict(selected)
+    policy["schema_version"] = schema_version
+    policy["active_generation"] = active_generation
+    policy["generation_history"] = list(generations.keys())
+    return policy
+
+
 def load_forward_validation_policy() -> dict[str, Any]:
-    """前向き検証の開始日・閾値・固定指標を検証する。"""
-    payload = _read_json_object(FORWARD_CONFIG_PATH, "前向き検証設定")
+    """前向き検証の有効世代・開始日・閾値・固定指標を検証する。"""
+    raw_payload = _read_json_object(FORWARD_CONFIG_PATH, "前向き検証設定")
+    payload = _select_forward_validation_generation(raw_payload)
+
     start_date = str(payload.get("start_date", ""))
     if not re.fullmatch(r"\d{8}", start_date):
         raise ModelConfigError("前向き検証start_dateはYYYYMMDDで指定してください")
@@ -151,6 +188,13 @@ def load_forward_validation_policy() -> dict[str, Any]:
     frozen_files = payload.get("frozen_files")
     if not isinstance(frozen_files, dict) or not frozen_files:
         raise ModelConfigError("前向き検証の固定ファイルSHAが未設定です")
+
+    hash_algorithm = str(payload.get("hash_algorithm", "sha256")).strip().lower()
+    if hash_algorithm not in {"sha256", "git_blob_sha1"}:
+        raise ModelConfigError(
+            f"前向き検証hash_algorithmが未対応です: {hash_algorithm}"
+        )
+
     root = PROJECT_ROOT.resolve()
     for relative_value, expected_sha in frozen_files.items():
         if not isinstance(relative_value, str) or not isinstance(expected_sha, str):
@@ -165,10 +209,16 @@ def load_forward_validation_policy() -> dict[str, Any]:
             raise ModelConfigError(f"プロジェクト外の固定ファイルは使えません: {relative_value}") from exc
         if not resolved.is_file():
             raise ModelConfigError(f"前向き検証の固定ファイルが存在しません: {resolved}")
-        actual_sha = sha256_file(resolved)
+
+        if hash_algorithm == "git_blob_sha1":
+            actual_sha = _git_blob_sha1(resolved)
+        else:
+            actual_sha = sha256_file(resolved)
         if actual_sha != expected_sha:
+            generation = payload.get("active_generation", "legacy")
             raise ModelConfigError(
                 "前向き検証の固定ファイルSHAが不一致です: "
+                f"generation={generation} algorithm={hash_algorithm} "
                 f"path={relative_value} expected={expected_sha} actual={actual_sha}"
             )
     return payload
