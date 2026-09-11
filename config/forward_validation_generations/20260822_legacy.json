@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "generation_id": "legacy_20260822",
+  "status": "archived",
+  "start_date": "20260822",
+  "closed_before": "20260905",
+  "production_model_config": "config/production_model.json",
+  "shadow_model_config": "config/shadow_model.json",
+  "frozen_items": [
+    "20260730重み",
+    "20260817重み",
+    "特徴量定義",
+    "補正処理",
+    "順位計算",
+    "ランク判定",
+    "買い目条件",
+    "購入金額"
+  ],
+  "prediction_interim_gate": {
+    "minimum_racing_days": 8,
+    "minimum_races": 300,
+    "require_both": true
+  },
+  "profit_final_gate": {
+    "minimum_current_trifecta_races": 50,
+    "validation_end_date": "20261031",
+    "insufficient_sample_action": "do_not_promote_by_roi_only"
+  },
+  "primary_metrics": [
+    "current_trifecta_profit",
+    "current_trifecta_roi",
+    "current_trifecta_max_drawdown",
+    "top3_complete_rate"
+  ],
+  "safety_metrics": [
+    "rank1_place_rate",
+    "rank1_average_finish",
+    "top5_point_rate",
+    "daily_monthly_consistency"
+  ],
+  "selection_policy": "一部条件だけの改善では総合採用しない",
+  "optimizer_holdout_start_date": "20260822",
+  "hash_algorithm": "sha256",
+  "frozen_files": {
+    "yosou_py/best_feature_weights_20260730.py": "2fdaf28273c2f2bbcb0052a09227f4be6d32a7e4817121df168613995cc66f32",
+    "yosou_py/best_feature_weights_20260817.py": "83e6126fd01af24ebe553039946dd603c3e6e326b8f6bee0e0a73a7ffd32dcbb",
+    "config/production_model.json": "63f58e1b5f7b14bd9fd1ae592715ed6bd6012cb2f3c468abf1e76d7f1a299442",
+    "config/shadow_model.json": "2967e29368652ae693f9de3e621eb361810690f713ddd6e0e2dd12fdf697636f",
+    "model_registry.py": "146fdf01a9fae1b0e9c08dde7080195b825f8a95dc2e41a67dfb4057435f6fc8",
+    "shadow_validation.py": "928ba6b519f428bbf0267459fbd6753a7c67af92e5a1ea48b31060aa76183bf1",
+    "1_keibayosou_config.py": "52d68167cdb41ca2712a6c2b7e8a64415f90bc5e27962c80a9e26c5df3b58254",
+    "1_keibayosou_features.py": "3e04076692dfe51c022f6e8a368436e915d3dc0a9f9411c3e6189c53670873d2",
+    "1_keibayosou_penalties.py": "846c5b70c9dc8a565d4635a7758203fec4c9545c3f5daa3ed80c15d1d8af1448",
+    "1_keibayosou_ranking.py": "a5b0c9804d00690704f9179ef1a1924edeb1331ac23308609676d14737c5ff5d",
+    "1_keibayosou_pipeline.py": "34afa42fc1b370bb0bcca88fb00138528f9fa429a6367a9efb21db0e5bfec0d6",
+    "1_keibayosou_best_import_roi_runner.py": "7a3ca48bdd06f9ac29b0fafef0340a32ad2b2d942e06c1381c5795ce9266e023",
+    "tokutyouryou_keisann/config.py": "08a8c99e2035ef0c908aefe3b23b8553f49ca4fb4e47711339e2b5de879114b4"
+  }
+}
