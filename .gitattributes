@@ -1,0 +1,8 @@
+# Keep source/config files byte-stable across Windows/macOS/Linux.
+# Forward-validation hashes depend on repository bytes, so force LF.
+*.py text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
