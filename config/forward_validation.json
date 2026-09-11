@@ -110,7 +110,7 @@
         "config/production_model.json": "f20d595c630be04a6306ae71cef1465f3f127c62",
         "config/shadow_model.json": "4e27b72c61382d5d77d361cd9baa0101d8f33b72",
         "model_registry.py": "cdef323bf856ace1c188da3b92e731a869172dc0",
-        "shadow_validation.py": "ae23334286079ba4ede3765e689c8200ea3d90b1",
+        "shadow_validation.py": "c04023b8a5d6107c5c3c83bab73c2bf03a7003f3",
         "1_keibayosou_config.py": "3ed7cdbbffd0970b5c9a5bfc72511efeebd78888",
         "1_keibayosou_features.py": "cae10aa7c2bb3c5a5cad2d7e8d3ae7be28d123f5",
         "1_keibayosou_penalties.py": "f56530a24db26b38a3fad6228f0e989d21e1cac5",
