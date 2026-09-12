@@ -3,7 +3,7 @@
   "role": "production",
   "model_name": "best_feature_weights_20260730",
   "weight_file": "yosou_py/best_feature_weights_20260730.py",
-  "file_sha256": "2fdaf28273c2f2bbcb0052a09227f4be6d32a7e4817121df168613995cc66f32",
+  "file_sha256": "2e070de3ab4a53c39661b74dcc9f6ea1ada339ac1ac586c44afd05f37ab55717",
   "effective_sha256": "6606ea4fa469e03ecc7a0000d031a914ca4ab10de04dfa132f0ba7d33ab70a3e",
   "activated_at": "2026-08-17T19:25:00+09:00",
   "activation_reason": "20260817モデルの前向き検証完了まで、検証済み20260730モデルを本番へ明示固定するため",
