@@ -107,8 +107,8 @@
       "frozen_files": {
         "yosou_py/best_feature_weights_20260730.py": "c0f4fdcfe76a045dadeab79c5d5b07c84259f311",
         "yosou_py/best_feature_weights_20260817.py": "6c1ed66a93b3ed50be695dc21292f136f9a7d212",
-        "config/production_model.json": "f20d595c630be04a6306ae71cef1465f3f127c62",
-        "config/shadow_model.json": "4e27b72c61382d5d77d361cd9baa0101d8f33b72",
+        "config/production_model.json": "8bd07993a327d63cca11dc56d3cac9b3f97e5631",
+        "config/shadow_model.json": "82926baed52e38ae911dd8f0ae1a22b360b56a70",
         "model_registry.py": "b34a2c130d4d218893f4743efa9579ef079608e0",
         "shadow_validation.py": "c04023b8a5d6107c5c3c83bab73c2bf03a7003f3",
         "1_keibayosou_config.py": "3ed7cdbbffd0970b5c9a5bfc72511efeebd78888",
