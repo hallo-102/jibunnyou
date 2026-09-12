@@ -118,48 +118,173 @@ def login(driver: webdriver.Edge, user: str, pw: str) -> None:
     print("✅ netkeiba ログイン完了")
 
 # ───────────────────────────────
-# ④-補助: HTMLから race_id を堅牢に抽出
+# ④-補助: HTMLから race_id を抽出（診断用）
 # ───────────────────────────────
 def extract_race_ids_from_html(html: str) -> List[str]:
+    """HTML全体に含まれる race_id を返す。診断用であり本番選別には使わない。"""
     ids: set[str] = set()
-    # 1) <span id="myrace_XXXXXXXXXXXX"> 由来（一覧に必ず出る）
+    # 1) <span id="myrace_XXXXXXXXXXXX"> 由来
     for m in re.findall(r'id=["\']myrace_(\d{12})["\']', html):
         ids.add(m)
-    # 2) <a href="...race/result.html?race_id=XXXXXXXXXXXX..."> 由来
+    # 2) <a href="...race_id=XXXXXXXXXXXX..."> 由来
     for m in re.findall(r'race_id=(\d{12})', html):
         ids.add(m)
     return sorted(ids)
 
+
+def extract_visible_race_ids(driver: webdriver.Edge) -> List[str]:
+    """
+    現在ブラウザ上で表示対象になっているレース要素だけから race_id を取得する。
+
+    race.sp.netkeiba.com の page_source には、指定日以外の前後日レースが
+    非表示DOMとして同居することがある。そのため page_source 全体への正規表現は
+    本番の race_id 選別には使用しない。
+    """
+    script = r"""
+        const ids = new Set();
+        const elements = document.querySelectorAll(
+            '[id^="myrace_"], a[href*="race_id="]'
+        );
+
+        for (const el of elements) {
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden') {
+                continue;
+            }
+
+            // 親要素が display:none の場合も getClientRects() は空になる。
+            if (el.getClientRects().length === 0) {
+                continue;
+            }
+
+            const idAttr = el.getAttribute('id') || '';
+            const href = el.getAttribute('href') || '';
+
+            let match = idAttr.match(/^myrace_(\d{12})$/);
+            if (!match) {
+                match = href.match(/[?&]race_id=(\d{12})(?:&|$)/);
+            }
+            if (match) {
+                ids.add(match[1]);
+            }
+        }
+        return Array.from(ids).sort();
+    """
+    result = driver.execute_script(script)
+    return [str(rid) for rid in (result or []) if re.fullmatch(r"\d{12}", str(rid))]
+
+
+def validate_visible_race_ids(
+    visible_race_ids: List[str],
+    all_html_race_ids: List[str],
+    race_date: str,
+    current_url: str,
+) -> None:
+    """
+    表示対象IDとHTML全体IDの差を検査する。
+
+    36件を固定上限にはしない。JRA開催形態の変更に耐えるため、
+    まず「表示対象」と「HTML全体」の差をログ化し、表示対象だけを採用する。
+    ただし表示対象が48件を超える場合は、複数日混入の疑いが強いため停止する。
+    """
+    print(f"[INFO] target_date={race_date}")
+    print(f"[INFO] current_url={current_url}")
+    print(f"[INFO] html_all_race_count={len(all_html_race_ids)}")
+    print(f"[INFO] visible_race_count={len(visible_race_ids)}")
+    print(f"[INFO] visible_race_ids_first10={visible_race_ids[:10]}")
+
+    hidden_ids = sorted(set(all_html_race_ids) - set(visible_race_ids))
+    if hidden_ids:
+        print(
+            f"[INFO] hidden_or_other_date_race_count={len(hidden_ids)} "
+            f"preview={hidden_ids[:10]}"
+        )
+
+    if len(visible_race_ids) > 48:
+        raise RuntimeError(
+            "表示対象のrace_idが多すぎます。複数開催日が同時に表示対象へ"
+            "混入している可能性があるため処理を停止します。"
+            f" target_date={race_date}"
+            f" visible_count={len(visible_race_ids)}"
+            f" html_all_count={len(all_html_race_ids)}"
+            f" preview={visible_race_ids[:20]}"
+        )
+
+
+def validate_race_ids_not_used_on_other_dates(
+    race_ids: List[str],
+    race_date: str,
+    workbook_path: Path,
+) -> None:
+    """同じrace_idが別日付シートですでに保存済みなら停止する。"""
+    if not workbook_path.exists() or not race_ids:
+        return
+
+    race_id_set = {str(rid) for rid in race_ids}
+    xls = pd.ExcelFile(workbook_path, engine="openpyxl")
+    conflicts: list[tuple[str, str]] = []
+    try:
+        for sheet in xls.sheet_names:
+            sheet_str = str(sheet)
+            if sheet_str == str(race_date) or not re.fullmatch(r"\d{8}", sheet_str):
+                continue
+            try:
+                df = pd.read_excel(xls, sheet_name=sheet, usecols=lambda c: str(c).replace(" ", "") in {"レースID", "ﾚｰｽID"})
+            except Exception:
+                df = pd.read_excel(xls, sheet_name=sheet)
+            race_col = next((c for c in df.columns if str(c).replace(" ", "") in {"レースID", "ﾚｰｽID"}), None)
+            if race_col is None:
+                continue
+            existing = set(df[race_col].dropna().astype(str).str.replace(r"\.0$", "", regex=True))
+            for rid in sorted(race_id_set & existing):
+                conflicts.append((sheet_str, rid))
+    finally:
+        xls.close()
+
+    if conflicts:
+        preview = ", ".join(f"{date}:{rid}" for date, rid in conflicts[:20])
+        raise RuntimeError(
+            "取得したrace_idが別開催日シートですでに使用されています。"
+            " 誤ったレース一覧を保存する事故を防ぐため処理を停止します。"
+            f" target_date={race_date} conflicts={len(conflicts)} preview={preview}"
+        )
+
 # ───────────────────────────────
-# ④ レースID 一括取得（待機強化＋抽出ロジック強化）
+# ④ レースID 一括取得（表示対象DOMだけを採用）
 # ───────────────────────────────
 JS_READY_STATE = "return document.readyState === 'complete';"
 JS_SCROLL_HEIGHT = "return document.documentElement.scrollHeight;"
 JS_SCROLL_TO = "window.scrollTo(0, arguments[0]);"
 
-def get_race_ids_for_date(driver: webdriver.Edge, race_list_url: str) -> List[str]:
+def get_race_ids_for_date(
+    driver: webdriver.Edge,
+    race_list_url: str,
+    race_date: str,
+) -> List[str]:
+    print(f"[INFO] requested_url={race_list_url}")
     driver.get(race_list_url)
 
     # レース一覧は広告などの影響で readyState が complete にならない場合がある。
-    # タイムアウトしても、取得済みの HTML を使って処理を続ける。
+    # タイムアウトしても、取得済みDOMを使って処理を続ける。
     try:
         WebDriverWait(driver, 15).until(
             lambda d: d.execute_script(JS_READY_STATE)
         )
     except TimeoutException:
-        print("⚠️ ページ読み込み完了待ちが時間切れになりました。取得済みHTMLを確認します。")
+        print("⚠️ ページ読み込み完了待ちが時間切れになりました。取得済みDOMを確認します。")
 
-    # リンクは画面外や非表示でも HTML から取得できるため、
-    # element_to_be_clickable は使わず race_id の出現を直接待つ。
     race_ids: List[str] = []
     wait_limit = time.monotonic() + 20
     while time.monotonic() < wait_limit:
-        race_ids = extract_race_ids_from_html(driver.page_source)
+        try:
+            race_ids = extract_visible_race_ids(driver)
+        except JavascriptException:
+            race_ids = []
         if race_ids:
             break
         time.sleep(0.5)
 
-    # 遅延読み込み対策としてスクロールし、各回で HTML を再確認する。
+    # 遅延読み込み対策。HTML全体の race_id へはフォールバックしない。
     if not race_ids:
         last_height = -1
         for _ in range(SCROLL_MAX):
@@ -167,18 +292,19 @@ def get_race_ids_for_date(driver: webdriver.Edge, race_list_url: str) -> List[st
                 height = driver.execute_script(JS_SCROLL_HEIGHT)
                 driver.execute_script(JS_SCROLL_TO, height)
             except JavascriptException:
-                # JavaScriptを実行できなくても、最後にHTMLは確認する。
                 break
 
             time.sleep(SCROLL_PAUSE)
-            race_ids = extract_race_ids_from_html(driver.page_source)
+            try:
+                race_ids = extract_visible_race_ids(driver)
+            except JavascriptException:
+                race_ids = []
             if race_ids:
                 break
             if height == last_height:
                 break
             last_height = height
 
-    # レースがない日やアクセス制限時も例外終了させず、呼び出し元へ空リストを返す。
     if not race_ids:
         page_text = bs(driver.page_source, "html.parser").get_text(
             " ", strip=True
@@ -190,9 +316,18 @@ def get_race_ids_for_date(driver: webdriver.Edge, race_list_url: str) -> List[st
         elif any(word in page_text.lower() for word in ("access denied", "cloudflare")):
             reason = "アクセス制限ページが表示されています"
         else:
-            reason = "対象日に開催レースがないか、レース一覧を取得できませんでした"
+            reason = "対象日に開催レースがないか、表示対象レース一覧を取得できませんでした"
         print(f"⚠️ {reason}。URL: {driver.current_url}", file=sys.stderr)
         return []
+
+    # 診断用にHTML全体のIDも数えるが、本番採用は visible_race_ids のみ。
+    all_html_race_ids = extract_race_ids_from_html(driver.page_source)
+    validate_visible_race_ids(
+        race_ids,
+        all_html_race_ids,
+        race_date,
+        driver.current_url,
+    )
 
     if len(race_ids) < 5:
         print(
@@ -201,7 +336,6 @@ def get_race_ids_for_date(driver: webdriver.Edge, race_list_url: str) -> List[st
             file=sys.stderr,
         )
 
-    # デバッグ表示（最初の数件）
     print("例:", race_ids[:5])
     return race_ids
 
@@ -355,8 +489,15 @@ def main():
     driver = setup_browser()
     try:
         login(driver, user, pw)
-        race_ids = get_race_ids_for_date(driver, race_list_url)
+        race_ids = get_race_ids_for_date(driver, race_list_url, race_date)
         print(f"▶ レースID取得: {len(race_ids)} 件")
+
+        # 既存の別日付シートで同じrace_idが使われていないことを保存前に強制確認する。
+        validate_race_ids_not_used_on_other_dates(
+            race_ids,
+            race_date,
+            OUTPUT_DIR / "racedata_results.xlsx",
+        )
 
         all_dfs: List[pd.DataFrame] = []
         for rid in tqdm(race_ids, desc="各レース取得"):

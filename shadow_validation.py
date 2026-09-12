@@ -3,10 +3,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import importlib
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -108,11 +108,56 @@ def load_shadow_runtime() -> ShadowRuntime:
     return ShadowRuntime(spec=spec, weights_map=weights_map, output_dir=output_dir)
 
 
-def _git_blob_sha1(path: Path) -> str:
-    """Gitがファイル(blob)に使うSHA-1を作る。GitHub Contents APIのshaと一致する。"""
-    data = path.read_bytes()
-    header = f"blob {len(data)}\0".encode("utf-8")
-    return hashlib.sha1(header + data).hexdigest()
+def _run_git(*args: str) -> subprocess.CompletedProcess[str]:
+    """プロジェクトルートでGitを実行し、Windowsでも安定した結果を返す。"""
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError as exc:
+        raise ModelConfigError(f"Gitコマンドを実行できません: {exc}") from exc
+
+
+def _git_index_blob_sha1(relative_value: str) -> str:
+    """Git indexに登録されたblob SHA-1を返し、未コミット変更があれば拒否する。"""
+    git_path = Path(relative_value).as_posix()
+
+    worktree = _run_git("diff", "--quiet", "--", git_path)
+    if worktree.returncode == 1:
+        raise ModelConfigError(
+            f"前向き検証の固定ファイルに未コミット変更があります: path={relative_value}"
+        )
+    if worktree.returncode != 0:
+        raise ModelConfigError(
+            "前向き検証の固定ファイル状態を確認できません: "
+            f"path={relative_value} stderr={worktree.stderr.strip()}"
+        )
+
+    staged = _run_git("diff", "--cached", "--quiet", "--", git_path)
+    if staged.returncode == 1:
+        raise ModelConfigError(
+            f"前向き検証の固定ファイルに未コミットのステージ変更があります: path={relative_value}"
+        )
+    if staged.returncode != 0:
+        raise ModelConfigError(
+            "前向き検証の固定ファイルのステージ状態を確認できません: "
+            f"path={relative_value} stderr={staged.stderr.strip()}"
+        )
+
+    result = _run_git("rev-parse", f":{git_path}")
+    actual_sha = result.stdout.strip().lower()
+    if result.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", actual_sha):
+        raise ModelConfigError(
+            "前向き検証のGit index blob SHAを取得できません: "
+            f"path={relative_value} stderr={result.stderr.strip()}"
+        )
+    return actual_sha
 
 
 def _select_forward_validation_generation(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -211,7 +256,7 @@ def load_forward_validation_policy() -> dict[str, Any]:
             raise ModelConfigError(f"前向き検証の固定ファイルが存在しません: {resolved}")
 
         if hash_algorithm == "git_blob_sha1":
-            actual_sha = _git_blob_sha1(resolved)
+            actual_sha = _git_index_blob_sha1(relative_value)
         else:
             actual_sha = sha256_file(resolved)
         if actual_sha != expected_sha:
