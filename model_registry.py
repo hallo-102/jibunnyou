@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -50,6 +51,73 @@ def sha256_file(path: str | Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _run_git(project_root: Path, args: list[str], *, text: bool = False) -> subprocess.CompletedProcess[Any]:
+    """プロジェクト直下でGitを実行し、環境差をModelConfigErrorへ変換する。"""
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(project_root),
+            check=False,
+            capture_output=True,
+            text=text,
+        )
+    except OSError as exc:
+        raise ModelConfigError(f"Gitを実行できません: {exc}") from exc
+
+
+def _git_index_sha256(project_root: Path, relative_path: str) -> str:
+    """Git indexの正規化済みblob内容からSHA-256を計算する。
+
+    WindowsのCRLF/LF変換に左右されないよう、作業ツリーの生バイト列ではなく
+    Git indexに登録された内容を使う。固定重みへの未コミット変更・ステージ変更は
+    検証前に拒否する。
+    """
+    relative_posix = Path(relative_path).as_posix()
+
+    tracked = _run_git(project_root, ["ls-files", "--error-unmatch", "--", relative_posix])
+    if tracked.returncode != 0:
+        raise ModelConfigError(
+            f"固定重みファイルがGit管理対象ではありません: {relative_posix}"
+        )
+
+    worktree_diff = _run_git(project_root, ["diff", "--quiet", "--", relative_posix])
+    if worktree_diff.returncode == 1:
+        raise ModelConfigError(
+            f"固定重みファイルに未コミット変更があります: {relative_posix}"
+        )
+    if worktree_diff.returncode != 0:
+        raise ModelConfigError(
+            f"固定重みファイルの作業ツリー差分を確認できません: {relative_posix}"
+        )
+
+    staged_diff = _run_git(
+        project_root,
+        ["diff", "--cached", "--quiet", "--", relative_posix],
+    )
+    if staged_diff.returncode == 1:
+        raise ModelConfigError(
+            f"固定重みファイルにステージ済み未コミット変更があります: {relative_posix}"
+        )
+    if staged_diff.returncode != 0:
+        raise ModelConfigError(
+            f"固定重みファイルのindex差分を確認できません: {relative_posix}"
+        )
+
+    blob = _run_git(project_root, ["show", f":{relative_posix}"])
+    if blob.returncode != 0:
+        raise ModelConfigError(
+            f"固定重みファイルのGit index内容を取得できません: {relative_posix}"
+        )
+    return hashlib.sha256(blob.stdout).hexdigest()
+
+
+def _verified_weight_sha256(project_root: Path, resolved_path: Path, relative_path: str) -> str:
+    """Git管理下ではindex内容、非Git配置では実ファイル内容を検証する。"""
+    if (project_root / ".git").exists():
+        return _git_index_sha256(project_root, relative_path)
+    return sha256_file(resolved_path)
 
 
 def _canonical_group_key(key: Any) -> dict[str, str]:
@@ -188,7 +256,7 @@ def load_model_spec(
         raise ModelConfigError("重みgroup数・要素数は正数で指定してください")
 
     resolved_weight_path = _resolve_project_relative_file(root, weight_file)
-    actual_file_sha256 = sha256_file(resolved_weight_path)
+    actual_file_sha256 = _verified_weight_sha256(root, resolved_weight_path, weight_file)
     if actual_file_sha256 != file_sha256:
         raise ModelConfigError(
             "重みファイルSHA-256が設定と一致しません: "
