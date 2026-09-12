@@ -16,6 +16,11 @@ v1 と v2 の「レース前rating」の予測力を時系列リークなしで�
 - 年別成績
 - v1/v2で1位評価馬が異なるレースの直接対決
 
+重複キー対策:
+entries / entries_v2 に同一 race_id + horse_id が複数存在する場合、
+many-to-many merge は行わない。重複群の中から情報欠損が最も少ない1行を
+代表行として採用し、重複内容は duplicate_audit シートへ出力する。
+
 注意:
 複勝払戻額は現行出力に無いため、複勝回収率は計算しない。
 """
@@ -28,6 +33,7 @@ from typing import Dict, List, Tuple
 import pandas as pd
 
 STAKE_YEN = 100
+KEY_COLS = ["race_id", "horse_id"]
 
 
 def to_num(series: pd.Series) -> pd.Series:
@@ -50,11 +56,80 @@ def popularity_bucket(pop) -> str:
     return "10人気以下"
 
 
-def load_joined_entries(xlsx_path: Path) -> pd.DataFrame:
+def _canonical_value(value):
+    if pd.isna(value):
+        return None
+    if isinstance(value, float):
+        return round(value, 10)
+    return str(value).strip()
+
+
+def dedupe_race_horse_rows(
+    df: pd.DataFrame,
+    source_name: str,
+    value_cols: List[str],
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """race_id + horse_id を1行へ正規化し、重複内容を監査表として返す。"""
+    work = df.copy()
+    if work.empty:
+        return work, pd.DataFrame()
+
+    dup_mask = work.duplicated(KEY_COLS, keep=False)
+    dup_rows = work.loc[dup_mask].copy()
+    if dup_rows.empty:
+        return work, pd.DataFrame()
+
+    audit_rows: List[Dict] = []
+    chosen_indices: List[int] = []
+    nondup_indices = work.index[~dup_mask].tolist()
+
+    available_value_cols = [c for c in value_cols if c in work.columns]
+    score_cols = list(dict.fromkeys(KEY_COLS + available_value_cols))
+
+    for key, group in dup_rows.groupby(KEY_COLS, dropna=False, sort=False):
+        g = group.copy()
+        conflict_cols: List[str] = []
+        for col in available_value_cols:
+            vals = [_canonical_value(v) for v in g[col].tolist()]
+            vals = [v for v in vals if v is not None]
+            if len(set(vals)) > 1:
+                conflict_cols.append(col)
+
+        completeness = g[score_cols].notna().sum(axis=1)
+        chosen_idx = completeness.sort_values(ascending=False, kind="mergesort").index[0]
+        chosen_indices.append(chosen_idx)
+
+        audit_rows.append({
+            "source": source_name,
+            "race_id": str(key[0]),
+            "horse_id": key[1],
+            "duplicate_count": int(len(g)),
+            "chosen_original_index": int(chosen_idx),
+            "has_conflict": bool(conflict_cols),
+            "conflict_columns": ",".join(conflict_cols),
+        })
+
+    keep_indices = nondup_indices + chosen_indices
+    normalized = work.loc[keep_indices].copy()
+    normalized = normalized.sort_index(kind="mergesort").reset_index(drop=True)
+
+    if normalized.duplicated(KEY_COLS).any():
+        raise ValueError(f"{source_name}: 重複正規化後も race_id + horse_id が一意ではありません。")
+
+    audit = pd.DataFrame(audit_rows)
+    print(
+        f"[warn] {source_name}: race_id+horse_id 重複を正規化 "
+        f"groups={len(audit)} rows={len(dup_rows)} conflicts={int(audit['has_conflict'].sum())}"
+    )
+    return normalized, audit
+
+
+def load_joined_entries(xlsx_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     xls = pd.ExcelFile(xlsx_path, engine="openpyxl")
     required = {"entries", "entries_v2", "races"}
     missing = required - set(xls.sheet_names)
     if missing:
+        xls.close()
         raise ValueError(
             f"必要シートがありません: {sorted(missing)}。"
             "先に 00_Export_To_Excel_4_v2.py を実行してください。"
@@ -63,6 +138,7 @@ def load_joined_entries(xlsx_path: Path) -> pd.DataFrame:
     v1 = pd.read_excel(xls, sheet_name="entries")
     v2 = pd.read_excel(xls, sheet_name="entries_v2")
     races = pd.read_excel(xls, sheet_name="races")
+    xls.close()
 
     for df in (v1, v2, races):
         if "race_id" in df.columns:
@@ -80,6 +156,24 @@ def load_joined_entries(xlsx_path: Path) -> pd.DataFrame:
     if miss2:
         raise ValueError(f"entries_v2 の必須列不足: {sorted(miss2)}")
 
+    v1, audit_v1 = dedupe_race_horse_rows(
+        v1,
+        "entries",
+        ["rank", "odds", "pop", "pre_rating", "number", "weight", "gap_from_winner_sec"],
+    )
+    v2, audit_v2 = dedupe_race_horse_rows(
+        v2,
+        "entries_v2",
+        [
+            "pre_rating_v2",
+            "pre_overall_rating_v2",
+            "pre_surface_rating_v2",
+            "pre_distance_rating_v2",
+            "distance_band",
+        ],
+    )
+    duplicate_audit = pd.concat([audit_v1, audit_v2], ignore_index=True)
+
     keep_v1 = [
         "race_id", "horse_id", "rank", "odds", "pop", "pre_rating",
         "number", "weight", "gap_from_winner_sec",
@@ -92,8 +186,21 @@ def load_joined_entries(xlsx_path: Path) -> pd.DataFrame:
     keep_v2 = [c for c in keep_v2 if c in v2.columns]
 
     merged = v1[keep_v1].merge(
-        v2[keep_v2], on=["race_id", "horse_id"], how="inner", validate="one_to_one"
+        v2[keep_v2],
+        on=KEY_COLS,
+        how="inner",
+        validate="one_to_one",
     )
+
+    left_keys = set(map(tuple, v1[KEY_COLS].astype(str).to_numpy()))
+    right_keys = set(map(tuple, v2[KEY_COLS].astype(str).to_numpy()))
+    only_v1 = left_keys - right_keys
+    only_v2 = right_keys - left_keys
+    if only_v1 or only_v2:
+        print(
+            f"[warn] v1/v2キー不一致: v1のみ={len(only_v1)} v2のみ={len(only_v2)} "
+            f"比較対象={len(merged)}"
+        )
 
     race_cols = [
         "race_id", "date", "start_time", "place", "class", "ground",
@@ -124,7 +231,11 @@ def load_joined_entries(xlsx_path: Path) -> pd.DataFrame:
     else:
         merged["year"] = pd.Series([pd.NA] * len(merged), dtype="Int64")
 
-    return merged
+    if merged.duplicated(KEY_COLS).any():
+        raise ValueError("結合後に race_id + horse_id の重複が残っています。比較を中止します。")
+
+    print(f"[verify] 比較用一意出走件数={len(merged):,} / レース数={merged['race_id'].nunique():,}")
+    return merged, duplicate_audit
 
 
 def evaluate_one_model(
@@ -311,6 +422,8 @@ def auto_width_excel(writer: pd.ExcelWriter, sheet_name: str, df: pd.DataFrame) 
     ws = writer.book[sheet_name]
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
+    if df.empty:
+        return
     for idx, col in enumerate(df.columns, start=1):
         sample = [str(col)] + [str(v) for v in df[col].head(300).fillna("").tolist()]
         width = min(max(len(x) for x in sample) + 2, 45)
@@ -318,7 +431,7 @@ def auto_width_excel(writer: pd.ExcelWriter, sheet_name: str, df: pd.DataFrame) 
 
 
 def compare(input_xlsx: Path, output_xlsx: Path) -> None:
-    entries = load_joined_entries(input_xlsx)
+    entries, duplicate_audit = load_joined_entries(input_xlsx)
     if entries.empty:
         raise ValueError("比較可能な出走データが0件です。")
 
@@ -332,6 +445,8 @@ def compare(input_xlsx: Path, output_xlsx: Path) -> None:
     yearly = grouped_metrics(detail, "year")
     head_to_head, head_summary = build_head_to_head(v1_detail, v2_detail)
 
+    duplicate_groups = int(len(duplicate_audit))
+    duplicate_conflicts = int(duplicate_audit["has_conflict"].sum()) if not duplicate_audit.empty else 0
     parameters = pd.DataFrame([
         {"item": "入力", "value": str(input_xlsx)},
         {"item": "評価rating v1", "value": "entries.pre_rating（各レース直前）"},
@@ -341,6 +456,9 @@ def compare(input_xlsx: Path, output_xlsx: Path) -> None:
         {"item": "複勝ROI", "value": "複勝払戻データが無いため未計算"},
         {"item": "Spearman", "value": "rating と -実着順のレース内順位相関。高いほど良い"},
         {"item": "未来情報", "value": "rating順位決定にはレース後情報を使用しない"},
+        {"item": "重複キー処理", "value": "race_id+horse_id重複は欠損が最少の1行へ正規化。many-to-many結合は禁止"},
+        {"item": "重複グループ数", "value": duplicate_groups},
+        {"item": "値矛盾あり重複グループ数", "value": duplicate_conflicts},
     ])
 
     output_xlsx.parent.mkdir(parents=True, exist_ok=True)
@@ -352,6 +470,7 @@ def compare(input_xlsx: Path, output_xlsx: Path) -> None:
         popularity.to_excel(writer, sheet_name="by_popularity", index=False)
         yearly.to_excel(writer, sheet_name="by_year", index=False)
         detail.to_excel(writer, sheet_name="race_detail", index=False)
+        duplicate_audit.to_excel(writer, sheet_name="duplicate_audit", index=False)
         parameters.to_excel(writer, sheet_name="README", index=False)
 
         for sheet, df in [
@@ -362,11 +481,13 @@ def compare(input_xlsx: Path, output_xlsx: Path) -> None:
             ("by_popularity", popularity),
             ("by_year", yearly),
             ("race_detail", detail),
+            ("duplicate_audit", duplicate_audit),
             ("README", parameters),
         ]:
             auto_width_excel(writer, sheet, df)
 
     print(f"[done] v1/v2比較完了: {output_xlsx}")
+    print(f"[audit] duplicate_groups={duplicate_groups} conflict_groups={duplicate_conflicts}")
     print("\n=== summary ===")
     print(summary.to_string(index=False))
     print("\n=== v1_vs_v2 ===")
