@@ -67,7 +67,7 @@
       "introduced_changes": [
         "field_size_adjusted_finishを特徴量定義へ追加",
         "過去走着順を過去レース頭数で0-1正規化して算出",
-        "本番20260730重みは変更せず、新特徴量の本番影響は0のまま計測"
+        "20260817重みを本番モデルへ昇格し、production_model.jsonの固定SHAを更新"
       ],
       "frozen_items": [
         "20260730重み",
@@ -107,7 +107,7 @@
       "frozen_files": {
         "yosou_py/best_feature_weights_20260730.py": "c0f4fdcfe76a045dadeab79c5d5b07c84259f311",
         "yosou_py/best_feature_weights_20260817.py": "6c1ed66a93b3ed50be695dc21292f136f9a7d212",
-        "config/production_model.json": "f20d595c630be04a6306ae71cef1465f3f127c62",
+        "config/production_model.json": "2dee82c1a45fca1b253c2fc2a1713d8b4752c3a9",
         "config/shadow_model.json": "4e27b72c61382d5d77d361cd9baa0101d8f33b72",
         "model_registry.py": "cdef323bf856ace1c188da3b92e731a869172dc0",
         "shadow_validation.py": "ae23334286079ba4ede3765e689c8200ea3d90b1",
