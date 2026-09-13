@@ -108,7 +108,7 @@
         "yosou_py/best_feature_weights_20260730.py": "c0f4fdcfe76a045dadeab79c5d5b07c84259f311",
         "yosou_py/best_feature_weights_20260817.py": "6c1ed66a93b3ed50be695dc21292f136f9a7d212",
         "config/production_model.json": "2dee82c1a45fca1b253c2fc2a1713d8b4752c3a9",
-        "config/shadow_model.json": "4e27b72c61382d5d77d361cd9baa0101d8f33b72",
+        "config/shadow_model.json": "82926baed52e38ae911dd8f0ae1a22b360b56a70",
         "model_registry.py": "cdef323bf856ace1c188da3b92e731a869172dc0",
         "shadow_validation.py": "ae23334286079ba4ede3765e689c8200ea3d90b1",
         "1_keibayosou_config.py": "3ed7cdbbffd0970b5c9a5bfc72511efeebd78888",
