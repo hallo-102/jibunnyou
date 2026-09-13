@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -31,6 +32,9 @@ def _load_base():
     if spec is None or spec.loader is None:
         raise ImportError(f"v1本体を読み込めません: {base_path}")
     mod = importlib.util.module_from_spec(spec)
+    # dataclass は class の __module__ を sys.modules から解決するため、
+    # exec_module() より前に登録しておく必要がある。
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
