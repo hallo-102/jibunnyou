@@ -147,7 +147,8 @@ def run(input_xlsx: Path, output_xlsx: Path) -> None:
     )
 
     store = base.process_excel_to_memory(input_xlsx)
-    base.export_to_excel(store, output_xlsx, input_xlsx)
+    # v1本体の実際の書き出し関数名は write_store_to_excel。
+    base.write_store_to_excel(store, output_xlsx, input_xlsx)
     print("[v1-margin] done")
 
 
