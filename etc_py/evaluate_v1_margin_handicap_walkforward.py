@@ -151,7 +151,10 @@ def main() -> None:
         test = df[df["race_id"].isin(test_ids)].copy()
 
         beta, search_df = choose_beta(train)
-        search_df.insert(0, "fold", fold)
+        # choose_beta内のsummarizeでfold列は既に存在するため、insertではなく上書きする。
+        search_df["fold"] = fold
+        # 出力時にfoldを先頭へ見せる。
+        search_df = search_df[["fold"] + [c for c in search_df.columns if c != "fold"]]
         search_rows.append(search_df)
 
         base = test.copy()
