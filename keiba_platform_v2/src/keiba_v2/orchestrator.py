@@ -28,7 +28,10 @@ def _load_combination_odds(path: str | Path | None) -> pd.DataFrame | None:
     src = Path(path)
     if not src.exists():
         raise FileNotFoundError(src)
-    return pd.read_csv(src, encoding="utf-8-sig")
+    try:
+        return pd.read_csv(src, encoding="utf-8-sig")
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def _safe_tag(value: str) -> str:
@@ -56,7 +59,8 @@ def run_pipeline(
         validation.raise_for_error()
 
         horse_ids = df["horse_id"].fillna("").astype(str).tolist() if "horse_id" in df.columns else []
-        history = history_store.load_for_horses(horse_ids)
+        horse_names = df["horse_name"].fillna("").astype(str).tolist() if "horse_name" in df.columns else []
+        history = history_store.load_for_horses(horse_ids, horse_names)
         df = attach_history_features(df, history, n_recent=int(settings.section("history").get("n_recent", 5)))
 
         with tracking_run(settings.section("tracking"), settings.project_root, f"run_{race_date}"):
