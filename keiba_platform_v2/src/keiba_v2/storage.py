@@ -146,6 +146,23 @@ class RunStore:
             ).fetchone()
         return int(row["total"] if row else 0)
 
+    def successful_t5_bet_races(self, race_date: str) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT t.race_id) AS total
+                FROM t5_snapshots t
+                WHERE t.race_date=?
+                  AND t.status='SUCCESS'
+                  AND EXISTS (
+                      SELECT 1 FROM strategy_bets b
+                      WHERE b.run_id=t.run_id AND b.race_id=t.race_id
+                  )
+                """,
+                (str(race_date),),
+            ).fetchone()
+        return int(row["total"] if row else 0)
+
     def mark_t5_scheduled(self, race_id: str, race_date: str, scheduled_at: str) -> None:
         with self.connect() as conn:
             conn.execute(
