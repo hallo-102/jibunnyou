@@ -17,6 +17,10 @@ from .storage import RunStore
 JST = ZoneInfo("Asia/Tokyo")
 
 
+class NoBetError(RuntimeError):
+    """Race-level data uncertainty that must result in zero tickets, not a crash."""
+
+
 def _target_datetime(race_date: str, start_time: str) -> datetime:
     return datetime.strptime(f"{race_date} {start_time}", "%Y%m%d %H:%M").replace(tzinfo=JST) - timedelta(minutes=5)
 
@@ -36,12 +40,20 @@ def _merge_t5_odds(base_race: pd.DataFrame, runner_odds: pd.DataFrame) -> pd.Dat
         validate="one_to_one",
     )
     if merged.empty:
-        raise RuntimeError("T-5 odds did not match any entry rows")
+        raise NoBetError("T-5 odds did not match any entry rows")
     if len(merged) != len(base_race) or len(merged) != len(runner_odds):
-        raise RuntimeError("T-5 runner/entry count mismatch")
+        raise NoBetError(
+            f"T-5 runner/entry count mismatch: entries={len(base_race)} odds={len(runner_odds)} matched={len(merged)}"
+        )
     merged["win_odds"] = pd.to_numeric(merged["t5_win_odds"], errors="coerce")
     if merged["win_odds"].isna().any() or (merged["win_odds"] <= 0).any():
-        raise RuntimeError("T-5 odds contain invalid win odds")
+        raise NoBetError("T-5 odds contain invalid win odds")
+    if "odds_horse_name" in merged.columns:
+        left_names = merged["horse_name"].fillna("").astype(str).str.replace(r"[\s\u3000]+", "", regex=True)
+        right_names = merged["odds_horse_name"].fillna("").astype(str).str.replace(r"[\s\u3000]+", "", regex=True)
+        mismatch = right_names.ne("") & left_names.ne(right_names)
+        if mismatch.any():
+            raise NoBetError("T-5 horse-name mismatch between entries and JRA odds")
     return merged.drop(columns=["t5_win_odds", "odds_horse_name"], errors="ignore")
 
 
@@ -64,7 +76,7 @@ def process_t5_race(
     base = pd.read_csv(input_path, encoding="utf-8-sig", dtype={"race_id": str, "race_date": str})
     base_race = base[base["race_id"].astype(str) == str(race_id)].copy()
     if base_race.empty:
-        raise RuntimeError(f"race not found in canonical input: {race_id}")
+        raise NoBetError(f"race not found in canonical input: {race_id}")
 
     last_error: Exception | None = None
     runners = combos = None
@@ -195,6 +207,9 @@ def run_t5_runtime(
                     input_path, settings_path, headless=headless,
                 )
                 finished.append(result)
+            except NoBetError as exc:
+                store.mark_t5_result(race_id, "NO_BET", error=str(exc))
+                finished.append({"race_id": race_id, "status": "NO_BET", "reason": str(exc)})
             except Exception as exc:
                 store.mark_t5_result(race_id, "FAILED", error=str(exc))
                 finished.append({"race_id": race_id, "status": "FAILED", "error": str(exc)})
