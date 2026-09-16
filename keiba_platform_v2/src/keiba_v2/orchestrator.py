@@ -45,6 +45,7 @@ def run_pipeline(
     combination_odds_path: str | Path | None = None,
     output_tag: str | None = None,
     existing_daily_stake_yen: int = 0,
+    allow_fallback_strategy: bool = True,
 ) -> dict:
     settings = load_settings(settings_path)
     app_cfg = settings.section("app")
@@ -66,12 +67,21 @@ def run_pipeline(
         with tracking_run(settings.section("tracking"), settings.project_root, f"run_{race_date}"):
             featured = build_features(df)
             predicted = predict(featured, settings.section("prediction"), settings.project_root)
+            prediction_sources = sorted(set(predicted["prediction_source"].astype(str).tolist()))
+            model_strategy_allowed = allow_fallback_strategy or prediction_sources == ["lightgbm"]
             enriched = add_expected_value(predicted, settings.section("odds"))
             odds_summary = analyze_odds(enriched, settings.section("odds"))
 
             combo_raw = _load_combination_odds(combination_odds_path)
             combo_ev = add_combination_expected_value(enriched, combo_raw) if combo_raw is not None and not combo_raw.empty else pd.DataFrame()
             race_selection = select_value_races(enriched, settings.section("race_selection"), combo_ev)
+            if not model_strategy_allowed and not race_selection.empty:
+                race_selection["selected_for_day"] = False
+                race_selection["selection_rank"] = pd.NA
+                race_selection["model_gate"] = "BLOCKED_FALLBACK"
+            elif not race_selection.empty:
+                race_selection["model_gate"] = "OK"
+
             selected_race_ids = set(
                 race_selection.loc[race_selection["selected_for_day"].fillna(False), "race_id"].astype(str).tolist()
             ) if not race_selection.empty else set()
@@ -126,6 +136,7 @@ def run_pipeline(
                 "value_candidates": int(enriched["value_candidate"].sum()),
                 "buy_candidate_races": int(race_selection["buy_candidate"].sum()) if not race_selection.empty else 0,
                 "selected_races": int(race_selection["selected_for_day"].sum()) if not race_selection.empty else 0,
+                "model_strategy_allowed": int(model_strategy_allowed),
                 "combination_value_candidates": int((selected_combo_ev["expected_value"] >= float(settings.section("strategy").get("min_expected_value", 1.08))).sum()) if not selected_combo_ev.empty else 0,
                 "shadow_bets": int(len(legacy_shadow_bets)),
                 "strategy_bets": int(len(strategy_bets)),
@@ -143,6 +154,8 @@ def run_pipeline(
                 "mode": app_cfg.get("mode", "SHADOW"),
                 "run_id": run_id,
                 "output_tag": tag,
+                "prediction_sources": ",".join(prediction_sources),
+                "allow_fallback_strategy": allow_fallback_strategy,
             })
             store.finish_run(run_id, "SUCCESS", metrics)
 
@@ -155,6 +168,7 @@ def run_pipeline(
             "race_selection": race_selection,
             "bets": legacy_shadow_bets,
             "strategy_bets": strategy_bets,
+            "prediction_sources": prediction_sources,
             "prediction_path": prediction_path,
             "odds_path": odds_path,
             "race_selection_path": race_selection_path,
