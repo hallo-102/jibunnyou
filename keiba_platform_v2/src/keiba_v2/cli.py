@@ -12,6 +12,7 @@ from .collectors.daily import collect_daily_dataset
 from .collectors.netkeiba_results import collect_results_for_entries, save_results
 from .config import load_settings
 from .contracts import canonicalize, load_race_table
+from .doctor import run_doctor
 from .features import build_features
 from .history import HistoryStore, build_training_dataset
 from .legacy_history import load_legacy_history
@@ -27,6 +28,9 @@ from .walkforward import run_walkforward
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="keiba-v2")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_doctor = sub.add_parser("doctor", help="check V2 runtime, optional dependencies, model and history readiness")
+    p_doctor.add_argument("--settings")
 
     p_validate = sub.add_parser("validate", help="validate input data")
     p_validate.add_argument("--input", required=True)
@@ -93,6 +97,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _build_parser().parse_args()
+
+    if args.command == "doctor":
+        report = run_doctor(args.settings)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if not report["ok"]:
+            raise SystemExit(2)
+        return
 
     if args.command == "validate":
         settings = load_settings(args.settings)
