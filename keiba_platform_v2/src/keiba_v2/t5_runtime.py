@@ -18,7 +18,7 @@ JST = ZoneInfo("Asia/Tokyo")
 
 
 class NoBetError(RuntimeError):
-    """Race-level data uncertainty that must result in zero tickets, not a crash."""
+    """Race-level condition that intentionally results in zero tickets."""
 
 
 def _target_datetime(race_date: str, start_time: str) -> datetime:
@@ -73,6 +73,11 @@ def process_t5_race(
     if store.is_t5_done(race_id):
         return {"race_id": race_id, "status": "ALREADY_DONE"}
 
+    max_buy_races = max(0, int(settings.section("race_selection").get("max_buy_races_per_day", 5)))
+    bought_races = store.successful_t5_bet_races(race_date)
+    if bought_races >= max_buy_races:
+        raise NoBetError(f"daily selected-race cap reached: {bought_races}/{max_buy_races}")
+
     base = pd.read_csv(input_path, encoding="utf-8-sig", dtype={"race_id": str, "race_date": str})
     base_race = base[base["race_id"].astype(str) == str(race_id)].copy()
     if base_race.empty:
@@ -114,12 +119,23 @@ def process_t5_race(
         output_tag=_output_tag(race_date, int(race_no), race_id),
         existing_daily_stake_yen=existing_daily_stake,
     )
+    if int(result["metrics"].get("strategy_bets", 0)) <= 0:
+        store.mark_t5_result(race_id, "NO_BET", run_id=result["run_id"], error="race failed EV/edge/selection gates")
+        return {
+            "race_id": race_id,
+            "status": "NO_BET",
+            "run_id": result["run_id"],
+            "reason": "race failed EV/edge/selection gates",
+            "metrics": result["metrics"],
+        }
+
     store.mark_t5_result(race_id, "SUCCESS", run_id=result["run_id"])
     return {
         "race_id": race_id,
         "status": "SUCCESS",
         "run_id": result["run_id"],
         "existing_daily_stake_yen": existing_daily_stake,
+        "existing_bet_races": bought_races,
         "metrics": result["metrics"],
         "strategy_path": str(result["strategy_path"]),
     }
