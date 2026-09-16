@@ -22,15 +22,18 @@ def merge_entries_and_odds(entries: pd.DataFrame, odds: pd.DataFrame) -> pd.Data
     if required_odds - set(odds.columns):
         raise ValueError(f"odds missing: {sorted(required_odds - set(odds.columns))}")
 
-    left = entries.copy()
+    left = entries.copy().drop(columns=["win_odds", "place_odds"], errors="ignore")
     right = odds.copy().rename(columns={"horse_name": "odds_horse_name"})
     merged = left.merge(
         right[[c for c in ["race_id", "horse_no", "odds_horse_name", "win_odds", "place_odds"] if c in right.columns]],
         on=["race_id", "horse_no"], how="left", validate="one_to_one",
     )
-    if merged["win_odds"].isna().any():
-        missing = merged.loc[merged["win_odds"].isna(), ["race_id", "horse_no", "horse_name"]]
-        raise RuntimeError(f"JRA odds missing for entry rows: {missing.head(10).to_dict('records')}")
+    if "win_odds" not in merged.columns:
+        raise RuntimeError("JRA win_odds column disappeared during merge")
+    merged["win_odds"] = pd.to_numeric(merged["win_odds"], errors="coerce")
+    if merged["win_odds"].isna().any() or (merged["win_odds"] <= 0).any():
+        missing = merged.loc[merged["win_odds"].isna() | (merged["win_odds"] <= 0), ["race_id", "horse_no", "horse_name"]]
+        raise RuntimeError(f"JRA odds missing/invalid for entry rows: {missing.head(10).to_dict('records')}")
 
     if "odds_horse_name" in merged.columns:
         mismatch = merged.apply(
