@@ -2,6 +2,7 @@ app:
   timezone: Asia/Tokyo
   seed: 42
   mode: SHADOW
+  runtime_db: data/runtime/keiba_v2.sqlite3
 
 validation:
   min_horses_per_race: 5
