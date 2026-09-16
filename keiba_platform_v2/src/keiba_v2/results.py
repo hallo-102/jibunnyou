@@ -57,44 +57,43 @@ def normalize_combination(selection: str) -> str:
 def evaluate_strategy_bets(bets: pd.DataFrame, results: pd.DataFrame, payouts: pd.DataFrame | None = None) -> pd.DataFrame:
     """Attach returns to WIN/QUINELLA/TRIO strategy tickets.
 
-    Combination payouts are expected in a normalized table with columns:
-    race_id, bet_type, selection, payout_yen_per_100.
+    Preferred payout format: race_id, bet_type, selection, payout_yen_per_100.
+    For WIN only, embedded result-column payouts remain supported as fallback.
     """
     if bets.empty:
         return bets.assign(return_yen=pd.Series(dtype=int), profit_yen=pd.Series(dtype=int))
     out = bets.copy()
     out["return_yen"] = 0.0
 
-    winners = results[pd.to_numeric(results.get("finish_position"), errors="coerce").eq(1)].copy()
-    win_map = {
-        (str(r["race_id"]), int(r["horse_no"])): float(r.get("win_payout_yen_per_100", 0) or 0)
-        for _, r in winners.dropna(subset=["horse_no"]).iterrows()
-    }
-
-    for idx, row in out.iterrows():
-        race_id = str(row["race_id"])
-        bet_type = str(row["bet_type"]).upper()
-        stake = float(row.get("stake_yen", 0) or 0)
-        if bet_type == "WIN":
-            horse_no = int(str(row["selection"]).split("-")[0])
-            payout = win_map.get((race_id, horse_no), 0.0)
-            out.at[idx, "return_yen"] = payout * (stake / 100.0)
-
+    payout_map: dict[tuple[str, str, str], float] = {}
     if payouts is not None and not payouts.empty:
+        required = {"race_id", "bet_type", "selection", "payout_yen_per_100"}
+        missing = required - set(payouts.columns)
+        if missing:
+            raise ValueError(f"payouts missing columns: {sorted(missing)}")
         p = payouts.copy()
         p["race_id"] = p["race_id"].astype(str)
         p["bet_type"] = p["bet_type"].astype(str).str.upper()
         p["selection"] = p["selection"].astype(str).map(normalize_combination)
         p["payout_yen_per_100"] = pd.to_numeric(p["payout_yen_per_100"], errors="coerce").fillna(0.0)
-        payout_map = {(r["race_id"], r["bet_type"], r["selection"]): float(r["payout_yen_per_100"]) for _, r in p.iterrows()}
-        for idx, row in out.iterrows():
-            bet_type = str(row["bet_type"]).upper()
-            if bet_type not in {"QUINELLA", "TRIO"}:
-                continue
-            key = (str(row["race_id"]), bet_type, normalize_combination(str(row["selection"])))
-            payout = payout_map.get(key, 0.0)
-            stake = float(row.get("stake_yen", 0) or 0)
-            out.at[idx, "return_yen"] = payout * (stake / 100.0)
+        payout_map = {
+            (str(r["race_id"]), str(r["bet_type"]), str(r["selection"])): float(r["payout_yen_per_100"])
+            for _, r in p.iterrows()
+        }
+
+    if "win_payout_yen_per_100" in results.columns:
+        winners = results[pd.to_numeric(results.get("finish_position"), errors="coerce").eq(1)].copy()
+        for _, r in winners.dropna(subset=["horse_no"]).iterrows():
+            key = (str(r["race_id"]), "WIN", normalize_combination(str(int(r["horse_no"]))))
+            payout_map.setdefault(key, float(r.get("win_payout_yen_per_100", 0) or 0))
+
+    for idx, row in out.iterrows():
+        race_id = str(row["race_id"])
+        bet_type = str(row["bet_type"]).upper()
+        selection = normalize_combination(str(row["selection"]))
+        stake = float(row.get("stake_yen", 0) or 0)
+        payout = payout_map.get((race_id, bet_type, selection), 0.0)
+        out.at[idx, "return_yen"] = payout * (stake / 100.0)
 
     out["return_yen"] = out["return_yen"].round().astype(int)
     out["stake_yen"] = pd.to_numeric(out["stake_yen"], errors="coerce").fillna(0).astype(int)
