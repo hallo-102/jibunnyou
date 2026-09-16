@@ -14,12 +14,12 @@ def select_value_races(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         gg = g.copy()
         if "expected_value" not in gg.columns:
             gg["expected_value"] = 0.0
-        if "estimated_win_prob" not in gg.columns:
-            gg["estimated_win_prob"] = 0.0
+        if "model_win_prob" not in gg.columns:
+            gg["model_win_prob"] = 0.0
         if "market_implied_prob" not in gg.columns:
             gg["market_implied_prob"] = 0.0
 
-        gg["edge"] = gg["estimated_win_prob"] - gg["market_implied_prob"]
+        gg["edge"] = gg["model_win_prob"] - gg["market_implied_prob"]
         cand = gg[(gg["expected_value"] >= min_ev) & (gg["edge"] >= min_edge)].copy()
         cand = cand.sort_values(["expected_value", "edge"], ascending=False).head(max_candidates)
 
