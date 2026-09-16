@@ -11,6 +11,7 @@ import yaml
 class Settings:
     raw: dict[str, Any]
     project_root: Path
+    path: Path
 
     def section(self, name: str) -> dict[str, Any]:
         value = self.raw.get(name, {})
@@ -24,10 +25,11 @@ def load_settings(path: str | Path | None = None) -> Settings:
     settings_path = Path(path) if path else project_root / "config" / "settings.yaml"
     if not settings_path.is_absolute():
         settings_path = project_root / settings_path
+    settings_path = settings_path.resolve()
     if not settings_path.exists():
         raise FileNotFoundError(f"settings not found: {settings_path}")
     with settings_path.open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     if not isinstance(raw, dict):
         raise ValueError("settings.yaml root must be a mapping")
-    return Settings(raw=raw, project_root=project_root)
+    return Settings(raw=raw, project_root=project_root, path=settings_path)
