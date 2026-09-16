@@ -79,6 +79,36 @@ def _parse_tanpuku(page) -> list[dict]:
     return result
 
 
+def _parse_quinella(page) -> dict[str, float]:
+    """Parse JRA 馬連 tables: caption=first horse, th=second horse, td=odds."""
+    result: dict[str, float] = {}
+    tables = page.locator("table.umaren")
+    for t in range(tables.count()):
+        table = tables.nth(t)
+        cap = table.locator("caption")
+        if not cap.count():
+            continue
+        first_text = re.sub(r"\D", "", cap.inner_text().strip())
+        if not first_text:
+            continue
+        first = int(first_text)
+        rows = table.locator("tr")
+        for r in range(rows.count()):
+            th = rows.nth(r).locator("th")
+            td = rows.nth(r).locator("td")
+            if not th.count() or not td.count():
+                continue
+            second_text = re.sub(r"\D", "", th.inner_text().strip())
+            if not second_text:
+                continue
+            odd = pd.to_numeric(_num(td.inner_text().strip()), errors="coerce")
+            if pd.isna(odd):
+                continue
+            selection = "-".join(map(str, sorted((first, int(second_text)))))
+            result[selection] = float(odd)
+    return result
+
+
 def _parse_trio(page) -> dict[str, float]:
     result: dict[str, float] = {}
     tables = page.locator("ul.fuku3_list table.basic")
@@ -160,6 +190,26 @@ def _collect_race_from_place_page(page, race_date: str, racecourse: str, race_no
     page.wait_for_load_state("domcontentloaded")
 
     row = page.locator(f"tr:has(th.race_num img[alt='{race_no}レース'])").first
+    quinella_btn = row.locator("div.umaren a, a:has(img[alt*='馬連'])").first if row.count() else None
+    if quinella_btn is not None and quinella_btn.count():
+        quinella_btn.click()
+        page.wait_for_selector("table.umaren", timeout=10_000)
+        if not _page_matches_date(page, race_date):
+            raise RuntimeError(f"JRA quinella odds date mismatch: {canonical}")
+        for selection, odds in _parse_quinella(page).items():
+            combo_rows.append({
+                "race_id": canonical,
+                "race_date": race_date,
+                "racecourse": racecourse,
+                "race_no": race_no,
+                "bet_type": "QUINELLA",
+                "selection": selection,
+                "odds": odds,
+            })
+        page.go_back()
+        page.wait_for_load_state("domcontentloaded")
+
+    row = page.locator(f"tr:has(th.race_num img[alt='{race_no}レース'])").first
     trio_btn = row.locator("div.trio a").first if row.count() else None
     if trio_btn is not None and trio_btn.count():
         trio_btn.click()
@@ -185,6 +235,8 @@ def _collect_race_from_place_page(page, race_date: str, racecourse: str, race_no
         raise RuntimeError(f"JRA runner odds empty: {canonical}")
     if runners.duplicated(["race_id", "horse_no"], keep=False).any():
         raise RuntimeError(f"duplicate JRA runner odds: {canonical}")
+    if not combos.empty and combos.duplicated(["race_id", "bet_type", "selection"], keep=False).any():
+        raise RuntimeError(f"duplicate JRA combination odds: {canonical}")
     return runners, combos
 
 
@@ -208,7 +260,7 @@ def collect_jra_race_odds(
 
 
 def collect_jra_odds(race_date: str, *, headless: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Collect same-day JRA win/place/trio odds for every race currently listed."""
+    """Collect same-day JRA win/place/quinella/trio odds for every race currently listed."""
     sync_playwright = _require_playwright()
     runner_frames: list[pd.DataFrame] = []
     combo_frames: list[pd.DataFrame] = []
