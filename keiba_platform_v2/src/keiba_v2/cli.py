@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
+import pandas as pd
+
 from .adapters import export_canonical_csv, load_legacy_excel
+from .backtest import summarize_bets
 from .config import load_settings
 from .contracts import canonicalize, load_race_table
 from .features import build_features
 from .orchestrator import run_pipeline
+from .results import evaluate_strategy_bets, load_results
 from .training import train_lightgbm
 from .validation import validate_races
 
@@ -33,6 +38,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--input", required=True)
     p_run.add_argument("--date", required=True, help="YYYYMMDD")
     p_run.add_argument("--settings")
+
+    p_settle = sub.add_parser("settle", help="evaluate strategy tickets against race results")
+    p_settle.add_argument("--bets", required=True, help="strategy_bets_YYYYMMDD.json")
+    p_settle.add_argument("--results", required=True)
+    p_settle.add_argument("--payouts")
+    p_settle.add_argument("--output")
     return parser
 
 
@@ -51,8 +62,7 @@ def main() -> None:
         return
 
     if args.command == "import-legacy":
-        sheet: str | int | None
-        sheet = int(args.sheet) if str(args.sheet).isdigit() else args.sheet
+        sheet: str | int | None = int(args.sheet) if str(args.sheet).isdigit() else args.sheet
         df = load_legacy_excel(args.input, sheet_name=sheet)
         dst = export_canonical_csv(df, args.output)
         print(f"OK: exported {len(df)} rows -> {dst}")
@@ -60,8 +70,7 @@ def main() -> None:
 
     if args.command == "train":
         settings = load_settings(args.settings)
-        df = canonicalize(load_race_table(args.input))
-        df = build_features(df)
+        df = build_features(canonicalize(load_race_table(args.input)))
         pred_cfg = settings.section("prediction")
         model_path = settings.project_root / str(pred_cfg.get("model_path", "data/runtime/model.txt"))
         result = train_lightgbm(
@@ -76,12 +85,24 @@ def main() -> None:
 
     if args.command == "run":
         result = run_pipeline(Path(args.input), args.date, args.settings)
-        print(f"OK: races={result['metrics']['races']} horses={result['metrics']['horses']}")
+        print(f"OK: run_id={result['run_id']} races={result['metrics']['races']} horses={result['metrics']['horses']}")
         print(f"buy_candidate_races={result['metrics']['buy_candidate_races']}")
         print(f"strategy_bets={result['metrics']['strategy_bets']} stake={result['metrics']['strategy_stake_yen']} yen")
         print(f"predictions={result['prediction_path']}")
         print(f"race_selection={result['race_selection_path']}")
         print(f"strategy={result['strategy_path']}")
+        return
+
+    if args.command == "settle":
+        bets = pd.DataFrame(json.loads(Path(args.bets).read_text(encoding="utf-8")))
+        results = load_results(args.results)
+        payouts = pd.read_csv(args.payouts, encoding="utf-8-sig") if args.payouts else None
+        settled = evaluate_strategy_bets(bets, results, payouts)
+        summary = summarize_bets(settled)
+        output = Path(args.output) if args.output else Path(args.bets).with_name(Path(args.bets).stem + "_settled.csv")
+        settled.to_csv(output, index=False, encoding="utf-8-sig")
+        print(f"OK: settled={output}")
+        print(summary.to_dict())
         return
 
     raise SystemExit(2)
