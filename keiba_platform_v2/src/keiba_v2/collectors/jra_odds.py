@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import re
 from pathlib import Path
 
@@ -28,6 +29,30 @@ def _place(raw: str) -> str:
 
 def _race_id(race_date: str, racecourse: str, race_no: int) -> str:
     return f"{race_date}_{racecourse}_{race_no:02d}R"
+
+
+def _target_date_tokens(race_date: str) -> tuple[str, ...]:
+    d = dt.datetime.strptime(race_date, "%Y%m%d").date()
+    return (
+        race_date,
+        f"{d.year}年{d.month}月{d.day}日",
+        f"{d.month}月{d.day}日",
+    )
+
+
+def _page_matches_date(page, race_date: str) -> bool:
+    tokens = _target_date_tokens(race_date)
+    texts = [page.url]
+    try:
+        texts.append(page.title())
+    except Exception:
+        pass
+    try:
+        texts.append(page.locator("body").inner_text(timeout=5_000))
+    except Exception:
+        pass
+    joined = " ".join(texts)
+    return any(token in joined for token in tokens)
 
 
 def _parse_tanpuku(page) -> list[dict]:
@@ -78,93 +103,148 @@ def _parse_trio(page) -> dict[str, float]:
     return result
 
 
-def collect_jra_odds(race_date: str, *, headless: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Collect same-day JRA win/place/trio odds from the public odds pages.
+def _open_odds_top(page) -> None:
+    page.goto("https://www.jra.go.jp/", timeout=60_000)
+    link = page.locator("#quick_menu a[onclick*='accessO.html']").first
+    if not link.count():
+        raise RuntimeError("JRA odds menu not found")
+    link.click(force=True)
+    page.wait_for_load_state("domcontentloaded")
 
-    Returns (runner_odds, combination_odds). Website changes are treated as hard
-    failures; downstream prediction must not silently continue with stale odds.
-    """
-    sync_playwright = _require_playwright()
+
+def _goto_place(page, race_date: str, racecourse: str) -> None:
+    candidates = page.locator("div.link_list a[onclick*='accessO.html']")
+    labels = [candidates.nth(i).inner_text().strip() for i in range(candidates.count())]
+    indexes = [i for i, label in enumerate(labels) if racecourse in _place(label)]
+    if not indexes:
+        raise RuntimeError(f"JRA racecourse link not found: {racecourse}")
+
+    for idx in indexes:
+        candidates = page.locator("div.link_list a[onclick*='accessO.html']")
+        if idx >= candidates.count():
+            continue
+        candidates.nth(idx).click()
+        page.wait_for_load_state("domcontentloaded")
+        if _page_matches_date(page, race_date):
+            return
+        page.go_back()
+        page.wait_for_load_state("domcontentloaded")
+    raise RuntimeError(f"JRA page date mismatch: date={race_date} racecourse={racecourse}")
+
+
+def _collect_race_from_place_page(page, race_date: str, racecourse: str, race_no: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    canonical = _race_id(race_date, racecourse, race_no)
+    row = page.locator(f"tr:has(th.race_num img[alt='{race_no}レース'])").first
+    if row.count() == 0:
+        raise RuntimeError(f"JRA race row not found: {canonical}")
+
     runner_rows: list[dict] = []
     combo_rows: list[dict] = []
+
+    tan_btn = row.locator("div.tanpuku a").first
+    if not tan_btn.count():
+        raise RuntimeError(f"JRA win odds link not found: {canonical}")
+    tan_btn.click()
+    page.wait_for_selector("table.tanpuku td.num", timeout=10_000)
+    if not _page_matches_date(page, race_date):
+        raise RuntimeError(f"JRA win odds date mismatch: {canonical}")
+    for h in _parse_tanpuku(page):
+        runner_rows.append({
+            "race_id": canonical,
+            "race_date": race_date,
+            "racecourse": racecourse,
+            "race_no": race_no,
+            **h,
+        })
+    page.go_back()
+    page.wait_for_load_state("domcontentloaded")
+
+    row = page.locator(f"tr:has(th.race_num img[alt='{race_no}レース'])").first
+    trio_btn = row.locator("div.trio a").first if row.count() else None
+    if trio_btn is not None and trio_btn.count():
+        trio_btn.click()
+        page.wait_for_selector("ul.fuku3_list", timeout=10_000)
+        if not _page_matches_date(page, race_date):
+            raise RuntimeError(f"JRA trio odds date mismatch: {canonical}")
+        for selection, odds in _parse_trio(page).items():
+            combo_rows.append({
+                "race_id": canonical,
+                "race_date": race_date,
+                "racecourse": racecourse,
+                "race_no": race_no,
+                "bet_type": "TRIO",
+                "selection": selection,
+                "odds": odds,
+            })
+        page.go_back()
+        page.wait_for_load_state("domcontentloaded")
+
+    runners = pd.DataFrame(runner_rows)
+    combos = pd.DataFrame(combo_rows)
+    if runners.empty:
+        raise RuntimeError(f"JRA runner odds empty: {canonical}")
+    if runners.duplicated(["race_id", "horse_no"], keep=False).any():
+        raise RuntimeError(f"duplicate JRA runner odds: {canonical}")
+    return runners, combos
+
+
+def collect_jra_race_odds(
+    race_date: str,
+    racecourse: str,
+    race_no: int,
+    *,
+    headless: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    sync_playwright = _require_playwright()
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=headless)
+        try:
+            page = browser.new_page(viewport={"width": 1400, "height": 900})
+            _open_odds_top(page)
+            _goto_place(page, race_date, racecourse)
+            return _collect_race_from_place_page(page, race_date, racecourse, int(race_no))
+        finally:
+            browser.close()
+
+
+def collect_jra_odds(race_date: str, *, headless: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Collect same-day JRA win/place/trio odds for every race currently listed."""
+    sync_playwright = _require_playwright()
+    runner_frames: list[pd.DataFrame] = []
+    combo_frames: list[pd.DataFrame] = []
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
         try:
             page = browser.new_page(viewport={"width": 1400, "height": 900})
-            page.goto("https://www.jra.go.jp/", timeout=60_000)
-            page.locator("#quick_menu a[onclick*='accessO.html']").first.click(force=True)
-            page.wait_for_load_state("domcontentloaded")
-
-            place_links = page.locator("div.link_list a[onclick*='accessO.html']")
-            link_labels = [place_links.nth(i).inner_text().strip() for i in range(place_links.count())]
-            if not link_labels:
+            _open_odds_top(page)
+            links = page.locator("div.link_list a[onclick*='accessO.html']")
+            labels = list(dict.fromkeys(links.nth(i).inner_text().strip() for i in range(links.count())))
+            racecourses = list(dict.fromkeys(_place(label) for label in labels if _place(label)))
+            if not racecourses:
                 raise RuntimeError("JRA odds place links not found")
 
-            for label in link_labels:
-                place_links = page.locator("div.link_list a[onclick*='accessO.html']")
-                match_index = None
-                for i in range(place_links.count()):
-                    if place_links.nth(i).inner_text().strip() == label:
-                        match_index = i
-                        break
-                if match_index is None:
+            for racecourse in racecourses:
+                _open_odds_top(page)
+                try:
+                    _goto_place(page, race_date, racecourse)
+                except RuntimeError:
                     continue
-                racecourse = _place(label)
-                place_links.nth(match_index).click()
-                page.wait_for_load_state("domcontentloaded")
-
                 for race_no in range(1, 13):
                     row = page.locator(f"tr:has(th.race_num img[alt='{race_no}レース'])").first
                     if row.count() == 0:
                         continue
-                    canonical = _race_id(race_date, racecourse, race_no)
-
-                    tan_btn = row.locator("div.tanpuku a").first
-                    if tan_btn.count():
-                        tan_btn.click()
-                        page.wait_for_selector("table.tanpuku td.num", timeout=10_000)
-                        for h in _parse_tanpuku(page):
-                            runner_rows.append({
-                                "race_id": canonical,
-                                "race_date": race_date,
-                                "racecourse": racecourse,
-                                "race_no": race_no,
-                                **h,
-                            })
-                        page.go_back()
-                        page.wait_for_load_state("domcontentloaded")
-
-                    row = page.locator(f"tr:has(th.race_num img[alt='{race_no}レース'])").first
-                    trio_btn = row.locator("div.trio a").first if row.count() else None
-                    if trio_btn is not None and trio_btn.count():
-                        trio_btn.click()
-                        page.wait_for_selector("ul.fuku3_list", timeout=10_000)
-                        for selection, odds in _parse_trio(page).items():
-                            combo_rows.append({
-                                "race_id": canonical,
-                                "race_date": race_date,
-                                "racecourse": racecourse,
-                                "race_no": race_no,
-                                "bet_type": "TRIO",
-                                "selection": selection,
-                                "odds": odds,
-                            })
-                        page.go_back()
-                        page.wait_for_load_state("domcontentloaded")
-
-                page.go_back()
-                page.wait_for_load_state("domcontentloaded")
+                    runners, combos = _collect_race_from_place_page(page, race_date, racecourse, race_no)
+                    runner_frames.append(runners)
+                    if not combos.empty:
+                        combo_frames.append(combos)
         finally:
             browser.close()
 
-    runners = pd.DataFrame(runner_rows)
-    combos = pd.DataFrame(combo_rows)
+    runners = pd.concat(runner_frames, ignore_index=True) if runner_frames else pd.DataFrame()
+    combos = pd.concat(combo_frames, ignore_index=True) if combo_frames else pd.DataFrame()
     if runners.empty:
         raise RuntimeError(f"JRA win odds were empty: {race_date}")
-    duplicates = runners.duplicated(["race_id", "horse_no"], keep=False)
-    if duplicates.any():
-        raise RuntimeError("duplicate JRA runner odds detected")
     return runners.sort_values(["race_id", "horse_no"]).reset_index(drop=True), combos
 
 
