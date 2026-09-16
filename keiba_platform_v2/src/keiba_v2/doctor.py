@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
-import sqlite3
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .config import load_settings
+from .history import HistoryStore
+from .storage import RunStore
 
 
 @dataclass(frozen=True)
@@ -30,22 +31,38 @@ def run_doctor(settings_path: str | Path | None = None) -> dict:
     app = settings.section("app")
     pred = settings.section("prediction")
 
-    checks: list[Check] = []
-    checks.append(Check("project_root", root.exists(), str(root)))
-    checks.append(Check("settings", True, str(settings.path)))
+    checks: list[Check] = [
+        Check("project_root", root.exists(), str(root)),
+        Check("settings", True, str(settings.path)),
+    ]
 
     runtime_db = root / str(app.get("runtime_db", "data/runtime/keiba_v2.sqlite3"))
     history_db = root / str(app.get("history_db", "data/runtime/history.sqlite3"))
     model_path = root / str(pred.get("model_path", "data/runtime/model.txt"))
 
-    for path, name in ((runtime_db, "runtime_db"), (history_db, "history_db")):
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(path) as conn:
-                conn.execute("SELECT 1")
-            checks.append(Check(name, True, str(path)))
-        except Exception as exc:
-            checks.append(Check(name, False, f"{path}: {exc}"))
+    try:
+        runtime = RunStore(runtime_db)
+        with runtime.connect() as conn:
+            conn.execute("SELECT 1 FROM runs LIMIT 1").fetchone()
+        checks.append(Check("runtime_db", True, str(runtime_db)))
+    except Exception as exc:
+        checks.append(Check("runtime_db", False, f"{runtime_db}: {exc}"))
+
+    history_rows = 0
+    try:
+        history = HistoryStore(history_db)
+        all_history = history.load_all()
+        history_rows = int(len(all_history))
+        checks.append(Check("history_db", True, str(history_db)))
+        checks.append(Check(
+            "history_rows",
+            history_rows > 0,
+            f"{history_rows} rows",
+            required=False,
+        ))
+    except Exception as exc:
+        checks.append(Check("history_db", False, f"{history_db}: {exc}"))
+        checks.append(Check("history_rows", False, str(exc), required=False))
 
     checks.extend([
         _module_check("pandas"),
@@ -68,21 +85,6 @@ def run_doctor(settings_path: str | Path | None = None) -> dict:
         str(model_path) if model_path.exists() else "model not trained; fallback prediction will be used",
         required=False,
     ))
-
-    history_rows = 0
-    if history_db.exists():
-        try:
-            with sqlite3.connect(history_db) as conn:
-                row = conn.execute("SELECT COUNT(*) FROM horse_runs").fetchone()
-                history_rows = int(row[0]) if row else 0
-            checks.append(Check(
-                "history_rows",
-                history_rows > 0,
-                f"{history_rows} rows",
-                required=False,
-            ))
-        except Exception as exc:
-            checks.append(Check("history_rows", False, str(exc), required=False))
 
     required_ok = all(c.ok for c in checks if c.required)
     collection_modules = {c.name: c.ok for c in checks if c.name in {
