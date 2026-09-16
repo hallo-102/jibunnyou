@@ -55,8 +55,18 @@ def _horse_ids_by_number(soup) -> dict[int, str]:
         no_text = re.sub(r"\D", "", no_cell.get_text(" ", strip=True))
         if not no_text:
             continue
-        result[int(no_text)] = _horse_id_from_href(str(horse.get("href", "")))
+        horse_id = _horse_id_from_href(str(horse.get("href", "")))
+        if horse_id:
+            result[int(no_text)] = horse_id
     return result
+
+
+def _fetch_horse_ids(requests, BeautifulSoup, source_race_id: str) -> dict[int, str]:
+    shutuba_url = f"https://race.netkeiba.com/race/shutuba.html?race_id={source_race_id}"
+    response = requests.get(shutuba_url, headers={"User-Agent": UA}, timeout=20)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.content, "html.parser")
+    return _horse_ids_by_number(soup)
 
 
 def collect_one_result(race_date: str, source_race_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -71,6 +81,8 @@ def collect_one_result(race_date: str, source_race_id: str) -> tuple[pd.DataFram
     canonical_id = _canonical_race_id(race_date, place or "UNKNOWN", race_no)
     surface, distance = _race_meta_from_text(text)
     horse_ids = _horse_ids_by_number(soup)
+    if not horse_ids:
+        horse_ids = _fetch_horse_ids(requests, BeautifulSoup, source_race_id)
 
     tables = pd.read_html(io.StringIO(response.text))
     if not tables:
@@ -114,12 +126,13 @@ def collect_one_result(race_date: str, source_race_id: str) -> tuple[pd.DataFram
             "body_weight": float(body_match.group(1)) if body_match else None,
         })
 
+    result_df = pd.DataFrame(rows)
+    if not result_df.empty and result_df["horse_id"].fillna("").eq("").any():
+        missing_ids = result_df.loc[result_df["horse_id"].fillna("").eq(""), ["horse_no", "horse_name"]]
+        raise RuntimeError(f"horse_id missing in result collection: {source_race_id}: {missing_ids.to_dict('records')}")
+
     payout_rows: list[dict] = []
-    pay_targets = {
-        "Tansho": "WIN",
-        "Umaren": "QUINELLA",
-        "Fuku3": "TRIO",
-    }
+    pay_targets = {"Tansho": "WIN", "Umaren": "QUINELLA", "Fuku3": "TRIO"}
     for css_class, bet_type in pay_targets.items():
         tr = soup.find("tr", class_=css_class)
         if not tr:
@@ -132,7 +145,10 @@ def collect_one_result(race_date: str, source_race_id: str) -> tuple[pd.DataFram
             selection_nums = nums[i:i + step]
             if len(selection_nums) != step:
                 continue
-            selection = "-".join(str(v) for v in sorted(int(x) for x in selection_nums if x.isdigit()))
+            numeric = [int(x) for x in selection_nums if x.isdigit()]
+            if len(numeric) != step:
+                continue
+            selection = "-".join(str(v) for v in sorted(numeric))
             payout_text = payouts[i // step] if i // step < len(payouts) else ""
             payout = pd.to_numeric(re.sub(r"\D", "", payout_text), errors="coerce")
             payout_rows.append({
@@ -142,7 +158,7 @@ def collect_one_result(race_date: str, source_race_id: str) -> tuple[pd.DataFram
                 "payout_yen_per_100": int(payout) if pd.notna(payout) else 0,
             })
 
-    return pd.DataFrame(rows), pd.DataFrame(payout_rows)
+    return result_df, pd.DataFrame(payout_rows)
 
 
 def collect_results_for_entries(entries: pd.DataFrame, *, pause_sec: float = 0.25) -> tuple[pd.DataFrame, pd.DataFrame]:
