@@ -125,14 +125,19 @@ def process_t5_race(
         combo_path,
         output_tag=_output_tag(race_date, int(race_no), race_id),
         existing_daily_stake_yen=existing_daily_stake,
+        allow_fallback_strategy=False,
     )
     if int(result["metrics"].get("strategy_bets", 0)) <= 0:
-        store.mark_t5_result(race_id, "NO_BET", run_id=result["run_id"], error="race failed EV/edge/selection gates")
+        source = ",".join(result.get("prediction_sources", []))
+        reason = "race failed EV/edge/selection gates"
+        if int(result["metrics"].get("model_strategy_allowed", 1)) == 0:
+            reason = f"trained model could not be applied; prediction_source={source or 'unknown'}"
+        store.mark_t5_result(race_id, "NO_BET", run_id=result["run_id"], error=reason)
         return {
             "race_id": race_id,
             "status": "NO_BET",
             "run_id": result["run_id"],
-            "reason": "race failed EV/edge/selection gates",
+            "reason": reason,
             "metrics": result["metrics"],
         }
 
