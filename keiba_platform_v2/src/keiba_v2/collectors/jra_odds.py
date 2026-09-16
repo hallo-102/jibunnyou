@@ -8,6 +8,8 @@ import pandas as pd
 
 _NUM = re.compile(r"[^\d.\-]")
 _PLACE = re.compile(r"回([^\d]+?)\d")
+_DATE_YMD = re.compile(r"(?<!\d)(20\d{2})[\/\-.年]?(\d{1,2})[\/\-.月]?(\d{1,2})日?(?!\d)")
+_DATE_MD = re.compile(r"(\d{1,2})月\s*(\d{1,2})日")
 
 
 def _require_playwright():
@@ -31,28 +33,52 @@ def _race_id(race_date: str, racecourse: str, race_no: int) -> str:
     return f"{race_date}_{racecourse}_{race_no:02d}R"
 
 
-def _target_date_tokens(race_date: str) -> tuple[str, ...]:
-    d = dt.datetime.strptime(race_date, "%Y%m%d").date()
-    return (
-        race_date,
-        f"{d.year}年{d.month}月{d.day}日",
-        f"{d.month}月{d.day}日",
-    )
+def _date_candidates(text: object, race_date: str) -> list[str]:
+    src = str(text or "")
+    base_year = int(race_date[:4])
+    values: list[str] = []
+    for m in _DATE_YMD.finditer(src):
+        try:
+            values.append(dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).strftime("%Y%m%d"))
+        except ValueError:
+            continue
+    for m in _DATE_MD.finditer(src):
+        try:
+            values.append(dt.date(base_year, int(m.group(1)), int(m.group(2))).strftime("%Y%m%d"))
+        except ValueError:
+            continue
+    return list(dict.fromkeys(values))
 
 
 def _page_matches_date(page, race_date: str) -> bool:
-    tokens = _target_date_tokens(race_date)
-    texts = [page.url]
+    """Accept a JRA page only when its primary date can be resolved to target date."""
+    primary: list[str] = [page.url]
     try:
-        texts.append(page.title())
+        primary.append(page.title())
     except Exception:
         pass
+    for selector in ("h1", "h2", "h3", ".race_header", ".kaisai", ".date", ".thisweek"):
+        try:
+            loc = page.locator(selector)
+            for i in range(min(loc.count(), 5)):
+                primary.append(loc.nth(i).inner_text(timeout=1_000))
+        except Exception:
+            continue
+    primary_dates: list[str] = []
+    for text in primary:
+        primary_dates.extend(_date_candidates(text, race_date))
+    primary_dates = list(dict.fromkeys(primary_dates))
+    if len(primary_dates) == 1:
+        return primary_dates[0] == race_date
+    if len(primary_dates) > 1:
+        return False
+
     try:
-        texts.append(page.locator("body").inner_text(timeout=5_000))
+        body = page.locator("body").inner_text(timeout=5_000)
     except Exception:
-        pass
-    joined = " ".join(texts)
-    return any(token in joined for token in tokens)
+        return False
+    body_dates = _date_candidates(body, race_date)
+    return len(body_dates) == 1 and body_dates[0] == race_date
 
 
 def _parse_tanpuku(page) -> list[dict]:
@@ -79,32 +105,37 @@ def _parse_tanpuku(page) -> list[dict]:
     return result
 
 
+def _quinella_tables(page):
+    preferred = page.locator("ul.umaren_list table.basic")
+    return preferred if preferred.count() else page.locator("table.umaren")
+
+
 def _parse_quinella(page) -> dict[str, float]:
     """Parse JRA 馬連 tables: caption=first horse, th=second horse, td=odds."""
     result: dict[str, float] = {}
-    tables = page.locator("table.umaren")
+    tables = _quinella_tables(page)
     for t in range(tables.count()):
         table = tables.nth(t)
         cap = table.locator("caption")
         if not cap.count():
             continue
-        first_text = re.sub(r"\D", "", cap.inner_text().strip())
-        if not first_text:
+        first_values = re.findall(r"\d+", cap.inner_text().strip())
+        if len(first_values) != 1:
             continue
-        first = int(first_text)
+        first = int(first_values[0])
         rows = table.locator("tr")
         for r in range(rows.count()):
             th = rows.nth(r).locator("th")
             td = rows.nth(r).locator("td")
             if not th.count() or not td.count():
                 continue
-            second_text = re.sub(r"\D", "", th.inner_text().strip())
-            if not second_text:
+            second_values = re.findall(r"\d+", th.inner_text().strip())
+            if len(second_values) != 1:
                 continue
             odd = pd.to_numeric(_num(td.inner_text().strip()), errors="coerce")
             if pd.isna(odd):
                 continue
-            selection = "-".join(map(str, sorted((first, int(second_text)))))
+            selection = "-".join(map(str, sorted((first, int(second_values[0])))))
             result[selection] = float(odd)
     return result
 
@@ -193,7 +224,7 @@ def _collect_race_from_place_page(page, race_date: str, racecourse: str, race_no
     quinella_btn = row.locator("div.umaren a, a:has(img[alt*='馬連'])").first if row.count() else None
     if quinella_btn is not None and quinella_btn.count():
         quinella_btn.click()
-        page.wait_for_selector("table.umaren", timeout=10_000)
+        page.wait_for_selector("ul.umaren_list table.basic, table.umaren", timeout=10_000)
         if not _page_matches_date(page, race_date):
             raise RuntimeError(f"JRA quinella odds date mismatch: {canonical}")
         for selection, odds in _parse_quinella(page).items():
