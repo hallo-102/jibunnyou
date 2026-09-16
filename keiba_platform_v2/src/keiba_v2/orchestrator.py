@@ -68,14 +68,14 @@ def run_pipeline(
             predicted = predict(featured, settings.section("prediction"), settings.project_root)
             enriched = add_expected_value(predicted, settings.section("odds"))
             odds_summary = analyze_odds(enriched, settings.section("odds"))
-            race_selection = select_value_races(enriched, settings.section("race_selection"))
+
+            combo_raw = _load_combination_odds(combination_odds_path)
+            combo_ev = add_combination_expected_value(enriched, combo_raw) if combo_raw is not None and not combo_raw.empty else pd.DataFrame()
+            race_selection = select_value_races(enriched, settings.section("race_selection"), combo_ev)
             selected_race_ids = set(
                 race_selection.loc[race_selection["selected_for_day"].fillna(False), "race_id"].astype(str).tolist()
             ) if not race_selection.empty else set()
             selected_enriched = enriched[enriched["race_id"].astype(str).isin(selected_race_ids)].copy()
-
-            combo_raw = _load_combination_odds(combination_odds_path)
-            combo_ev = add_combination_expected_value(enriched, combo_raw) if combo_raw is not None and not combo_raw.empty else pd.DataFrame()
             selected_combo_ev = (
                 combo_ev[combo_ev["race_id"].astype(str).isin(selected_race_ids)].copy()
                 if not combo_ev.empty else pd.DataFrame()
