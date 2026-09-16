@@ -9,8 +9,12 @@ import pandas as pd
 @dataclass(frozen=True)
 class FoldResult:
     fold: int
+    train_dates: int
+    test_dates: int
     train_races: int
     test_races: int
+    train_last_date: str
+    test_first_date: str
     top1_win_rate: float
     top3_win_rate: float
     top5_win_rate: float
@@ -23,25 +27,21 @@ class FoldResult:
         return asdict(self)
 
 
-def _race_folds(df: pd.DataFrame, n_splits: int) -> list[tuple[list[str], list[str]]]:
+def _date_folds(df: pd.DataFrame, n_splits: int) -> list[tuple[list[pd.Timestamp], list[pd.Timestamp]]]:
     work = df.copy()
-    work["race_date"] = pd.to_datetime(work["race_date"], errors="coerce")
-    races = (
-        work.groupby("race_id", as_index=False)["race_date"]
-        .min()
-        .dropna()
-        .sort_values(["race_date", "race_id"])
-    )
-    ids = races["race_id"].astype(str).tolist()
-    if len(ids) < n_splits + 4:
-        raise ValueError(f"not enough races for walk-forward: races={len(ids)}, n_splits={n_splits}")
-    chunks = [list(x) for x in np.array_split(np.array(ids, dtype=object), n_splits + 1)]
-    folds: list[tuple[list[str], list[str]]] = []
+    work["_race_date"] = pd.to_datetime(work["race_date"], errors="coerce").dt.normalize()
+    if work["_race_date"].isna().any():
+        raise ValueError("walk-forward race_date contains invalid values")
+    dates = sorted(work["_race_date"].unique().tolist())
+    if len(dates) < n_splits + 2:
+        raise ValueError(f"not enough distinct race dates for walk-forward: dates={len(dates)}, n_splits={n_splits}")
+    chunks = [list(x) for x in np.array_split(np.array(dates, dtype=object), n_splits + 1)]
+    folds: list[tuple[list[pd.Timestamp], list[pd.Timestamp]]] = []
     for i in range(1, len(chunks)):
-        train_ids = [str(v) for chunk in chunks[:i] for v in chunk]
-        test_ids = [str(v) for v in chunks[i]]
-        if train_ids and test_ids:
-            folds.append((train_ids, test_ids))
+        train_dates = [pd.Timestamp(v) for chunk in chunks[:i] for v in chunk]
+        test_dates = [pd.Timestamp(v) for v in chunks[i]]
+        if train_dates and test_dates:
+            folds.append((train_dates, test_dates))
     return folds
 
 
@@ -70,16 +70,21 @@ def run_walkforward(
 
     work = df.copy()
     work["race_id"] = work["race_id"].astype(str)
+    work["_race_date"] = pd.to_datetime(work["race_date"], errors="coerce").dt.normalize()
+    if work["_race_date"].isna().any():
+        raise ValueError("walk-forward race_date contains invalid values")
     work["is_winner"] = pd.to_numeric(work["is_winner"], errors="coerce").fillna(0).astype(int)
     work["win_odds"] = pd.to_numeric(work["win_odds"], errors="coerce")
-    folds = _race_folds(work, n_splits)
+    folds = _date_folds(work, n_splits)
     results: list[FoldResult] = []
 
-    for fold_no, (train_ids, test_ids) in enumerate(folds, start=1):
-        train = work[work["race_id"].isin(train_ids)].copy()
-        test = work[work["race_id"].isin(test_ids)].copy()
+    for fold_no, (train_dates, test_dates) in enumerate(folds, start=1):
+        train = work[work["_race_date"].isin(train_dates)].copy()
+        test = work[work["_race_date"].isin(test_dates)].copy()
         if train["is_winner"].nunique() < 2 or test["is_winner"].sum() == 0:
             continue
+        if train["_race_date"].max() >= test["_race_date"].min():
+            raise RuntimeError("walk-forward leakage detected: train date overlaps test date")
 
         x_train = train[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
         y_train = train["is_winner"]
@@ -119,8 +124,12 @@ def run_walkforward(
 
         results.append(FoldResult(
             fold=fold_no,
+            train_dates=int(train["_race_date"].nunique()),
+            test_dates=int(test["_race_date"].nunique()),
             train_races=int(train["race_id"].nunique()),
             test_races=race_count,
+            train_last_date=str(train["_race_date"].max().date()),
+            test_first_date=str(test["_race_date"].min().date()),
             top1_win_rate=top1,
             top3_win_rate=top3,
             top5_win_rate=top5,
@@ -132,12 +141,13 @@ def run_walkforward(
 
     fold_df = pd.DataFrame([r.to_dict() for r in results])
     if fold_df.empty:
-        summary = {"folds": 0, "test_races": 0, "win_bets": 0, "win_roi": 0.0}
+        summary = {"folds": 0, "test_dates": 0, "test_races": 0, "win_bets": 0, "win_roi": 0.0}
     else:
         total_stake = int(fold_df["win_stake_yen"].sum())
         total_return = int(fold_df["win_return_yen"].sum())
         summary = {
             "folds": int(len(fold_df)),
+            "test_dates": int(fold_df["test_dates"].sum()),
             "test_races": int(fold_df["test_races"].sum()),
             "avg_top1_win_rate": float(fold_df["top1_win_rate"].mean()),
             "avg_top3_win_rate": float(fold_df["top3_win_rate"].mean()),
