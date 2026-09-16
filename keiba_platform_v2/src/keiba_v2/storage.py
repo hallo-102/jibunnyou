@@ -133,6 +133,19 @@ class RunStore:
             ).fetchone()
         return bool(row and row["status"] == "SUCCESS")
 
+    def successful_t5_stake(self, race_date: str) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COALESCE(SUM(b.stake_yen), 0) AS total
+                FROM t5_snapshots t
+                JOIN strategy_bets b ON b.run_id = t.run_id
+                WHERE t.race_date=? AND t.status='SUCCESS'
+                """,
+                (str(race_date),),
+            ).fetchone()
+        return int(row["total"] if row else 0)
+
     def mark_t5_scheduled(self, race_id: str, race_date: str, scheduled_at: str) -> None:
         with self.connect() as conn:
             conn.execute(
