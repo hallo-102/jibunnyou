@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from .collectors.jra_odds import collect_jra_race_odds
+from .collectors.schedule import collect_one_start_time
 from .config import load_settings
 from .orchestrator import run_pipeline
 from .storage import RunStore
@@ -26,7 +27,7 @@ def _output_tag(race_date: str, race_no: int, race_id: str) -> str:
 
 
 def _merge_t5_odds(base_race: pd.DataFrame, runner_odds: pd.DataFrame) -> pd.DataFrame:
-    base = base_race.copy()
+    base = base_race.copy().drop(columns=["win_odds", "place_odds"], errors="ignore")
     odds = runner_odds.copy().rename(columns={"horse_name": "odds_horse_name", "win_odds": "t5_win_odds"})
     merged = base.merge(
         odds[["race_id", "horse_no", "odds_horse_name", "t5_win_odds"]],
@@ -36,7 +37,7 @@ def _merge_t5_odds(base_race: pd.DataFrame, runner_odds: pd.DataFrame) -> pd.Dat
     )
     if merged.empty:
         raise RuntimeError("T-5 odds did not match any entry rows")
-    if len(merged) != len(runner_odds):
+    if len(merged) != len(base_race) or len(merged) != len(runner_odds):
         raise RuntimeError("T-5 runner/entry count mismatch")
     merged["win_odds"] = pd.to_numeric(merged["t5_win_odds"], errors="coerce")
     if merged["win_odds"].isna().any() or (merged["win_odds"] <= 0).any():
@@ -124,10 +125,14 @@ def run_t5_runtime(
     settings = load_settings(settings_path)
     app_cfg = settings.section("app")
     store = RunStore(settings.project_root / str(app_cfg.get("runtime_db", "data/runtime/keiba_v2.sqlite3")))
-    schedule = pd.read_csv(schedule_path, encoding="utf-8-sig", dtype={"race_id": str, "race_date": str})
-    schedule = schedule[schedule["race_date"].astype(str) == str(race_date)].copy()
+    schedule = pd.read_csv(schedule_path, encoding="utf-8-sig", dtype={"race_id": str, "race_date": str, "source_race_id": str})
+    schedule = schedule[schedule["race_date"].astype(str) == str(race_date)].copy().reset_index(drop=True)
     if schedule.empty:
         raise RuntimeError(f"empty schedule for {race_date}")
+    required = {"race_id", "racecourse", "race_no", "start_time", "source_race_id"}
+    missing = required - set(schedule.columns)
+    if missing:
+        raise ValueError(f"T-5 schedule missing columns: {sorted(missing)}")
 
     for _, race in schedule.iterrows():
         target = _target_datetime(str(race_date), str(race["start_time"]))
@@ -135,9 +140,12 @@ def run_t5_runtime(
 
     finished: list[dict] = []
     terminal: set[str] = set()
+    refreshed: set[str] = set()
+    next_refresh_attempt: dict[str, datetime] = {}
+
     while len(terminal) < len(schedule):
         now = datetime.now(JST)
-        for _, race in schedule.iterrows():
+        for idx, race in schedule.iterrows():
             race_id = str(race["race_id"])
             if race_id in terminal:
                 continue
@@ -145,10 +153,35 @@ def run_t5_runtime(
                 terminal.add(race_id)
                 continue
 
-            target = _target_datetime(str(race_date), str(race["start_time"]))
+            target = _target_datetime(str(race_date), str(schedule.at[idx, "start_time"]))
+            refresh_from = target - timedelta(minutes=25)  # start time - 30 minutes
+            if race_id not in refreshed and now >= refresh_from:
+                retry_at = next_refresh_attempt.get(race_id)
+                if retry_at is None or now >= retry_at:
+                    try:
+                        latest_start = collect_one_start_time(str(race["source_race_id"]))
+                        schedule.at[idx, "start_time"] = latest_start
+                        target = _target_datetime(str(race_date), latest_start)
+                        store.mark_t5_scheduled(race_id, str(race_date), target.isoformat())
+                        refreshed.add(race_id)
+                    except Exception as exc:
+                        next_refresh_attempt[race_id] = now + timedelta(seconds=60)
+                        window_start_old = target - timedelta(seconds=30)
+                        if now >= window_start_old:
+                            store.mark_t5_result(race_id, "FAILED", error=f"start-time refresh failed: {exc}")
+                            terminal.add(race_id)
+                            finished.append({"race_id": race_id, "status": "FAILED", "error": f"start-time refresh failed: {exc}"})
+                            continue
+
+            target = _target_datetime(str(race_date), str(schedule.at[idx, "start_time"]))
             window_start = target - timedelta(seconds=30)
             window_end = target + timedelta(seconds=30)
             if now < window_start:
+                continue
+            if race_id not in refreshed:
+                store.mark_t5_result(race_id, "FAILED", error="start time was not reconfirmed before T-5 window")
+                terminal.add(race_id)
+                finished.append({"race_id": race_id, "status": "FAILED", "error": "start time was not reconfirmed before T-5 window"})
                 continue
             if now > window_end:
                 store.mark_t5_result(race_id, "MISSED", error=f"T-5 window missed at {now.isoformat()}")
