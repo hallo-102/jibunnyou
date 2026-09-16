@@ -4,11 +4,16 @@ import pandas as pd
 
 
 def select_value_races(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """Rank races by value quality without forcing a fixed number of bets."""
+    """Rank all races, then select at most N races that independently pass value gates.
+
+    The cap is not a quota: if only two races pass, two are selected; if none pass,
+    the day ends with zero selected races.
+    """
     rows: list[dict] = []
     min_ev = float(cfg.get("min_race_ev", 1.08))
     min_edge = float(cfg.get("min_edge", 0.03))
     max_candidates = int(cfg.get("max_value_candidates_per_race", 4))
+    max_buy_races = max(0, int(cfg.get("max_buy_races_per_day", 5)))
 
     for race_id, g in df.groupby("race_id", sort=True):
         gg = g.copy()
@@ -38,4 +43,17 @@ def select_value_races(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     out = pd.DataFrame(rows)
     if out.empty:
         return out
-    return out.sort_values(["buy_candidate", "race_value_score"], ascending=[False, False]).reset_index(drop=True)
+
+    out = out.sort_values(
+        ["buy_candidate", "race_value_score", "best_expected_value"],
+        ascending=[False, False, False],
+    ).reset_index(drop=True)
+    out["selected_for_day"] = False
+    qualifying = out.index[out["buy_candidate"]].tolist()[:max_buy_races]
+    if qualifying:
+        out.loc[qualifying, "selected_for_day"] = True
+    out["selection_rank"] = pd.NA
+    selected_indexes = out.index[out["selected_for_day"]].tolist()
+    for rank, idx in enumerate(selected_indexes, start=1):
+        out.at[idx, "selection_rank"] = rank
+    return out
