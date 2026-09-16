@@ -15,7 +15,9 @@ $Payouts = "data\results\payouts_$RaceDate.csv"
 
 & $Python -m keiba_v2.cli collect-results --entries $Entries --date $RaceDate
 
-$BetFiles = Get-ChildItem -Path "data\output" -Filter "strategy_bets_$RaceDate*.json" -File -ErrorAction SilentlyContinue
+# Morning strategy_bets_YYYYMMDD.json is preview only.
+# KPI settlement includes only actual T-5 SHADOW decision files.
+$BetFiles = Get-ChildItem -Path "data\output" -Filter "strategy_bets_$RaceDate*_T5.json" -File -ErrorAction SilentlyContinue
 foreach ($BetFile in $BetFiles) {
     $Settled = Join-Path $BetFile.DirectoryName ($BetFile.BaseName + "_settled.csv")
     & $Python -m keiba_v2.cli settle --bets $BetFile.FullName --results $Results --payouts $Payouts --output $Settled
@@ -24,4 +26,4 @@ foreach ($BetFile in $BetFiles) {
 & $Python -m keiba_v2.cli build-training
 & $Python -m keiba_v2.cli report --directory "data\output" --output "data\output\performance_report.xlsx"
 
-Write-Host "Results/history/settlement/report pipeline completed for $RaceDate"
+Write-Host "Results/history/T-5 settlement/report pipeline completed for $RaceDate"
