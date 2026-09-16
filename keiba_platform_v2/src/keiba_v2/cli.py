@@ -15,10 +15,12 @@ from .contracts import canonicalize, load_race_table
 from .features import build_features
 from .history import HistoryStore, build_training_dataset
 from .orchestrator import run_pipeline
+from .reporting import load_settled_files, write_report
 from .results import evaluate_strategy_bets, load_results
 from .t5_runtime import run_t5_runtime
 from .training import train_lightgbm
 from .validation import validate_races
+from .walkforward import run_walkforward
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -59,6 +61,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--input", required=True)
     p_train.add_argument("--settings")
 
+    p_walk = sub.add_parser("walkforward", help="chronological walk-forward accuracy/ROI evaluation")
+    p_walk.add_argument("--input", required=True, help="training CSV")
+    p_walk.add_argument("--splits", type=int, default=4)
+    p_walk.add_argument("--output")
+    p_walk.add_argument("--settings")
+
     p_run = sub.add_parser("run", help="run validation + history features + prediction + odds + race selection + SHADOW strategies")
     p_run.add_argument("--input", required=True)
     p_run.add_argument("--date", required=True, help="YYYYMMDD")
@@ -66,10 +74,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--settings")
 
     p_settle = sub.add_parser("settle", help="evaluate strategy tickets against race results")
-    p_settle.add_argument("--bets", required=True, help="strategy_bets_YYYYMMDD.json")
+    p_settle.add_argument("--bets", required=True, help="strategy_bets_*.json")
     p_settle.add_argument("--results", required=True)
     p_settle.add_argument("--payouts")
     p_settle.add_argument("--output")
+
+    p_report = sub.add_parser("report", help="aggregate settled SHADOW tickets into Excel performance report")
+    p_report.add_argument("--directory", default="data/output")
+    p_report.add_argument("--output", default="data/output/performance_report.xlsx")
     return parser
 
 
@@ -151,6 +163,26 @@ def main() -> None:
         print(result["metrics"])
         return
 
+    if args.command == "walkforward":
+        settings = load_settings(args.settings)
+        df = pd.read_csv(args.input, encoding="utf-8-sig", dtype={"race_id": str, "race_date": str})
+        pred_cfg = settings.section("prediction")
+        odds_cfg = settings.section("odds")
+        folds, summary = run_walkforward(
+            df,
+            feature_prefix=str(pred_cfg.get("feature_prefix", "feature_")),
+            n_splits=int(args.splits),
+            seed=int(settings.section("app").get("seed", 42)),
+            min_ev=float(odds_cfg.get("min_expected_value", 1.05)),
+            max_odds=float(odds_cfg.get("max_win_odds", 30.0)),
+        )
+        output = Path(args.output) if args.output else settings.project_root / "data" / "output" / "walkforward.csv"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        folds.to_csv(output, index=False, encoding="utf-8-sig")
+        print(f"OK: walkforward={output}")
+        print(summary)
+        return
+
     if args.command == "run":
         result = run_pipeline(Path(args.input), args.date, args.settings, args.combination_odds)
         print(f"OK: run_id={result['run_id']} races={result['metrics']['races']} horses={result['metrics']['horses']}")
@@ -172,6 +204,12 @@ def main() -> None:
         settled.to_csv(output, index=False, encoding="utf-8-sig")
         print(f"OK: settled={output}")
         print(summary.to_dict())
+        return
+
+    if args.command == "report":
+        settled = load_settled_files(args.directory)
+        destination = write_report(settled, args.output)
+        print(f"OK: report={destination}")
         return
 
     raise SystemExit(2)
