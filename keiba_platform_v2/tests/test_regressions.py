@@ -4,6 +4,7 @@ import pandas as pd
 
 from keiba_v2.collectors.daily import merge_entries_and_odds
 from keiba_v2.legacy_history import load_legacy_history
+from keiba_v2.race_selector import select_value_races
 from keiba_v2.strategies import StrategyBet, cap_bets
 from keiba_v2.training import _chronological_race_split
 from keiba_v2.walkforward import _date_folds
@@ -64,6 +65,41 @@ def test_daily_stake_cap_respects_existing_t5_stake():
 
     selected_none = cap_bets(bets, cfg, existing_daily_stake_yen=5000)
     assert selected_none == []
+
+
+def test_race_selection_never_forces_more_than_five_and_accepts_combo_only_value():
+    rows = []
+    combo_rows = []
+    for i in range(1, 8):
+        race_id = f"R{i}"
+        rows.extend([
+            {"race_id": race_id, "horse_no": 1, "expected_value": 0.95, "model_win_prob": 0.4, "market_implied_prob": 0.4},
+            {"race_id": race_id, "horse_no": 2, "expected_value": 0.90, "model_win_prob": 0.3, "market_implied_prob": 0.3},
+        ])
+        combo_rows.append({
+            "race_id": race_id,
+            "bet_type": "TRIO",
+            "selection": "1-2-3",
+            "odds": 20.0,
+            "model_hit_prob": 0.06 + i * 0.001,
+            "expected_value": 1.20 + i * 0.01,
+        })
+    selected = select_value_races(
+        pd.DataFrame(rows),
+        {"min_race_ev": 1.08, "min_edge": 0.03, "max_buy_races_per_day": 5},
+        pd.DataFrame(combo_rows),
+    )
+    assert int(selected["selected_for_day"].sum()) == 5
+    assert set(selected.loc[selected["selected_for_day"], "qualifying_source"]) == {"COMBINATION"}
+
+
+def test_race_selection_can_end_with_zero_races():
+    runners = pd.DataFrame([
+        {"race_id": "R1", "horse_no": 1, "expected_value": 0.9, "model_win_prob": 0.4, "market_implied_prob": 0.4},
+        {"race_id": "R1", "horse_no": 2, "expected_value": 0.8, "model_win_prob": 0.3, "market_implied_prob": 0.3},
+    ])
+    selected = select_value_races(runners, {"min_race_ev": 1.08, "min_edge": 0.03, "max_buy_races_per_day": 5})
+    assert int(selected["selected_for_day"].sum()) == 0
 
 
 def _dated_rows() -> pd.DataFrame:
