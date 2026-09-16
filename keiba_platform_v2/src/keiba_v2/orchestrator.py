@@ -41,6 +41,7 @@ def run_pipeline(
     settings_path: str | Path | None = None,
     combination_odds_path: str | Path | None = None,
     output_tag: str | None = None,
+    existing_daily_stake_yen: int = 0,
 ) -> dict:
     settings = load_settings(settings_path)
     app_cfg = settings.section("app")
@@ -72,6 +73,7 @@ def run_pipeline(
             strategy_bets = cap_bets(
                 build_strategy_bets(enriched, settings.section("strategy"), combo_ev),
                 settings.section("strategy"),
+                existing_daily_stake_yen=existing_daily_stake_yen,
             )
 
             output_dir = settings.project_root / "data" / "output"
@@ -114,6 +116,8 @@ def run_pipeline(
                 "shadow_bets": int(len(legacy_shadow_bets)),
                 "strategy_bets": int(len(strategy_bets)),
                 "strategy_stake_yen": int(sum(b.stake_yen for b in strategy_bets)),
+                "existing_daily_stake_yen": int(existing_daily_stake_yen),
+                "projected_daily_stake_yen": int(existing_daily_stake_yen + sum(b.stake_yen for b in strategy_bets)),
                 "avg_top3_concentration": float(odds_summary["top3_concentration"].mean()) if not odds_summary.empty else 0.0,
                 "avg_max_gap_ratio": float(odds_summary["max_gap_ratio"].mean()) if not odds_summary.empty else 0.0,
             }
