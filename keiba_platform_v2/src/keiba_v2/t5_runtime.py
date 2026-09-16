@@ -82,18 +82,21 @@ def process_t5_race(
     combos.to_csv(combo_snapshot, index=False, encoding="utf-8-sig")
     runners.to_csv(runners_snapshot, index=False, encoding="utf-8-sig")
 
+    existing_daily_stake = store.successful_t5_stake(race_date)
     result = run_pipeline(
         input_snapshot,
         race_date,
         settings_path,
         combo_snapshot,
         output_tag=f"{race_id}_T5",
+        existing_daily_stake_yen=existing_daily_stake,
     )
     store.mark_t5_result(race_id, "SUCCESS", run_id=result["run_id"])
     return {
         "race_id": race_id,
         "status": "SUCCESS",
         "run_id": result["run_id"],
+        "existing_daily_stake_yen": existing_daily_stake,
         "metrics": result["metrics"],
         "strategy_path": str(result["strategy_path"]),
     }
