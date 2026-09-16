@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,11 +31,16 @@ def _load_combination_odds(path: str | Path | None) -> pd.DataFrame | None:
     return pd.read_csv(src, encoding="utf-8-sig")
 
 
+def _safe_tag(value: str) -> str:
+    return re.sub(r"[^0-9A-Za-z_\-]+", "_", str(value)).strip("_") or "run"
+
+
 def run_pipeline(
     input_path: str | Path,
     race_date: str,
     settings_path: str | Path | None = None,
     combination_odds_path: str | Path | None = None,
+    output_tag: str | None = None,
 ) -> dict:
     settings = load_settings(settings_path)
     app_cfg = settings.section("app")
@@ -70,11 +76,12 @@ def run_pipeline(
 
             output_dir = settings.project_root / "data" / "output"
             output_dir.mkdir(parents=True, exist_ok=True)
-            prediction_path = output_dir / f"predictions_{race_date}.xlsx"
-            odds_path = output_dir / f"odds_summary_{race_date}.csv"
-            race_selection_path = output_dir / f"race_selection_{race_date}.csv"
-            strategy_path = output_dir / f"strategy_bets_{race_date}.json"
-            combo_ev_path = output_dir / f"combination_ev_{race_date}.csv"
+            tag = _safe_tag(output_tag or race_date)
+            prediction_path = output_dir / f"predictions_{tag}.xlsx"
+            odds_path = output_dir / f"odds_summary_{tag}.csv"
+            race_selection_path = output_dir / f"race_selection_{tag}.csv"
+            strategy_path = output_dir / f"strategy_bets_{tag}.json"
+            combo_ev_path = output_dir / f"combination_ev_{tag}.csv"
 
             with pd.ExcelWriter(prediction_path, engine="openpyxl") as writer:
                 enriched.to_excel(writer, index=False, sheet_name="predictions")
@@ -117,6 +124,7 @@ def run_pipeline(
                 "combination_odds_path": str(combination_odds_path or ""),
                 "mode": app_cfg.get("mode", "SHADOW"),
                 "run_id": run_id,
+                "output_tag": tag,
             })
             store.finish_run(run_id, "SUCCESS", metrics)
 
