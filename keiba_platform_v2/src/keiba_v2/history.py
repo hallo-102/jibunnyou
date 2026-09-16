@@ -87,16 +87,17 @@ class HistoryStore:
 
 def attach_history_features(entries: pd.DataFrame, history: pd.DataFrame, n_recent: int = 5) -> pd.DataFrame:
     out = entries.copy()
+    defaults = {
+        "feature_avg_finish": 99.0,
+        "feature_avg_pop": 99.0,
+        "feature_avg_last3f": 99.0,
+        "feature_win_rate": 0.0,
+        "feature_top3_rate": 0.0,
+        "feature_recent_count": 0.0,
+        "feature_days_off_log": 0.0,
+    }
     if "horse_id" not in out.columns or history.empty:
-        for col, default in {
-            "feature_avg_finish": 99.0,
-            "feature_avg_pop": 99.0,
-            "feature_avg_last3f": 99.0,
-            "feature_win_rate": 0.0,
-            "feature_top3_rate": 0.0,
-            "feature_recent_count": 0.0,
-            "feature_days_off_log": 0.0,
-        }.items():
+        for col, default in defaults.items():
             if col not in out.columns:
                 out[col] = default
         return out
@@ -132,7 +133,29 @@ def attach_history_features(entries: pd.DataFrame, history: pd.DataFrame, n_rece
             "feature_days_off_log": float(np.log1p(max(days_off, 0))),
         })
 
-    features = pd.DataFrame(feature_rows).set_index("_index")
-    for col in features.columns:
-        out[col] = features[col].reindex(out.index)
+    features = pd.DataFrame(feature_rows).set_index("_index") if feature_rows else pd.DataFrame()
+    for col, default in defaults.items():
+        if col in features.columns:
+            out[col] = features[col].reindex(out.index).fillna(default)
+        elif col not in out.columns:
+            out[col] = default
     return out
+
+
+def build_training_dataset(history: pd.DataFrame, n_recent: int = 5) -> pd.DataFrame:
+    """Create labeled rows using only races strictly before each target race date."""
+    if history.empty:
+        return pd.DataFrame()
+    required = {"race_id", "race_date", "horse_id", "horse_no", "horse_name", "finish_position", "win_odds"}
+    missing = required - set(history.columns)
+    if missing:
+        raise ValueError(f"history missing training columns: {sorted(missing)}")
+
+    targets = history.copy()
+    targets["race_date"] = pd.to_datetime(targets["race_date"], errors="coerce")
+    targets = targets.dropna(subset=["race_date", "horse_id", "finish_position"]).copy()
+    targets["race_date"] = targets["race_date"].dt.strftime("%Y%m%d")
+    featured = attach_history_features(targets, history, n_recent=n_recent)
+    featured["is_winner"] = pd.to_numeric(featured["finish_position"], errors="coerce").eq(1).astype(int)
+    featured["is_top3"] = pd.to_numeric(featured["finish_position"], errors="coerce").le(3).astype(int)
+    return featured.sort_values(["race_date", "race_id", "horse_no"]).reset_index(drop=True)
