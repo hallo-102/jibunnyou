@@ -25,7 +25,7 @@ def test_legacy_history_keeps_race_id_and_copies_source_race_id(tmp_path):
     assert "source_race_id" in out.columns
     assert out["race_id"].tolist() == ["202609190101", "202609190101"]
     assert out["source_race_id"].tolist() == ["202609190101", "202609190101"]
-    assert out["horse_id"].str.startswith("legacy:").all()
+    assert out["horse_id"].str.startswith("NAME:").all()
 
 
 def test_jra_odds_are_authoritative_when_entries_contain_old_odds():
