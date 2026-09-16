@@ -4,6 +4,8 @@ import pandas as pd
 
 from keiba_v2.legacy_history import load_legacy_history
 from keiba_v2.strategies import StrategyBet, cap_bets
+from keiba_v2.training import _chronological_race_split
+from keiba_v2.walkforward import _date_folds
 
 
 def test_legacy_history_keeps_race_id_and_copies_source_race_id(tmp_path):
@@ -41,3 +43,38 @@ def test_daily_stake_cap_respects_existing_t5_stake():
 
     selected_none = cap_bets(bets, cfg, existing_daily_stake_yen=5000)
     assert selected_none == []
+
+
+def _dated_rows() -> pd.DataFrame:
+    rows = []
+    for day in range(1, 7):
+        date = f"202609{day:02d}"
+        for race_no in (1, 2):
+            race_id = f"{date}_T_{race_no:02d}R"
+            for horse_no in (1, 2):
+                rows.append({
+                    "race_id": race_id,
+                    "race_date": date,
+                    "horse_no": horse_no,
+                    "is_winner": int(horse_no == 1),
+                    "win_odds": 2.0 + horse_no,
+                    "feature_x": float(horse_no),
+                })
+    return pd.DataFrame(rows)
+
+
+def test_train_validation_never_split_same_race_date():
+    train, valid = _chronological_race_split(_dated_rows(), valid_fraction=0.33)
+    train_dates = set(train["race_date"].astype(str))
+    valid_dates = set(valid["race_date"].astype(str))
+    assert train_dates.isdisjoint(valid_dates)
+    assert max(train_dates) < min(valid_dates)
+
+
+def test_walkforward_fold_dates_are_strictly_forward():
+    df = _dated_rows()
+    folds = _date_folds(df, n_splits=2)
+    assert folds
+    for train_dates, test_dates in folds:
+        assert set(train_dates).isdisjoint(set(test_dates))
+        assert max(train_dates) < min(test_dates)
