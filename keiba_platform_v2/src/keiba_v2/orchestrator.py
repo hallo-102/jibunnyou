@@ -69,13 +69,22 @@ def run_pipeline(
             enriched = add_expected_value(predicted, settings.section("odds"))
             odds_summary = analyze_odds(enriched, settings.section("odds"))
             race_selection = select_value_races(enriched, settings.section("race_selection"))
+            selected_race_ids = set(
+                race_selection.loc[race_selection["selected_for_day"].fillna(False), "race_id"].astype(str).tolist()
+            ) if not race_selection.empty else set()
+            selected_enriched = enriched[enriched["race_id"].astype(str).isin(selected_race_ids)].copy()
 
             combo_raw = _load_combination_odds(combination_odds_path)
             combo_ev = add_combination_expected_value(enriched, combo_raw) if combo_raw is not None and not combo_raw.empty else pd.DataFrame()
+            selected_combo_ev = (
+                combo_ev[combo_ev["race_id"].astype(str).isin(selected_race_ids)].copy()
+                if not combo_ev.empty else pd.DataFrame()
+            )
 
-            legacy_shadow_bets = build_shadow_bets(enriched, settings.section("shadow"))
+            legacy_shadow_bets = build_shadow_bets(selected_enriched, settings.section("shadow")) if not selected_enriched.empty else []
             strategy_bets = cap_bets(
-                build_strategy_bets(enriched, settings.section("strategy"), combo_ev),
+                build_strategy_bets(selected_enriched, settings.section("strategy"), selected_combo_ev)
+                if not selected_enriched.empty else [],
                 settings.section("strategy"),
                 existing_daily_stake_yen=existing_daily_stake_yen,
             )
@@ -116,7 +125,8 @@ def run_pipeline(
                 "history_rows_used": int(len(history)),
                 "value_candidates": int(enriched["value_candidate"].sum()),
                 "buy_candidate_races": int(race_selection["buy_candidate"].sum()) if not race_selection.empty else 0,
-                "combination_value_candidates": int((combo_ev["expected_value"] >= float(settings.section("strategy").get("min_expected_value", 1.08))).sum()) if not combo_ev.empty else 0,
+                "selected_races": int(race_selection["selected_for_day"].sum()) if not race_selection.empty else 0,
+                "combination_value_candidates": int((selected_combo_ev["expected_value"] >= float(settings.section("strategy").get("min_expected_value", 1.08))).sum()) if not selected_combo_ev.empty else 0,
                 "shadow_bets": int(len(legacy_shadow_bets)),
                 "strategy_bets": int(len(strategy_bets)),
                 "strategy_stake_yen": int(sum(b.stake_yen for b in strategy_bets)),
