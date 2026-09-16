@@ -39,6 +39,7 @@ race_selection:
   min_race_ev: 1.08
   min_edge: 0.03
   max_value_candidates_per_race: 4
+  max_buy_races_per_day: 5
 
 strategy:
   unit_yen: 100
