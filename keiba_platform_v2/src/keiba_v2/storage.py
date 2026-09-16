@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS strategy_results (
     settled_at TEXT NOT NULL,
     PRIMARY KEY (run_id, race_id, bet_type, selection)
 );
+CREATE TABLE IF NOT EXISTS t5_snapshots (
+    race_id TEXT PRIMARY KEY,
+    race_date TEXT NOT NULL,
+    scheduled_at TEXT NOT NULL,
+    captured_at TEXT,
+    status TEXT NOT NULL,
+    run_id TEXT,
+    error TEXT
+);
 """
 
 
@@ -114,4 +123,28 @@ class RunStore:
                     )
                     for r in rows
                 ],
+            )
+
+    def is_t5_done(self, race_id: str) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM t5_snapshots WHERE race_id=?",
+                (str(race_id),),
+            ).fetchone()
+        return bool(row and row["status"] == "SUCCESS")
+
+    def mark_t5_scheduled(self, race_id: str, race_date: str, scheduled_at: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO t5_snapshots(race_id,race_date,scheduled_at,status) VALUES(?,?,?,?) "
+                "ON CONFLICT(race_id) DO UPDATE SET race_date=excluded.race_date, scheduled_at=excluded.scheduled_at "
+                "WHERE t5_snapshots.status != 'SUCCESS'",
+                (str(race_id), str(race_date), str(scheduled_at), "SCHEDULED"),
+            )
+
+    def mark_t5_result(self, race_id: str, status: str, *, run_id: str | None = None, error: str | None = None) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE t5_snapshots SET captured_at=?, status=?, run_id=?, error=? WHERE race_id=?",
+                (utc_now(), str(status), run_id, error, str(race_id)),
             )
