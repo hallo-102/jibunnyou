@@ -5,9 +5,13 @@ from pathlib import Path
 import pandas as pd
 
 
-def load_settled_files(directory: str | Path) -> pd.DataFrame:
+def load_settled_files(
+    directory: str | Path,
+    pattern: str = "strategy_bets_*_T5_settled.csv",
+) -> pd.DataFrame:
+    """Load only T-5 settled tickets by default; morning preview tickets are excluded."""
     root = Path(directory)
-    files = sorted(root.glob("strategy_bets_*_settled.csv")) if root.exists() else []
+    files = sorted(root.glob(pattern)) if root.exists() else []
     frames: list[pd.DataFrame] = []
     for path in files:
         df = pd.read_csv(path, encoding="utf-8-sig")
