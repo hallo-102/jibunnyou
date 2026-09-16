@@ -45,6 +45,11 @@ def _extract_place(text: str) -> str:
     return ""
 
 
+def _horse_id_from_href(href: str) -> str:
+    m = re.search(r"/horse/(?:result/)?(\d+)", str(href or ""))
+    return m.group(1) if m else ""
+
+
 def collect_race_ids(race_date: str, *, headless: bool = True, timeout_sec: int = 40) -> list[str]:
     _, BeautifulSoup, webdriver, Options = _require_collection_deps()
     url = f"https://race.netkeiba.com/top/race_list.html?kaisai_date={race_date}"
@@ -90,6 +95,7 @@ def _parse_runner_rows(soup, race_date: str, source_race_id: str) -> pd.DataFram
         if not no_text:
             continue
         horse_name = horse.get_text(" ", strip=True)
+        horse_id = _horse_id_from_href(str(horse.get("href", "")))
         age_cell = tr.select_one("td.Barei")
         weight_cell = tr.select_one("td.Weight")
         jockey_cell = tr.select_one("td.Jockey a")
@@ -110,6 +116,7 @@ def _parse_runner_rows(soup, race_date: str, source_race_id: str) -> pd.DataFram
             "race_date": race_date,
             "racecourse": place,
             "race_no": race_no,
+            "horse_id": horse_id,
             "horse_no": int(no_text),
             "horse_name": horse_name,
             "sex_age": sex_age,
