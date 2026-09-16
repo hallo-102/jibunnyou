@@ -131,7 +131,7 @@ class RunStore:
                 "SELECT status FROM t5_snapshots WHERE race_id=?",
                 (str(race_id),),
             ).fetchone()
-        return bool(row and row["status"] == "SUCCESS")
+        return bool(row and row["status"] in {"SUCCESS", "NO_BET"})
 
     def successful_t5_stake(self, race_date: str) -> int:
         with self.connect() as conn:
@@ -151,7 +151,7 @@ class RunStore:
             conn.execute(
                 "INSERT INTO t5_snapshots(race_id,race_date,scheduled_at,status) VALUES(?,?,?,?) "
                 "ON CONFLICT(race_id) DO UPDATE SET race_date=excluded.race_date, scheduled_at=excluded.scheduled_at "
-                "WHERE t5_snapshots.status != 'SUCCESS'",
+                "WHERE t5_snapshots.status NOT IN ('SUCCESS','NO_BET')",
                 (str(race_id), str(race_date), str(scheduled_at), "SCHEDULED"),
             )
 
