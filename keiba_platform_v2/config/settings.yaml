@@ -27,10 +27,25 @@ odds:
   top3_concentration_watch: 0.60
   gap_watch: 1.50
 
+race_selection:
+  min_race_ev: 1.08
+  min_edge: 0.03
+  max_value_candidates_per_race: 4
+
+strategy:
+  unit_yen: 100
+  min_expected_value: 1.08
+  max_win_bets_per_race: 2
+  max_quinella_points_per_race: 3
+  max_trio_points_per_race: 5
+  max_points_per_race: 13
+  max_race_stake_yen: 1300
+  daily_stake_limit_yen: 5000
+
 shadow:
   unit_yen: 100
-  max_points_per_race: 5
-  max_race_stake_yen: 500
+  max_points_per_race: 13
+  max_race_stake_yen: 1300
   daily_stake_limit_yen: 5000
   output_jsonl: data/runtime/shadow_bets.jsonl
 
