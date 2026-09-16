@@ -1,0 +1,40 @@
+app:
+  timezone: Asia/Tokyo
+  seed: 42
+  mode: SHADOW
+
+validation:
+  min_horses_per_race: 5
+  max_horses_per_race: 18
+  require_positive_odds: true
+
+prediction:
+  top_k: 5
+  feature_prefix: feature_
+  model_path: data/runtime/model.txt
+  fallback_weights:
+    feature_avg_finish: -0.25
+    feature_avg_pop: -0.15
+    feature_avg_last3f: -0.20
+    feature_win_rate: 0.25
+    feature_fast_score: 0.30
+    feature_avg_score: 0.35
+    feature_leg_type_suitability: 0.20
+
+odds:
+  min_expected_value: 1.05
+  max_win_odds: 30.0
+  top3_concentration_watch: 0.60
+  gap_watch: 1.50
+
+shadow:
+  unit_yen: 100
+  max_points_per_race: 5
+  max_race_stake_yen: 500
+  daily_stake_limit_yen: 5000
+  output_jsonl: data/runtime/shadow_bets.jsonl
+
+tracking:
+  enabled: true
+  experiment_name: keiba_platform_v2
+  tracking_uri: data/runtime/mlruns
