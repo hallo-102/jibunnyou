@@ -76,13 +76,21 @@ def build_strategy_bets(
     )
 
 
-def cap_bets(bets: list[StrategyBet], cfg: dict) -> list[StrategyBet]:
+def cap_bets(
+    bets: list[StrategyBet],
+    cfg: dict,
+    *,
+    existing_daily_stake_yen: int = 0,
+) -> list[StrategyBet]:
     max_points = int(cfg.get("max_points_per_race", 13))
     max_stake = int(cfg.get("max_race_stake_yen", 1300))
     daily_limit = int(cfg.get("daily_stake_limit_yen", 5000))
     selected: list[StrategyBet] = []
-    daily = 0
+    daily = max(0, int(existing_daily_stake_yen))
     per_race: dict[str, tuple[int, int]] = {}
+
+    if daily >= daily_limit:
+        return selected
 
     for bet in bets:
         pts, stake = per_race.get(bet.race_id, (0, 0))
