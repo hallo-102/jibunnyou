@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS horse_runs (
     PRIMARY KEY (source_race_id, horse_id)
 );
 CREATE INDEX IF NOT EXISTS idx_horse_runs_horse_date ON horse_runs(horse_id, race_date);
+CREATE INDEX IF NOT EXISTS idx_horse_runs_name_date ON horse_runs(horse_name, race_date);
 """
 
 HISTORY_COLUMNS = [
@@ -34,6 +36,15 @@ HISTORY_COLUMNS = [
     "horse_id", "horse_name", "horse_no", "finish_position", "popularity",
     "win_odds", "last3f", "distance", "surface", "carried_weight", "body_weight",
 ]
+
+
+def normalize_horse_name(value: object) -> str:
+    return re.sub(r"[\s\u3000]+", "", str(value or "").strip())
+
+
+def legacy_horse_id(horse_name: object) -> str:
+    name = normalize_horse_name(horse_name)
+    return f"NAME:{name}" if name else ""
 
 
 class HistoryStore:
@@ -46,13 +57,17 @@ class HistoryStore:
     def upsert_runs(self, runs: pd.DataFrame) -> int:
         if runs.empty:
             return 0
-        missing = {"source_race_id", "race_id", "race_date", "horse_id"} - set(runs.columns)
+        missing = {"source_race_id", "race_id", "race_date"} - set(runs.columns)
         if missing:
             raise ValueError(f"history rows missing columns: {sorted(missing)}")
         x = runs.copy()
         for col in HISTORY_COLUMNS:
             if col not in x.columns:
                 x[col] = None
+        x["horse_name"] = x["horse_name"].fillna("").astype(str).str.strip()
+        x["horse_id"] = x["horse_id"].fillna("").astype(str).str.strip()
+        missing_id = x["horse_id"].eq("")
+        x.loc[missing_id, "horse_id"] = x.loc[missing_id, "horse_name"].map(legacy_horse_id)
         x = x[HISTORY_COLUMNS]
         x = x[x["horse_id"].fillna("").astype(str).str.strip() != ""].copy()
         if x.empty:
@@ -72,17 +87,39 @@ class HistoryStore:
         with sqlite3.connect(self.path) as conn:
             return pd.read_sql_query("SELECT * FROM horse_runs ORDER BY race_date, source_race_id, horse_no", conn)
 
-    def load_for_horses(self, horse_ids: list[str]) -> pd.DataFrame:
+    def load_for_horses(self, horse_ids: list[str], horse_names: list[str] | None = None) -> pd.DataFrame:
         ids = [str(x) for x in horse_ids if str(x)]
-        if not ids:
+        names = [normalize_horse_name(x) for x in (horse_names or []) if normalize_horse_name(x)]
+        clauses: list[str] = []
+        params: list[str] = []
+        if ids:
+            clauses.append(f"horse_id IN ({','.join(['?'] * len(ids))})")
+            params.extend(ids)
+        if names:
+            legacy_ids = [f"NAME:{name}" for name in names]
+            clauses.append(f"horse_id IN ({','.join(['?'] * len(legacy_ids))})")
+            params.extend(legacy_ids)
+        if not clauses:
             return pd.DataFrame(columns=HISTORY_COLUMNS)
-        placeholders = ",".join(["?"] * len(ids))
         with sqlite3.connect(self.path) as conn:
             return pd.read_sql_query(
-                f"SELECT * FROM horse_runs WHERE horse_id IN ({placeholders}) ORDER BY race_date",
+                f"SELECT * FROM horse_runs WHERE {' OR '.join(clauses)} ORDER BY race_date",
                 conn,
-                params=ids,
+                params=params,
             )
+
+
+def _select_horse_history(hist: pd.DataFrame, horse_id: str, horse_name: str) -> pd.DataFrame:
+    if hist.empty:
+        return hist.copy()
+    h = hist[hist["horse_id"].astype(str) == str(horse_id)].copy() if horse_id else hist.iloc[0:0].copy()
+    if h.empty and horse_name:
+        legacy_id = legacy_horse_id(horse_name)
+        h = hist[hist["horse_id"].astype(str) == legacy_id].copy()
+    if h.empty and "horse_name" in hist.columns and horse_name:
+        normalized = hist["horse_name"].map(normalize_horse_name)
+        h = hist[normalized == normalize_horse_name(horse_name)].copy()
+    return h
 
 
 def attach_history_features(entries: pd.DataFrame, history: pd.DataFrame, n_recent: int = 5) -> pd.DataFrame:
@@ -96,7 +133,7 @@ def attach_history_features(entries: pd.DataFrame, history: pd.DataFrame, n_rece
         "feature_recent_count": 0.0,
         "feature_days_off_log": 0.0,
     }
-    if "horse_id" not in out.columns or history.empty:
+    if history.empty:
         for col, default in defaults.items():
             if col not in out.columns:
                 out[col] = default
@@ -104,13 +141,17 @@ def attach_history_features(entries: pd.DataFrame, history: pd.DataFrame, n_rece
 
     hist = history.copy()
     hist["race_date"] = pd.to_datetime(hist["race_date"], errors="coerce")
-    current_dates = pd.to_datetime(out.get("race_date"), errors="coerce")
+    if "race_date" in out.columns:
+        current_dates = pd.to_datetime(out["race_date"], errors="coerce")
+    else:
+        current_dates = pd.Series(pd.NaT, index=out.index, dtype="datetime64[ns]")
     feature_rows: list[dict] = []
 
     for idx, row in out.iterrows():
         horse_id = str(row.get("horse_id", "") or "")
+        horse_name = normalize_horse_name(row.get("horse_name", ""))
         current_date = current_dates.loc[idx] if idx in current_dates.index else pd.NaT
-        h = hist[hist["horse_id"].astype(str) == horse_id].copy()
+        h = _select_horse_history(hist, horse_id, horse_name)
         if pd.notna(current_date):
             h = h[h["race_date"] < current_date]
         h = h.sort_values("race_date").tail(n_recent)
