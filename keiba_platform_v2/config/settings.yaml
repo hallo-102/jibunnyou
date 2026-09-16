@@ -4,6 +4,7 @@ app:
   mode: SHADOW
   runtime_db: data/runtime/keiba_v2.sqlite3
   history_db: data/runtime/history.sqlite3
+  require_trained_model_for_t5: true
 
 validation:
   min_horses_per_race: 5
@@ -40,6 +41,7 @@ race_selection:
   min_edge: 0.03
   max_value_candidates_per_race: 4
   max_buy_races_per_day: 5
+  min_combination_ev: 1.08
 
 strategy:
   unit_yen: 100
