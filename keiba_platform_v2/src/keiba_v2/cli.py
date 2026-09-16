@@ -16,6 +16,7 @@ from .features import build_features
 from .history import HistoryStore, build_training_dataset
 from .orchestrator import run_pipeline
 from .results import evaluate_strategy_bets, load_results
+from .t5_runtime import run_t5_runtime
 from .training import train_lightgbm
 from .validation import validate_races
 
@@ -33,10 +34,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p_import.add_argument("--output", required=True)
     p_import.add_argument("--sheet", default="0")
 
-    p_collect = sub.add_parser("collect", help="collect same-day netkeiba entries and JRA odds")
+    p_collect = sub.add_parser("collect", help="collect same-day netkeiba entries, schedule and JRA odds")
     p_collect.add_argument("--date", required=True, help="YYYYMMDD")
     p_collect.add_argument("--settings")
     p_collect.add_argument("--show-browser", action="store_true")
+
+    p_t5 = sub.add_parser("t5-runtime", help="run restart-safe T-5 SHADOW odds/prediction runtime")
+    p_t5.add_argument("--input", required=True)
+    p_t5.add_argument("--schedule", required=True)
+    p_t5.add_argument("--date", required=True, help="YYYYMMDD")
+    p_t5.add_argument("--settings")
+    p_t5.add_argument("--show-browser", action="store_true")
 
     p_results = sub.add_parser("collect-results", help="collect netkeiba results and append horse history")
     p_results.add_argument("--entries", required=True, help="canonical/raw entries CSV containing source_race_id")
@@ -90,7 +98,19 @@ def main() -> None:
         settings = load_settings(args.settings)
         result = collect_daily_dataset(args.date, settings.project_root, headless=not args.show_browser)
         print(f"OK: canonical={result['canonical_path']}")
+        print(f"schedule={result['schedule_path']}")
         print(f"combination_odds={result['combination_odds_path']}")
+        return
+
+    if args.command == "t5-runtime":
+        results = run_t5_runtime(
+            args.input, args.schedule, args.date, args.settings,
+            headless=not args.show_browser,
+        )
+        summary = pd.DataFrame(results)
+        print(summary.to_string(index=False) if not summary.empty else "No T-5 races processed")
+        if not summary.empty and summary["status"].isin(["FAILED", "MISSED"]).any():
+            raise SystemExit(3)
         return
 
     if args.command == "collect-results":
