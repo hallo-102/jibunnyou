@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pandas as pd
+
+from .jra_odds import collect_jra_odds, save_odds
+from .netkeiba import collect_entries, save_entries
+
+
+def _norm_name(value: object) -> str:
+    return re.sub(r"[\s\u3000]+", "", str(value or "").strip())
+
+
+def merge_entries_and_odds(entries: pd.DataFrame, odds: pd.DataFrame) -> pd.DataFrame:
+    required_entries = {"race_id", "horse_no", "horse_name"}
+    required_odds = {"race_id", "horse_no", "win_odds"}
+    if required_entries - set(entries.columns):
+        raise ValueError(f"entries missing: {sorted(required_entries - set(entries.columns))}")
+    if required_odds - set(odds.columns):
+        raise ValueError(f"odds missing: {sorted(required_odds - set(odds.columns))}")
+
+    left = entries.copy()
+    right = odds.copy()
+    right = right.rename(columns={"horse_name": "odds_horse_name"})
+    merged = left.merge(
+        right[[c for c in ["race_id", "horse_no", "odds_horse_name", "win_odds", "place_odds"] if c in right.columns]],
+        on=["race_id", "horse_no"], how="left", validate="one_to_one",
+    )
+    if merged["win_odds"].isna().any():
+        missing = merged.loc[merged["win_odds"].isna(), ["race_id", "horse_no", "horse_name"]]
+        raise RuntimeError(f"JRA odds missing for entry rows: {missing.head(10).to_dict('records')}")
+
+    if "odds_horse_name" in merged.columns:
+        mismatch = merged.apply(
+            lambda r: bool(_norm_name(r["odds_horse_name"])) and _norm_name(r["horse_name"]) != _norm_name(r["odds_horse_name"]),
+            axis=1,
+        )
+        if mismatch.any():
+            rows = merged.loc[mismatch, ["race_id", "horse_no", "horse_name", "odds_horse_name"]]
+            raise RuntimeError(f"horse name mismatch between netkeiba and JRA: {rows.head(10).to_dict('records')}")
+        merged = merged.drop(columns=["odds_horse_name"])
+    return merged.sort_values(["race_id", "horse_no"]).reset_index(drop=True)
+
+
+def collect_daily_dataset(race_date: str, project_root: str | Path, *, headless: bool = True) -> dict:
+    root = Path(project_root)
+    raw_dir = root / "data" / "raw"
+    input_dir = root / "data" / "input"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    entries = collect_entries(race_date, headless=headless)
+    runners, combinations = collect_jra_odds(race_date, headless=headless)
+    merged = merge_entries_and_odds(entries, runners)
+
+    entry_path = save_entries(entries, raw_dir / f"netkeiba_entries_{race_date}.csv")
+    runner_odds_path, combo_path = save_odds(runners, combinations, raw_dir, race_date)
+    canonical_path = input_dir / f"races_{race_date}.csv"
+    merged.to_csv(canonical_path, index=False, encoding="utf-8-sig")
+
+    return {
+        "entries": entries,
+        "runner_odds": runners,
+        "combination_odds": combinations,
+        "canonical": merged,
+        "entry_path": entry_path,
+        "runner_odds_path": runner_odds_path,
+        "combination_odds_path": combo_path,
+        "canonical_path": canonical_path,
+    }
