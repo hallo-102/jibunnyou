@@ -55,6 +55,11 @@ def collect_daily_dataset(race_date: str, project_root: str | Path, *, headless:
     schedule = collect_start_times(entries)
     entries = entries.merge(schedule[["race_id", "start_time"]], on="race_id", how="left", validate="many_to_one")
     runners, combinations = collect_jra_odds(race_date, headless=headless)
+    if combinations.empty and len(combinations.columns) == 0:
+        combinations = pd.DataFrame(columns=[
+            "race_id", "race_date", "racecourse", "race_no",
+            "bet_type", "selection", "odds",
+        ])
     merged = merge_entries_and_odds(entries, runners)
 
     entry_path = save_entries(entries, raw_dir / f"netkeiba_entries_{race_date}.csv")
