@@ -14,6 +14,7 @@ from .config import load_settings
 from .contracts import canonicalize, load_race_table
 from .features import build_features
 from .history import HistoryStore, build_training_dataset
+from .legacy_history import load_legacy_history
 from .orchestrator import run_pipeline
 from .reporting import load_settled_files, write_report
 from .results import evaluate_strategy_bets, load_results
@@ -35,6 +36,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_import.add_argument("--input", required=True)
     p_import.add_argument("--output", required=True)
     p_import.add_argument("--sheet", default="0")
+
+    p_history = sub.add_parser("import-history", help="read legacy result CSV/Excel without modifying it and append to V2 history DB")
+    p_history.add_argument("--input", required=True)
+    p_history.add_argument("--date", help="YYYYMMDD fallback when source rows/filename do not contain a date")
+    p_history.add_argument("--settings")
 
     p_collect = sub.add_parser("collect", help="collect same-day netkeiba entries, schedule and JRA odds")
     p_collect.add_argument("--date", required=True, help="YYYYMMDD")
@@ -104,6 +110,15 @@ def main() -> None:
         df = load_legacy_excel(args.input, sheet_name=sheet)
         dst = export_canonical_csv(df, args.output)
         print(f"OK: exported {len(df)} rows -> {dst}")
+        return
+
+    if args.command == "import-history":
+        settings = load_settings(args.settings)
+        history_path = settings.project_root / str(settings.section("app").get("history_db", "data/runtime/history.sqlite3"))
+        rows = load_legacy_history(args.input, race_date=args.date)
+        inserted = HistoryStore(history_path).upsert_runs(rows)
+        print(f"OK: history_rows_upserted={inserted} source={Path(args.input).resolve()}")
+        print(f"history_db={history_path}")
         return
 
     if args.command == "collect":
