@@ -9,7 +9,7 @@ from .history import legacy_horse_id
 
 ALIASES: dict[str, tuple[str, ...]] = {
     "race_id": ("race_id", "レースID", "RID", "rid", "rid_str"),
-    "source_race_id": ("source_race_id", "レースID", "race_id", "RID", "rid"),
+    "source_race_id": ("source_race_id",),
     "horse_id": ("horse_id", "馬ID", "馬id"),
     "horse_name": ("horse_name", "馬名", "馬 名", "name"),
     "horse_no": ("horse_no", "馬番", "馬番号"),
@@ -40,13 +40,16 @@ def _rename(frame: pd.DataFrame) -> pd.DataFrame:
     out = _flatten_columns(frame)
     lookup = {str(c).replace(" ", ""): c for c in out.columns}
     rename: dict[object, str] = {}
+    claimed_sources: set[object] = set()
     for canonical, aliases in ALIASES.items():
         if canonical in out.columns:
             continue
         for alias in aliases:
             key = str(alias).replace(" ", "")
-            if key in lookup:
-                rename[lookup[key]] = canonical
+            source = lookup.get(key)
+            if source is not None and source not in claimed_sources:
+                rename[source] = canonical
+                claimed_sources.add(source)
                 break
     return out.rename(columns=rename)
 
