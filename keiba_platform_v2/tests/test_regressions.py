@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from keiba_v2.collectors.daily import merge_entries_and_odds
 from keiba_v2.legacy_history import load_legacy_history
 from keiba_v2.strategies import StrategyBet, cap_bets
 from keiba_v2.training import _chronological_race_split
@@ -25,6 +26,26 @@ def test_legacy_history_keeps_race_id_and_copies_source_race_id(tmp_path):
     assert out["race_id"].tolist() == ["202609190101", "202609190101"]
     assert out["source_race_id"].tolist() == ["202609190101", "202609190101"]
     assert out["horse_id"].str.startswith("legacy:").all()
+
+
+def test_jra_odds_are_authoritative_when_entries_contain_old_odds():
+    entries = pd.DataFrame({
+        "race_id": ["R1", "R1"],
+        "horse_no": [1, 2],
+        "horse_name": ["A", "B"],
+        "win_odds": [999.0, 999.0],
+    })
+    odds = pd.DataFrame({
+        "race_id": ["R1", "R1"],
+        "horse_no": [1, 2],
+        "horse_name": ["A", "B"],
+        "win_odds": [2.5, 4.0],
+        "place_odds": ["1.2-1.5", "1.8-2.2"],
+    })
+    merged = merge_entries_and_odds(entries, odds)
+    assert "win_odds_x" not in merged.columns
+    assert "win_odds_y" not in merged.columns
+    assert merged["win_odds"].tolist() == [2.5, 4.0]
 
 
 def test_daily_stake_cap_respects_existing_t5_stake():
