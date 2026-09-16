@@ -7,25 +7,25 @@ import pandas as pd
 
 
 def _chronological_race_split(data: pd.DataFrame, valid_fraction: float = 0.2) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split on complete race dates so no target-day result can leak into training."""
     x = data.copy()
-    if "race_date" in x.columns:
-        x["_race_date"] = pd.to_datetime(x["race_date"], errors="coerce")
-    else:
-        x["_race_date"] = pd.NaT
+    if "race_date" not in x.columns:
+        raise ValueError("training data requires race_date for leakage-safe split")
+    x["_race_date"] = pd.to_datetime(x["race_date"], errors="coerce")
+    if x["_race_date"].isna().any():
+        raise ValueError("race_date contains invalid values")
 
-    race_order = (
-        x.groupby("race_id", as_index=False)["_race_date"]
-        .min()
-        .sort_values(["_race_date", "race_id"], na_position="first")
-    )
-    race_ids = race_order["race_id"].astype(str).tolist()
-    if len(race_ids) < 5:
-        raise ValueError("at least 5 races are required for chronological train/validation split")
-    valid_count = max(1, int(round(len(race_ids) * valid_fraction)))
-    valid_count = min(valid_count, len(race_ids) - 1)
-    valid_ids = set(race_ids[-valid_count:])
-    train = x[~x["race_id"].astype(str).isin(valid_ids)].drop(columns=["_race_date"])
-    valid = x[x["race_id"].astype(str).isin(valid_ids)].drop(columns=["_race_date"])
+    dates = sorted(x["_race_date"].dt.normalize().unique().tolist())
+    if len(dates) < 5:
+        raise ValueError("at least 5 distinct race dates are required for chronological train/validation split")
+
+    valid_count = max(1, int(round(len(dates) * valid_fraction)))
+    valid_count = min(valid_count, len(dates) - 1)
+    valid_dates = set(dates[-valid_count:])
+    train = x[~x["_race_date"].dt.normalize().isin(valid_dates)].drop(columns=["_race_date"])
+    valid = x[x["_race_date"].dt.normalize().isin(valid_dates)].drop(columns=["_race_date"])
+    if train.empty or valid.empty:
+        raise ValueError("chronological split produced an empty train or validation set")
     return train, valid
 
 
@@ -40,6 +40,8 @@ def train_lightgbm(df: pd.DataFrame, feature_prefix: str, model_path: Path, seed
         raise ValueError("training data requires is_winner column (0/1)")
     if "race_id" not in df.columns:
         raise ValueError("training data requires race_id")
+    if "race_date" not in df.columns:
+        raise ValueError("training data requires race_date")
     feature_cols = [c for c in df.columns if str(c).startswith(feature_prefix)]
     if not feature_cols:
         raise ValueError(f"no training features with prefix: {feature_prefix}")
@@ -87,11 +89,17 @@ def train_lightgbm(df: pd.DataFrame, feature_prefix: str, model_path: Path, seed
     model_path.parent.mkdir(parents=True, exist_ok=True)
     model.booster_.save_model(str(model_path))
 
+    train_dates = pd.to_datetime(train["race_date"], errors="coerce")
+    valid_dates = pd.to_datetime(valid["race_date"], errors="coerce")
     metrics = {
         "train_rows": int(len(train)),
         "valid_rows": int(len(valid)),
         "train_races": int(train["race_id"].nunique()),
         "valid_races": int(valid["race_id"].nunique()),
+        "train_dates": int(train_dates.dt.normalize().nunique()),
+        "valid_dates": int(valid_dates.dt.normalize().nunique()),
+        "train_last_date": str(train_dates.max().date()),
+        "valid_first_date": str(valid_dates.min().date()),
         "valid_logloss": float(log_loss(y_valid, prob, labels=[0, 1])),
         "best_iteration": int(model.best_iteration_ or model.n_estimators),
     }
@@ -102,7 +110,7 @@ def train_lightgbm(df: pd.DataFrame, feature_prefix: str, model_path: Path, seed
         "feature_cols": feature_cols,
         "metrics": metrics,
         "seed": seed,
-        "split": "chronological_by_race",
+        "split": "chronological_by_whole_race_date",
     }
     manifest_path = model_path.with_suffix(model_path.suffix + ".json")
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
