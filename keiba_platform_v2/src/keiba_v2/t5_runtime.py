@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -17,6 +18,11 @@ JST = ZoneInfo("Asia/Tokyo")
 
 def _target_datetime(race_date: str, start_time: str) -> datetime:
     return datetime.strptime(f"{race_date} {start_time}", "%Y%m%d %H:%M").replace(tzinfo=JST) - timedelta(minutes=5)
+
+
+def _output_tag(race_date: str, race_no: int, race_id: str) -> str:
+    digest = hashlib.sha1(str(race_id).encode("utf-8")).hexdigest()[:8]
+    return f"{race_date}_{int(race_no):02d}R_{digest}_T5"
 
 
 def _merge_t5_odds(base_race: pd.DataFrame, runner_odds: pd.DataFrame) -> pd.DataFrame:
@@ -73,22 +79,26 @@ def process_t5_race(
         raise RuntimeError(f"T-5 odds failed after 3 attempts: {race_id}: {last_error}")
 
     t5_input = _merge_t5_odds(base_race, runners)
-    runtime_dir = settings.project_root / "data" / "runtime" / "t5" / str(race_id)
+    runtime_dir = settings.project_root / "data" / "runtime" / "t5" / hashlib.sha1(str(race_id).encode("utf-8")).hexdigest()[:12]
     runtime_dir.mkdir(parents=True, exist_ok=True)
     input_snapshot = runtime_dir / "runners.csv"
     combo_snapshot = runtime_dir / "combination_odds.csv"
     runners_snapshot = runtime_dir / "jra_runner_odds.csv"
     t5_input.to_csv(input_snapshot, index=False, encoding="utf-8-sig")
-    combos.to_csv(combo_snapshot, index=False, encoding="utf-8-sig")
     runners.to_csv(runners_snapshot, index=False, encoding="utf-8-sig")
+
+    combo_path: Path | None = None
+    if not combos.empty:
+        combos.to_csv(combo_snapshot, index=False, encoding="utf-8-sig")
+        combo_path = combo_snapshot
 
     existing_daily_stake = store.successful_t5_stake(race_date)
     result = run_pipeline(
         input_snapshot,
         race_date,
         settings_path,
-        combo_snapshot,
-        output_tag=f"{race_id}_T5",
+        combo_path,
+        output_tag=_output_tag(race_date, int(race_no), race_id),
         existing_daily_stake_yen=existing_daily_stake,
     )
     store.mark_t5_result(race_id, "SUCCESS", run_id=result["run_id"])
