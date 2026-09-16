@@ -10,14 +10,18 @@ if (-not (Test-Path $Python)) {
 }
 
 $Entries = "data\raw\netkeiba_entries_$RaceDate.csv"
-$Bets = "data\output\strategy_bets_$RaceDate.json"
 $Results = "data\results\results_$RaceDate.csv"
 $Payouts = "data\results\payouts_$RaceDate.csv"
 
 & $Python -m keiba_v2.cli collect-results --entries $Entries --date $RaceDate
-if (Test-Path $Bets) {
-    & $Python -m keiba_v2.cli settle --bets $Bets --results $Results --payouts $Payouts
-}
-& $Python -m keiba_v2.cli build-training
 
-Write-Host "Results/history pipeline completed for $RaceDate"
+$BetFiles = Get-ChildItem -Path "data\output" -Filter "strategy_bets_$RaceDate*.json" -File -ErrorAction SilentlyContinue
+foreach ($BetFile in $BetFiles) {
+    $Settled = Join-Path $BetFile.DirectoryName ($BetFile.BaseName + "_settled.csv")
+    & $Python -m keiba_v2.cli settle --bets $BetFile.FullName --results $Results --payouts $Payouts --output $Settled
+}
+
+& $Python -m keiba_v2.cli build-training
+& $Python -m keiba_v2.cli report --directory "data\output" --output "data\output\performance_report.xlsx"
+
+Write-Host "Results/history/settlement/report pipeline completed for $RaceDate"
