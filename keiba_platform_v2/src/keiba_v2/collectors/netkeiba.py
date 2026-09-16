@@ -100,15 +100,15 @@ def _parse_runner_rows(soup, race_date: str, source_race_id: str) -> pd.DataFram
         weight_cell = tr.select_one("td.Weight")
         jockey_cell = tr.select_one("td.Jockey a")
         trainer_cell = tr.select_one("td.Trainer a")
-        odds_cell = tr.select_one("td.Popular span") or tr.select_one("td.Popular")
+        popular_cell = tr.select_one("td.Popular span") or tr.select_one("td.Popular")
 
         sex_age = age_cell.get_text(" ", strip=True) if age_cell else ""
         age_match = re.search(r"(\d+)", sex_age)
-        win_odds = None
-        if odds_cell is not None:
-            odds_match = re.search(r"\d+(?:\.\d+)?", odds_cell.get_text(" ", strip=True))
-            if odds_match:
-                win_odds = float(odds_match.group(0))
+        popularity = None
+        if popular_cell is not None:
+            pop_match = re.search(r"\d+", popular_cell.get_text(" ", strip=True))
+            if pop_match:
+                popularity = int(pop_match.group(0))
 
         rows.append({
             "race_id": canonical_id,
@@ -124,7 +124,7 @@ def _parse_runner_rows(soup, race_date: str, source_race_id: str) -> pd.DataFram
             "carried_weight": pd.to_numeric(weight_cell.get_text(" ", strip=True), errors="coerce") if weight_cell else None,
             "jockey": jockey_cell.get_text(" ", strip=True) if jockey_cell else "",
             "trainer": trainer_cell.get_text(" ", strip=True) if trainer_cell else "",
-            "win_odds": win_odds,
+            "netkeiba_popularity": popularity,
         })
     return pd.DataFrame(rows)
 
