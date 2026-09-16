@@ -41,15 +41,30 @@ def analyze_odds(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _normalize_model_probability(scores: pd.Series, race_ids: pd.Series) -> pd.Series:
+    scores = pd.to_numeric(scores, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    result = pd.Series(0.0, index=scores.index, dtype=float)
+    for race_id, idx in race_ids.groupby(race_ids).groups.items():
+        s = scores.loc[idx].astype(float)
+        if len(s) == 0:
+            continue
+        if (s >= 0).all() and (s <= 1).all() and float(s.sum()) > 0:
+            p = s / float(s.sum())
+        else:
+            shifted = s - float(s.max())
+            exp = np.exp(shifted.clip(lower=-50, upper=50))
+            denom = float(exp.sum())
+            p = exp / denom if denom > 0 else pd.Series(1.0 / len(s), index=s.index)
+        result.loc[idx] = p
+    return result
+
+
 def add_expected_value(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     out = df.copy()
-    scores = pd.to_numeric(out["prediction_score"], errors="coerce").fillna(0.0)
-    min_score = scores.groupby(out["race_id"]).transform("min")
-    shifted = (scores - min_score + 1e-9).clip(lower=1e-9)
-    probability = shifted / shifted.groupby(out["race_id"]).transform("sum")
-    out["model_win_prob"] = probability
-    out["expected_value"] = out["model_win_prob"] * pd.to_numeric(out["win_odds"], errors="coerce").fillna(0.0)
+    out["model_win_prob"] = _normalize_model_probability(out["prediction_score"], out["race_id"])
+    odds = pd.to_numeric(out["win_odds"], errors="coerce").fillna(0.0)
+    out["expected_value"] = out["model_win_prob"] * odds
     min_ev = float(cfg.get("min_expected_value", 1.05))
     max_odds = float(cfg.get("max_win_odds", 30.0))
-    out["value_candidate"] = (out["expected_value"] >= min_ev) & (out["win_odds"] <= max_odds)
+    out["value_candidate"] = (out["expected_value"] >= min_ev) & (odds <= max_odds)
     return out
