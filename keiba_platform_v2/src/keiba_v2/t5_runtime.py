@@ -69,9 +69,16 @@ def process_t5_race(
 ) -> dict:
     settings = load_settings(settings_path)
     app_cfg = settings.section("app")
+    pred_cfg = settings.section("prediction")
     store = RunStore(settings.project_root / str(app_cfg.get("runtime_db", "data/runtime/keiba_v2.sqlite3")))
     if store.is_t5_done(race_id):
         return {"race_id": race_id, "status": "ALREADY_DONE"}
+
+    if bool(app_cfg.get("require_trained_model_for_t5", True)):
+        model_path = settings.project_root / str(pred_cfg.get("model_path", "data/runtime/model.txt"))
+        manifest_path = model_path.with_suffix(model_path.suffix + ".json")
+        if not model_path.exists() or not manifest_path.exists():
+            raise NoBetError("trained model/manifest is required for T-5 SHADOW")
 
     max_buy_races = max(0, int(settings.section("race_selection").get("max_buy_races_per_day", 5)))
     bought_races = store.successful_t5_bet_races(race_date)
