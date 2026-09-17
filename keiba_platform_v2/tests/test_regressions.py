@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from keiba_v2.collectors.daily import merge_entries_and_odds
@@ -7,7 +8,7 @@ from keiba_v2.legacy_history import load_legacy_history
 from keiba_v2.race_selector import select_value_races
 from keiba_v2.strategies import StrategyBet, cap_bets
 from keiba_v2.training import _chronological_race_split
-from keiba_v2.walkforward import _date_folds
+from keiba_v2.walkforward import _date_folds, _normalize_race_probabilities, _sanitize_features
 
 
 def test_legacy_history_keeps_race_id_and_copies_source_race_id(tmp_path):
@@ -135,3 +136,23 @@ def test_walkforward_fold_dates_are_strictly_forward():
     for train_dates, test_dates in folds:
         assert set(train_dates).isdisjoint(set(test_dates))
         assert max(train_dates) < min(test_dates)
+
+
+def test_walkforward_sanitizes_nan_and_infinite_features():
+    df = pd.DataFrame({
+        "feature_x": [1.0, np.nan, np.inf, -np.inf],
+        "feature_y": ["2.5", "bad", 3.0, None],
+    })
+    out = _sanitize_features(df, ["feature_x", "feature_y"])
+    assert np.isfinite(out.to_numpy(dtype=float)).all()
+    assert float(out.iloc[1, 1]) == 0.0
+
+
+def test_walkforward_probability_normalization_never_returns_non_finite_values():
+    raw = pd.Series([0.8, np.nan, np.inf, -np.inf, 0.0, 0.0])
+    races = pd.Series(["R1", "R1", "R1", "R1", "R2", "R2"])
+    out = _normalize_race_probabilities(raw, races)
+    assert np.isfinite(out.to_numpy(dtype=float)).all()
+    assert abs(float(out[races == "R1"].sum()) - 1.0) < 1e-12
+    assert abs(float(out[races == "R2"].sum()) - 1.0) < 1e-12
+    assert out[races == "R2"].tolist() == [0.5, 0.5]
