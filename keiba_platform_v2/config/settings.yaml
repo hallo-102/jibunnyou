@@ -1,0 +1,66 @@
+app:
+  timezone: Asia/Tokyo
+  seed: 42
+  mode: SHADOW
+  runtime_db: data/runtime/keiba_v2.sqlite3
+  history_db: data/runtime/history.sqlite3
+  require_trained_model_for_t5: true
+
+validation:
+  min_horses_per_race: 5
+  max_horses_per_race: 18
+  require_positive_odds: true
+
+history:
+  n_recent: 5
+
+prediction:
+  top_k: 5
+  feature_prefix: feature_
+  model_path: data/runtime/model.txt
+  fallback_weights:
+    feature_avg_finish: -0.25
+    feature_avg_pop: -0.15
+    feature_avg_last3f: -0.20
+    feature_win_rate: 0.25
+    feature_top3_rate: 0.25
+    feature_recent_count: 0.05
+    feature_days_off_log: -0.05
+    feature_fast_score: 0.30
+    feature_avg_score: 0.35
+    feature_leg_type_suitability: 0.20
+
+odds:
+  min_expected_value: 1.05
+  max_win_odds: 30.0
+  top3_concentration_watch: 0.60
+  gap_watch: 1.50
+
+race_selection:
+  min_race_ev: 1.08
+  min_edge: 0.03
+  max_value_candidates_per_race: 4
+  max_buy_races_per_day: 5
+  min_combination_ev: 1.08
+
+strategy:
+  unit_yen: 100
+  min_expected_value: 1.08
+  max_win_bets_per_race: 2
+  max_quinella_points_per_race: 3
+  max_trio_points_per_race: 5
+  max_points_per_race: 13
+  max_race_stake_yen: 1300
+  daily_stake_limit_yen: 5000
+
+shadow:
+  unit_yen: 100
+  max_points_per_race: 13
+  max_race_stake_yen: 1300
+  daily_stake_limit_yen: 5000
+  output_jsonl: data/runtime/shadow_bets.jsonl
+
+tracking:
+  enabled: true
+  experiment_name: keiba_platform_v2
+  tracking_uri: data/runtime/mlruns
