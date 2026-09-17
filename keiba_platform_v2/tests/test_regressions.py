@@ -30,6 +30,37 @@ def test_legacy_history_keeps_race_id_and_copies_source_race_id(tmp_path):
     assert out["horse_id"].str.startswith("NAME:").all()
 
 
+def test_legacy_history_uses_sheet_date_and_reads_all_result_sheets(tmp_path):
+    source = tmp_path / "racedata_results_clean_v3.xlsx"
+    with pd.ExcelWriter(source) as writer:
+        pd.DataFrame({
+            "レースID": ["R1", "R1"],
+            "着 順": [1, 2],
+            "馬 番": [1, 2],
+            "馬名": ["A", "B"],
+            "人 気": [1, 2],
+            "単勝 オッズ": [2.0, 4.0],
+            "後3F": [34.1, 34.8],
+        }).to_excel(writer, sheet_name="20260912", index=False)
+        pd.DataFrame({
+            "レースID": ["R2", "R2"],
+            "着 順": [1, 2],
+            "馬 番": [3, 4],
+            "馬名": ["C", "D"],
+            "人 気": [2, 1],
+            "単勝 オッズ": [5.0, 1.8],
+            "後3F": [35.0, 34.4],
+        }).to_excel(writer, sheet_name="20260913", index=False)
+        pd.DataFrame({"foo": [1]}).to_excel(writer, sheet_name="metadata", index=False)
+
+    out = load_legacy_history(source)
+    assert len(out) == 4
+    assert set(out["race_date"].astype(str)) == {"20260912", "20260913"}
+    assert set(out["race_id"]) == {"R1", "R2"}
+    assert "last3f" in out.columns
+    assert out["last3f"].notna().all()
+
+
 def test_jra_odds_are_authoritative_when_entries_contain_old_odds():
     entries = pd.DataFrame({
         "race_id": ["R1", "R1"],
