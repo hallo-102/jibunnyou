@@ -7,18 +7,32 @@ import numpy as np
 import pandas as pd
 
 
+def _parse_race_dates(values: pd.Series) -> pd.Series:
+    """Parse race dates safely, including numeric/string YYYYMMDD values."""
+    text = values.astype("string").str.strip()
+    ymd_mask = text.str.fullmatch(r"20\d{6}", na=False)
+    out = pd.Series(pd.NaT, index=values.index, dtype="datetime64[ns]")
+    if ymd_mask.any():
+        out.loc[ymd_mask] = pd.to_datetime(text.loc[ymd_mask], format="%Y%m%d", errors="coerce")
+    other_mask = ~ymd_mask & text.notna() & text.ne("")
+    if other_mask.any():
+        out.loc[other_mask] = pd.to_datetime(text.loc[other_mask], errors="coerce")
+    return out
+
+
 def _chronological_race_split(data: pd.DataFrame, valid_fraction: float = 0.2) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split on complete race dates so no target-day result can leak into training."""
     x = data.copy()
     if "race_date" not in x.columns:
         raise ValueError("training data requires race_date for leakage-safe split")
-    x["_race_date"] = pd.to_datetime(x["race_date"], errors="coerce")
+    x["_race_date"] = _parse_race_dates(x["race_date"])
     if x["_race_date"].isna().any():
-        raise ValueError("race_date contains invalid values")
+        bad = x.loc[x["_race_date"].isna(), "race_date"].astype(str).head(5).tolist()
+        raise ValueError(f"race_date contains invalid values: {bad}")
 
     dates = sorted(x["_race_date"].dt.normalize().unique().tolist())
     if len(dates) < 5:
-        raise ValueError("at least 5 distinct race dates are required for chronological train/validation split")
+        raise ValueError(f"at least 5 distinct race dates are required for chronological train/validation split; found={len(dates)}")
 
     valid_count = max(1, int(round(len(dates) * valid_fraction)))
     valid_count = min(valid_count, len(dates) - 1)
@@ -101,8 +115,8 @@ def train_lightgbm(df: pd.DataFrame, feature_prefix: str, model_path: Path, seed
     model_path.parent.mkdir(parents=True, exist_ok=True)
     model.booster_.save_model(str(model_path))
 
-    train_dates = pd.to_datetime(train["race_date"], errors="coerce")
-    valid_dates = pd.to_datetime(valid["race_date"], errors="coerce")
+    train_dates = _parse_race_dates(train["race_date"])
+    valid_dates = _parse_race_dates(valid["race_date"])
     metrics = {
         "train_rows": int(len(train)),
         "valid_rows": int(len(valid)),
