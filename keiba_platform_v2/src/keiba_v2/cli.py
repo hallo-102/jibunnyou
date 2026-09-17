@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .acceptance import run_acceptance, write_acceptance_report
 from .adapters import export_canonical_csv, load_legacy_excel
 from .backtest import summarize_bets
 from .collectors.daily import collect_daily_dataset
@@ -31,6 +32,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_doctor = sub.add_parser("doctor", help="check V2 runtime, optional dependencies, model and history readiness")
     p_doctor.add_argument("--settings")
+
+    p_accept = sub.add_parser("acceptance", help="verify one full raceday after results settlement")
+    p_accept.add_argument("--date", required=True, help="YYYYMMDD")
+    p_accept.add_argument("--output")
+    p_accept.add_argument("--settings")
 
     p_validate = sub.add_parser("validate", help="validate input data")
     p_validate.add_argument("--input", required=True)
@@ -103,6 +109,17 @@ def main() -> None:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if not report["ok"]:
             raise SystemExit(2)
+        return
+
+    if args.command == "acceptance":
+        report = run_acceptance(args.date, args.settings)
+        settings = load_settings(args.settings)
+        output = Path(args.output) if args.output else settings.project_root / "data" / "output" / f"acceptance_{args.date}.json"
+        destination = write_acceptance_report(report, output)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        print(f"acceptance_report={destination}")
+        if not report["ok"]:
+            raise SystemExit(4)
         return
 
     if args.command == "validate":
