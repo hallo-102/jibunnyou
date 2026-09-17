@@ -38,7 +38,7 @@ ROI・損益・馬券種別レポート
 履歴DB更新 → 次回学習
 ```
 
-実資金投票はV2ではまだ有効化していません。T-5までをSHADOWで完全に検証し、実開催日の通し試験を合格させてから別ゲートとして追加する前提です。
+実資金投票はV2では有効化していません。T-5までをSHADOWで完全に検証し、実開催日の通し試験を合格させてから別ゲートとして追加する前提です。
 
 ## 既存システムとの分離
 
@@ -50,7 +50,7 @@ ROI・損益・馬券種別レポート
 ## 主な機能
 
 - netkeiba当日出馬表・horse_id・発走時刻取得
-- JRA単勝/複勝/3連複オッズ取得
+- JRA単勝/複勝/馬連/3連複オッズ取得
 - JRAページ日付照合
 - race_id/馬番/馬名/オッズ/重複/頭数の品質ゲート
 - SQLite履歴DB
@@ -71,6 +71,7 @@ ROI・損益・馬券種別レポート
 - MLflow任意記録
 - Prefect任意フロー
 - Windows PowerShell運用スクリプト
+- V2専用Windowsタスク登録/解除
 
 ## フォルダ概要
 
@@ -83,7 +84,10 @@ keiba_platform_v2/
 │  ├─ run_raceday.ps1
 │  ├─ run_t5.ps1
 │  ├─ run_results.ps1
-│  └─ retrain.ps1
+│  ├─ retrain.ps1
+│  ├─ task_runner.ps1
+│  ├─ register_tasks.ps1
+│  └─ unregister_tasks.ps1
 ├─ src/keiba_v2/
 │  ├─ collectors/
 │  │  ├─ netkeiba.py
@@ -222,9 +226,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_results.ps1 -RaceDate 202
 
 1. netkeiba結果・払戻取得
 2. V2履歴SQLiteへ追加
-3. SHADOW券を精算
+3. T-5 SHADOW券だけを精算
 4. 学習データ再生成
 5. 集計レポート更新
+
+朝時点の `strategy_bets_YYYYMMDD.json` はプレビュー扱いで、KPIにはT-5確定券のみを含めます。
 
 個別に集計する場合:
 
@@ -232,7 +238,39 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_results.ps1 -RaceDate 202
 .\.venv\Scripts\python.exe -m keiba_v2.cli report --directory data\output --output data\output\performance_report.xlsx
 ```
 
-## 7. 手動CSV/Excel入力から予想する場合
+## 7. Windowsタスクスケジューラへの登録
+
+V2専用タスクとして土日だけ登録します。既存タスクは変更しません。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\register_tasks.ps1
+```
+
+既定時刻:
+
+```text
+KeibaV2_Morning  08:20
+KeibaV2_T5       09:00
+KeibaV2_Results  19:00
+```
+
+実行ログは次に残します。
+
+```text
+data/runtime/task_logs/YYYYMMDD_morning.log
+data/runtime/task_logs/YYYYMMDD_t5.log
+data/runtime/task_logs/YYYYMMDD_results.log
+```
+
+解除:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\unregister_tasks.ps1
+```
+
+祝日・平日開催はこの土日登録には含めません。その場合は `task_runner.ps1` または各 `run_*.ps1` を当日手動実行します。
+
+## 8. 手動CSV/Excel入力から予想する場合
 
 最低限必要な列:
 
@@ -253,7 +291,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_results.ps1 -RaceDate 202
 .\.venv\Scripts\python.exe -m keiba_v2.cli run --input data\input\races.csv --date 20260919
 ```
 
-## 8. KPI
+## 9. KPI
 
 V2は的中率だけで採用判断しません。優先するのは次です。
 
@@ -266,7 +304,7 @@ V2は的中率だけで採用判断しません。優先するのは次です。
 
 EV閾値は `config/settings.yaml` で管理します。
 
-## 9. 完成判定
+## 10. 完成判定
 
 ソフトウェア側のSHADOW機能は、以下を満たすことを完成条件とします。
 
@@ -275,10 +313,11 @@ EV閾値は `config/settings.yaml` で管理します。
 - `keiba-v2 doctor` の必須項目が成功
 - 過去結果取込→学習→Walk-Forwardが成功
 - 実開催日に朝収集が成功
+- 単勝/馬連/3連複オッズが取得され、EV計算へ渡る
 - 全レースのT-5処理が `SUCCESS` または意図した `NO_BET` で終了
 - race_id/馬番/日付不一致時に停止する
 - 日次5,000円上限を再起動後も超えない
-- レース後の結果取得と全SHADOW券精算が成功
+- レース後の結果取得と全T-5 SHADOW券精算が成功
 - performance_report.xlsx が生成される
 
 実資金LIVEはこの完成条件とは分離します。SHADOWで十分な期間の再現性を確認した後に、独立したLIVEゲートとして設計します。
