@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +53,26 @@ def _sanitize_features(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFram
         .replace([np.inf, -np.inf], np.nan)
         .fillna(0.0)
     )
+
+
+def _save_booster_unicode_safe(booster, model_path: Path) -> None:
+    """Save through an ASCII temp path, then move with Python for Windows unicode paths."""
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = Path(tempfile.gettempdir())
+    with tempfile.NamedTemporaryFile(prefix="keiba_v2_model_", suffix=".txt", dir=tmp_dir, delete=False) as handle:
+        tmp_path = Path(handle.name)
+    try:
+        # LightGBM native I/O can fail on Windows when the destination contains
+        # non-ASCII characters. Save to the system temp directory first, then
+        # let Python handle the unicode destination path.
+        booster.save_model(str(tmp_path))
+        if not tmp_path.exists() or tmp_path.stat().st_size == 0:
+            raise RuntimeError(f"LightGBM temporary model save failed: {tmp_path}")
+        shutil.copyfile(tmp_path, model_path)
+        if not model_path.exists() or model_path.stat().st_size == 0:
+            raise RuntimeError(f"model copy failed: {model_path}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def train_lightgbm(df: pd.DataFrame, feature_prefix: str, model_path: Path, seed: int = 42) -> dict:
@@ -112,8 +134,7 @@ def train_lightgbm(df: pd.DataFrame, feature_prefix: str, model_path: Path, seed
     if not np.isfinite(prob).all():
         raise RuntimeError("LightGBM validation prediction contains non-finite values")
 
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    model.booster_.save_model(str(model_path))
+    _save_booster_unicode_safe(model.booster_, model_path)
 
     train_dates = _parse_race_dates(train["race_date"])
     valid_dates = _parse_race_dates(valid["race_date"])
