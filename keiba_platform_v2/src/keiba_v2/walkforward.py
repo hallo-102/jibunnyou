@@ -27,6 +27,29 @@ class FoldResult:
         return asdict(self)
 
 
+def _sanitize_features(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
+    """Return numeric finite features safe for LightGBM."""
+    return (
+        df[feature_cols]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+
+
+def _normalize_race_probabilities(raw_prob: pd.Series, race_id: pd.Series) -> pd.Series:
+    """Normalize finite non-negative scores within each race without propagating NaN/inf."""
+    safe = pd.to_numeric(raw_prob, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    safe = safe.clip(lower=0.0)
+    denom = safe.groupby(race_id).transform("sum")
+    normalized = safe.div(denom.where(denom > 0.0))
+
+    # A degenerate race (all scores invalid/zero) falls back to equal probability.
+    group_size = race_id.groupby(race_id).transform("size").astype(float)
+    fallback = 1.0 / group_size
+    return normalized.replace([np.inf, -np.inf], np.nan).fillna(fallback)
+
+
 def _date_folds(df: pd.DataFrame, n_splits: int) -> list[tuple[list[pd.Timestamp], list[pd.Timestamp]]]:
     work = df.copy()
     work["_race_date"] = pd.to_datetime(work["race_date"], errors="coerce").dt.normalize()
@@ -74,7 +97,7 @@ def run_walkforward(
     if work["_race_date"].isna().any():
         raise ValueError("walk-forward race_date contains invalid values")
     work["is_winner"] = pd.to_numeric(work["is_winner"], errors="coerce").fillna(0).astype(int)
-    work["win_odds"] = pd.to_numeric(work["win_odds"], errors="coerce")
+    work["win_odds"] = pd.to_numeric(work["win_odds"], errors="coerce").replace([np.inf, -np.inf], np.nan)
     folds = _date_folds(work, n_splits)
     results: list[FoldResult] = []
 
@@ -86,7 +109,7 @@ def run_walkforward(
         if train["_race_date"].max() >= test["_race_date"].min():
             raise RuntimeError("walk-forward leakage detected: train date overlaps test date")
 
-        x_train = train[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        x_train = _sanitize_features(train, feature_cols)
         y_train = train["is_winner"]
         pos = max(1, int(y_train.sum()))
         neg = max(1, int((1 - y_train).sum()))
@@ -104,11 +127,14 @@ def run_walkforward(
             verbosity=-1,
         )
         model.fit(x_train, y_train)
-        x_test = test[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
-        test["raw_prob"] = model.predict_proba(x_test)[:, 1]
-        denom = test.groupby("race_id")["raw_prob"].transform("sum").replace(0.0, np.nan)
-        test["model_win_prob"] = (test["raw_prob"] / denom).fillna(0.0)
-        test["pred_rank"] = test.groupby("race_id")["model_win_prob"].rank(method="first", ascending=False).astype(int)
+        x_test = _sanitize_features(test, feature_cols)
+        test["raw_prob"] = pd.Series(model.predict_proba(x_test)[:, 1], index=test.index, dtype=float)
+        test["model_win_prob"] = _normalize_race_probabilities(test["raw_prob"], test["race_id"])
+        test["pred_rank"] = (
+            test.groupby("race_id")["model_win_prob"]
+            .rank(method="first", ascending=False)
+            .astype("Int64")
+        )
 
         winners = test[test["is_winner"] == 1]
         race_count = int(test["race_id"].nunique())
