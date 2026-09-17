@@ -16,7 +16,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "finish_position": ("finish_position", "着順", "着順_num"),
     "popularity": ("popularity", "人気", "人気順"),
     "win_odds": ("win_odds", "単勝", "単勝オッズ"),
-    "last3f": ("last3f", "上り", "上がり", "上り3F"),
+    "last3f": ("last3f", "上り", "上がり", "上り3F", "後3F"),
     "distance": ("distance", "距離"),
     "surface": ("surface", "芝ダ", "芝・ダート"),
     "racecourse": ("racecourse", "競馬場", "場所"),
@@ -54,37 +54,47 @@ def _rename(frame: pd.DataFrame) -> pd.DataFrame:
     return out.rename(columns=rename)
 
 
-def _date_from_filename(path: Path) -> str:
-    m = re.search(r"(20\d{6})", path.name)
+def _date_from_text(text: str) -> str:
+    m = re.search(r"(20\d{6})", str(text))
     return m.group(1) if m else ""
+
+
+def _date_from_filename(path: Path) -> str:
+    return _date_from_text(path.name)
 
 
 def load_legacy_history(path: str | Path, *, race_date: str | None = None) -> pd.DataFrame:
     """Read an existing CSV/Excel result file without modifying it.
 
     Workbook sheets that do not contain horse result columns are ignored. When
-    race_date is absent from rows, `--date` or an 8-digit date in the filename is
-    used. Horse IDs are optional; legacy name identities are generated.
+    race_date is absent from rows, precedence is: explicit ``--date``, an
+    8-digit date in the sheet name, then an 8-digit date in the filename.
+    Horse IDs are optional; legacy name identities are generated.
     """
     src = Path(path)
     if not src.exists():
         raise FileNotFoundError(src)
 
+    explicit_date = str(race_date or "")
+    filename_date = _date_from_filename(src)
+
     if src.suffix.lower() in {".xlsx", ".xls", ".xlsm"}:
         raw = pd.read_excel(src, sheet_name=None)
-        candidates = [_rename(df) for df in raw.values()]
+        candidates = [(str(sheet_name), _rename(df)) for sheet_name, df in raw.items()]
     else:
-        candidates = [_rename(pd.read_csv(src, encoding="utf-8-sig"))]
+        candidates = [("", _rename(pd.read_csv(src, encoding="utf-8-sig")))]
 
     frames: list[pd.DataFrame] = []
-    fallback_date = str(race_date or _date_from_filename(src))
-    for frame in candidates:
+    for sheet_name, frame in candidates:
         required = {"race_id", "horse_name", "finish_position"}
         if not required.issubset(frame.columns):
             continue
         x = frame.copy()
         if "source_race_id" not in x.columns:
             x["source_race_id"] = x["race_id"]
+
+        sheet_date = _date_from_text(sheet_name)
+        fallback_date = explicit_date or sheet_date or filename_date
         if "race_date" not in x.columns:
             x["race_date"] = fallback_date
         else:
@@ -92,7 +102,9 @@ def load_legacy_history(path: str | Path, *, race_date: str | None = None) -> pd
             if fallback_date:
                 x.loc[x["race_date"].eq(""), "race_date"] = fallback_date
         if not x["race_date"].fillna("").astype(str).str.fullmatch(r"20\d{6}").all():
-            raise ValueError(f"race_date could not be resolved for every result row: {src}")
+            location = f" sheet={sheet_name!r}" if sheet_name else ""
+            raise ValueError(f"race_date could not be resolved for every result row: {src}{location}")
+
         if "horse_id" not in x.columns:
             x["horse_id"] = x["horse_name"].map(legacy_horse_id)
         else:
