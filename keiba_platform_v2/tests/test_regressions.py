@@ -7,7 +7,7 @@ from keiba_v2.collectors.daily import merge_entries_and_odds
 from keiba_v2.legacy_history import load_legacy_history
 from keiba_v2.race_selector import select_value_races
 from keiba_v2.strategies import StrategyBet, cap_bets
-from keiba_v2.training import _chronological_race_split, _parse_race_dates
+from keiba_v2.training import _chronological_race_split, _parse_race_dates, _save_booster_unicode_safe
 from keiba_v2.walkforward import _date_folds, _normalize_race_probabilities, _sanitize_features
 
 
@@ -169,6 +169,17 @@ def test_training_date_parser_handles_numeric_yyyymmdd():
     df["race_date"] = df["race_date"].astype(int)
     train, valid = _chronological_race_split(df, valid_fraction=0.33)
     assert pd.to_numeric(train["race_date"]).max() < pd.to_numeric(valid["race_date"]).min()
+
+
+def test_unicode_safe_model_save_uses_python_copy_for_destination(tmp_path):
+    class FakeBooster:
+        def save_model(self, path):
+            from pathlib import Path
+            Path(path).write_text("model-data", encoding="utf-8")
+
+    destination = tmp_path / "日本語フォルダ" / "model.txt"
+    _save_booster_unicode_safe(FakeBooster(), destination)
+    assert destination.read_text(encoding="utf-8") == "model-data"
 
 
 def test_walkforward_fold_dates_are_strictly_forward():
