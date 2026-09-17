@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
@@ -27,6 +28,15 @@ def _chronological_race_split(data: pd.DataFrame, valid_fraction: float = 0.2) -
     if train.empty or valid.empty:
         raise ValueError("chronological split produced an empty train or validation set")
     return train, valid
+
+
+def _sanitize_features(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
+    return (
+        df[feature_cols]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
 
 
 def train_lightgbm(df: pd.DataFrame, feature_prefix: str, model_path: Path, seed: int = 42) -> dict:
@@ -57,9 +67,9 @@ def train_lightgbm(df: pd.DataFrame, feature_prefix: str, model_path: Path, seed
     if train["is_winner"].nunique() < 2 or valid["is_winner"].nunique() < 2:
         raise ValueError("train and validation must each contain winners and non-winners")
 
-    x_train = train[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    x_train = _sanitize_features(train, feature_cols)
     y_train = train["is_winner"].astype(int)
-    x_valid = valid[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    x_valid = _sanitize_features(valid, feature_cols)
     y_valid = valid["is_winner"].astype(int)
 
     positives = max(1, int(y_train.sum()))
@@ -84,7 +94,9 @@ def train_lightgbm(df: pd.DataFrame, feature_prefix: str, model_path: Path, seed
         eval_set=[(x_valid, y_valid)],
         callbacks=[lgb.early_stopping(80, verbose=False)],
     )
-    prob = model.predict_proba(x_valid)[:, 1]
+    prob = np.asarray(model.predict_proba(x_valid)[:, 1], dtype=float)
+    if not np.isfinite(prob).all():
+        raise RuntimeError("LightGBM validation prediction contains non-finite values")
 
     model_path.parent.mkdir(parents=True, exist_ok=True)
     model.booster_.save_model(str(model_path))
