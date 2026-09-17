@@ -14,6 +14,7 @@ $Results = "data\results\results_$RaceDate.csv"
 $Payouts = "data\results\payouts_$RaceDate.csv"
 
 & $Python -m keiba_v2.cli collect-results --entries $Entries --date $RaceDate
+if ($LASTEXITCODE -ne 0) { throw "collect-results failed" }
 
 # Morning strategy_bets_YYYYMMDD.json is preview only.
 # KPI settlement includes only actual T-5 SHADOW decision files.
@@ -21,9 +22,16 @@ $BetFiles = Get-ChildItem -Path "data\output" -Filter "strategy_bets_$RaceDate*_
 foreach ($BetFile in $BetFiles) {
     $Settled = Join-Path $BetFile.DirectoryName ($BetFile.BaseName + "_settled.csv")
     & $Python -m keiba_v2.cli settle --bets $BetFile.FullName --results $Results --payouts $Payouts --output $Settled
+    if ($LASTEXITCODE -ne 0) { throw "settlement failed: $($BetFile.FullName)" }
 }
 
 & $Python -m keiba_v2.cli build-training
-& $Python -m keiba_v2.cli report --directory "data\output" --output "data\output\performance_report.xlsx"
+if ($LASTEXITCODE -ne 0) { throw "build-training failed" }
 
-Write-Host "Results/history/T-5 settlement/report pipeline completed for $RaceDate"
+& $Python -m keiba_v2.cli report --directory "data\output" --output "data\output\performance_report.xlsx"
+if ($LASTEXITCODE -ne 0) { throw "report failed" }
+
+& $Python -m keiba_v2.cli acceptance --date $RaceDate
+if ($LASTEXITCODE -ne 0) { throw "raceday acceptance failed" }
+
+Write-Host "Results/history/T-5 settlement/report/acceptance pipeline completed for $RaceDate"
