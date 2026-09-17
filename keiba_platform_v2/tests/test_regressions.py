@@ -7,7 +7,7 @@ from keiba_v2.collectors.daily import merge_entries_and_odds
 from keiba_v2.legacy_history import load_legacy_history
 from keiba_v2.race_selector import select_value_races
 from keiba_v2.strategies import StrategyBet, cap_bets
-from keiba_v2.training import _chronological_race_split
+from keiba_v2.training import _chronological_race_split, _parse_race_dates
 from keiba_v2.walkforward import _date_folds, _normalize_race_probabilities, _sanitize_features
 
 
@@ -158,6 +158,17 @@ def test_train_validation_never_split_same_race_date():
     valid_dates = set(valid["race_date"].astype(str))
     assert train_dates.isdisjoint(valid_dates)
     assert max(train_dates) < min(valid_dates)
+
+
+def test_training_date_parser_handles_numeric_yyyymmdd():
+    values = pd.Series([20260901, 20260902, 20260903, 20260904, 20260905, 20260906])
+    parsed = _parse_race_dates(values)
+    assert parsed.dt.strftime("%Y%m%d").tolist() == [str(v) for v in values.tolist()]
+
+    df = _dated_rows().copy()
+    df["race_date"] = df["race_date"].astype(int)
+    train, valid = _chronological_race_split(df, valid_fraction=0.33)
+    assert pd.to_numeric(train["race_date"]).max() < pd.to_numeric(valid["race_date"]).min()
 
 
 def test_walkforward_fold_dates_are_strictly_forward():
