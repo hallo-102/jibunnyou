@@ -22,7 +22,7 @@ if ($RaceDate -notmatch '^20\d{6}$') {
 }
 
 $Python = ".\.venv\Scripts\python.exe"
-$Input = "data\input\races_$RaceDate.csv"
+$MorningInput = "data\input\races_$RaceDate.csv"
 $Schedule = "data\raw\race_schedule_$RaceDate.csv"
 $Entries = "data\raw\netkeiba_entries_$RaceDate.csv"
 $Results = "data\results\results_$RaceDate.csv"
@@ -38,7 +38,7 @@ function Show-Status {
     Write-Host "venv           : $(Test-Path $Python)"
     Write-Host "trained model  : $(Test-Path $Model)"
     Write-Host "history db     : $(Test-Path $HistoryDb)"
-    Write-Host "morning input  : $(Test-Path $Input)"
+    Write-Host "morning input  : $(Test-Path $MorningInput)"
     Write-Host "schedule       : $(Test-Path $Schedule)"
     Write-Host "entries        : $(Test-Path $Entries)"
     Write-Host "results        : $(Test-Path $Results)"
@@ -81,7 +81,7 @@ switch ($Action) {
         Show-Status
     }
     "T5" {
-        if (-not (Test-Path $Input)) { throw "Morning input is missing: $Input" }
+        if (-not (Test-Path $MorningInput)) { throw "Morning input is missing: $MorningInput" }
         if (-not (Test-Path $Schedule)) { throw "Race schedule is missing: $Schedule" }
         if (-not (Test-Path $Model)) { throw "Trained model is missing: $Model" }
         $argsList = @("-ExecutionPolicy", "Bypass", "-File", ".\scripts\run_t5.ps1", "-RaceDate", $RaceDate)

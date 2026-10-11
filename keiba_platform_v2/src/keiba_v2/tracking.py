@@ -16,8 +16,16 @@ def tracking_run(cfg: dict, project_root: Path, run_name: str) -> Iterator[objec
         yield None
         return
 
-    uri = str(cfg.get("tracking_uri", "data/runtime/mlruns"))
-    if "://" not in uri:
+    uri = str(cfg.get("tracking_uri", "sqlite:///data/runtime/mlflow.db"))
+    if uri.startswith("sqlite:///") and uri != "sqlite:///:memory:":
+        # 相対SQLiteパスは実行時の作業場所ではなくV2ルートを基準にする。
+        database_path = Path(uri.removeprefix("sqlite:///"))
+        if not database_path.is_absolute():
+            database_path = project_root / database_path
+        database_path = database_path.resolve()
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+        uri = "sqlite:///" + database_path.as_posix()
+    elif "://" not in uri:
         uri = str((project_root / uri).resolve())
     mlflow.set_tracking_uri(uri)
     mlflow.set_experiment(str(cfg.get("experiment_name", "keiba_platform_v2")))

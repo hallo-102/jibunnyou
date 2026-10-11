@@ -2,13 +2,54 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from bs4 import BeautifulSoup
 
 from keiba_v2.collectors.daily import merge_entries_and_odds
+from keiba_v2.collectors.netkeiba import _parse_runner_rows
 from keiba_v2.legacy_history import load_legacy_history
 from keiba_v2.race_selector import select_value_races
 from keiba_v2.strategies import StrategyBet, cap_bets
 from keiba_v2.training import _chronological_race_split, _parse_race_dates, _save_booster_unicode_safe
 from keiba_v2.walkforward import _date_folds, _normalize_race_probabilities, _sanitize_features
+
+
+def test_netkeiba_parser_accepts_numbered_umaban_class_from_current_html():
+    html = """
+    <html lang="ja">
+      <head><title>テスト競走 出馬表 | 2026年9月21日 阪神1R</title></head>
+      <body>
+        <div class="RaceData02"><span>4回</span><span>阪神</span><span>7日目</span></div>
+        <table class="Shutuba_Table">
+          <tr class="HorseList" id="tr_7">
+            <td class="Waku3 Txt_C"><span>3</span></td>
+            <td class="Umaban3 Txt_C">7</td>
+            <td class="HorseInfo">
+              <a href="https://db.netkeiba.com/horse/2023101234" title="テストホース">テストホース</a>
+            </td>
+            <td class="Barei Txt_C">牡3</td>
+            <td class="Txt_C">58.0</td>
+            <td class="Jockey"><a href="/jockey/01234/">テスト騎手</a></td>
+            <td class="Trainer"><a href="/trainer/01234/">テスト調教師</a></td>
+            <td class="Weight">496<small>(+4)</small></td>
+            <td class="Txt_R Popular"><span>12.3</span></td>
+            <td class="Popular Popular_Ninki Txt_C"><span>3</span></td>
+          </tr>
+        </table>
+        <footer><a href="/nakayama/">中山競馬場</a></footer>
+      </body>
+    </html>
+    """
+
+    frame = _parse_runner_rows(BeautifulSoup(html, "html.parser"), "20260921", "202606040701")
+
+    assert len(frame) == 1
+    row = frame.iloc[0]
+    assert row["racecourse"] == "阪神"
+    assert row["horse_no"] == 7
+    assert row["horse_id"] == "2023101234"
+    assert row["horse_name"] == "テストホース"
+    assert row["carried_weight"] == 58.0
+    assert row["netkeiba_popularity"] == 3
 
 
 def test_legacy_history_keeps_race_id_and_copies_source_race_id(tmp_path):

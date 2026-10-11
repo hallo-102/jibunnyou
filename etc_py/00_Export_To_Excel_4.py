@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
+import json
+import math
 import re
 import shutil
 import tempfile
@@ -687,6 +690,30 @@ OVERALL_UPDATE_SHARE = 0.65
 SURFACE_UPDATE_SHARE = 1.15
 
 
+@dataclass(frozen=True)
+class RatingParameters:
+    """時系列比較用の調整値。指定しなければ従来の重みを使う。"""
+    surface_weight: float = SURFACE_RATING_WEIGHT
+    k_scale: float = 1.0
+    performance_time_scale: float = 1.0
+    level_weights: Tuple[float, float, float, float] = (0.35, 0.25, 0.25, 0.15)
+    level_time_scale: float = 1.0
+
+    def __post_init__(self):
+        # 不正な比較設定を本番計算へ持ち込まない。
+        scalar_values = [self.surface_weight, self.k_scale, self.performance_time_scale, self.level_time_scale]
+        if not all(math.isfinite(float(v)) for v in scalar_values):
+            raise ValueError("ratingパラメータは有限値で指定してください")
+        if not 0 <= self.surface_weight <= 1 or self.k_scale <= 0:
+            raise ValueError("surface_weightは0〜1、k_scaleは正の値で指定してください")
+        if self.performance_time_scale < 0 or self.level_time_scale < 0:
+            raise ValueError("時計補正の倍率は0以上で指定してください")
+        if (len(self.level_weights) != 4 or
+                any(not math.isfinite(float(v)) or v < 0 for v in self.level_weights) or
+                not math.isclose(sum(self.level_weights), 1.0, abs_tol=1e-9)):
+            raise ValueError("level_weightsは非負の4値、合計1で指定してください")
+
+
 def normalize_race_class_key(race_class: Optional[str]) -> Optional[str]:
     if not race_class:
         return None
@@ -1028,6 +1055,7 @@ def calc_pre_race_level_score(
     pre_top5_mean: Optional[float],
     pre_mean: Optional[float],
     pre_p50: Optional[float],
+    weights: Tuple[float, float, float, float] = (0.35, 0.25, 0.25, 0.15),
 ) -> Optional[float]:
     """
     レース前に取得できる出走馬ratingだけでレースレベルを計算する。
@@ -1037,12 +1065,7 @@ def calc_pre_race_level_score(
     if any(v is None or pd.isna(v) for v in values):
         return None
 
-    return float(
-        (float(pre_top3_mean) * 0.35)
-        + (float(pre_top5_mean) * 0.25)
-        + (float(pre_mean) * 0.25)
-        + (float(pre_p50) * 0.15)
-    )
+    return float(sum(float(value) * weight for value, weight in zip(values, weights)))
 
 
 def calc_result_time_level_adjustment(
@@ -1185,6 +1208,7 @@ def compute_performance_score(
     best_last3f: Optional[float],
     median_last3f: Optional[float],
     passing_positions: List[int],
+    time_scale: float = 1.0,
 ) -> float:
     score = rank_score
     rc = normalize_race_class_key(race_class)
@@ -1225,9 +1249,9 @@ def compute_performance_score(
 
     if time_sec is not None:
         if ref_best is not None:
-            score += clamp(-0.05 * (time_sec - ref_best), -0.18, 0.10)
+            score += time_scale * clamp(-0.05 * (time_sec - ref_best), -0.18, 0.10)
         if ref_median is not None:
-            score += clamp(0.025 * (ref_median - time_sec), -0.05, 0.07)
+            score += time_scale * clamp(0.025 * (ref_median - time_sec), -0.05, 0.07)
 
     if last3f is not None:
         if best_last3f is not None:
@@ -1274,6 +1298,7 @@ def k_factor(
 
 @dataclass
 class MemoryStore:
+    parameters: RatingParameters = field(default_factory=RatingParameters)
     horses: Dict[str, int] = field(default_factory=dict)
     horse_rows: Dict[int, Dict] = field(default_factory=dict)
     races: Dict[str, Dict] = field(default_factory=dict)
@@ -1338,7 +1363,8 @@ class MemoryStore:
     def get_combined_rating(self, horse_id: int, ground: Optional[str]) -> float:
         overall = self.get_rating(horse_id)
         surface = self.get_surface_rating(horse_id, ground)
-        return ((1.0 - SURFACE_RATING_WEIGHT) * overall) + (SURFACE_RATING_WEIGHT * surface)
+        weight = self.parameters.surface_weight
+        return ((1.0 - weight) * overall) + (weight * surface)
 
     def set_rating(self, horse_id: int, rating: float) -> None:
         self.ratings[horse_id] = float(rating)
@@ -1363,13 +1389,54 @@ def safe_get_scalar(row: pd.Series, key: str):
     return val
 
 
+def race_result_fingerprint(group: pd.DataFrame) -> str:
+    """開催日の再登録を検知するため、結果本体を行順に依存せず照合する。"""
+    # 通過順などの後日補完で同じ確定結果を再学習しないよう、主要結果で同定する。
+    columns = ["horse_name", "rank", "time_str", "margin_str", "odds", "pop"]
+    numeric_columns = {"rank", "odds", "pop"}
+    records = []
+    for _, row in group.iterrows():
+        values = []
+        for col in columns:
+            value = safe_get_scalar(row, col)
+            if value is None or pd.isna(value):
+                values.append("")
+            elif col in numeric_columns and to_float_or_none(value) is not None:
+                # シートごとの整数・小数型の違いを同じ値として扱う。
+                values.append(format(to_float_or_none(value), ".12g"))
+            else:
+                values.append(str(value).strip())
+        records.append(values)
+    payload = json.dumps(sorted(records), ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def build_entry_record(starter: Dict, race_id: str, date: str, surface: Optional[str],
+                       condition_best_time: Optional[float] = None,
+                       gap_from_winner_sec: Optional[float] = None) -> Dict:
+    """未出走も同じ列構成で記録し、能力更新の有無を明示する。"""
+    record = {key: starter.get(key) for key in [
+        "horse_id", "frame", "number", "jockey", "weight", "odds", "pop", "rank",
+        "time_str", "time_sec", "margin_sec", "last3f", "passing",
+        "time_vs_master_sec", "time_master_score", "faster_than_master",
+        "market_prior_adjustment", "status", "rating_updated",
+    ]}
+    record.update({"race_id": race_id, "date": date, "surface": surface,
+                   "pre_rating": starter["pre_effective"],
+                   "pre_overall_rating": starter["pre_overall"],
+                   "pre_surface_rating": starter["pre_surface"],
+                   "condition_best_time": condition_best_time,
+                   "gap_from_winner_sec": gap_from_winner_sec})
+    return record
+
+
 # ========= 6) メイン処理：Excel → MemoryStore ================================
 
-def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
+def process_excel_to_memory(xlsx_path: Path, parameters: Optional[RatingParameters] = None) -> MemoryStore:
     assert Path(xlsx_path).exists(), f"入力Excelが見つかりません: {xlsx_path}"
 
     xls, temp_copy = open_excelfile_safely(Path(xlsx_path))
-    store = MemoryStore()
+    store = MemoryStore(parameters=parameters or RatingParameters())
     store.condition_time_master = load_place_baba_time_master(PLACE_BABA_TIME_PATH)
 
     date_sheets = [s for s in xls.sheet_names if re.match(r"^\d{8}$", str(s))]
@@ -1380,6 +1447,8 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
         print("[warn] YYYYMMDD形式の開催日シートが見つかりません（処理対象なし）")
 
     unknown_margins = set()
+    seen_races: Dict[str, Tuple[str, str]] = {}
+    duplicate_races = 0
 
     try:
         for sheet in date_sheets:
@@ -1394,9 +1463,26 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                 print(f"  ⚠ 必須カラム不足のためスキップ: {sheet}")
                 continue
 
+            # 馬名が空の補助行から架空のレース基本情報を作らない。
+            names = df["horse_name"].fillna("").astype(str).str.strip()
+            df = df.loc[~names.str.lower().isin(["", "nan"])].copy()
+            if df["race_id"].isna().any():
+                raise ValueError(f"馬名のある行のレースIDが欠損しています: {sheet}")
+            df["race_id"] = df["race_id"].astype(str).str.replace(r"\.0$", "", regex=True)
+
             for rid, g0 in df.groupby("race_id", dropna=False):
                 g = g0.copy()
                 date_str = str(sheet)
+                fingerprint = race_result_fingerprint(g)
+                if str(rid) in seen_races:
+                    first_date, first_fingerprint = seen_races[str(rid)]
+                    if fingerprint != first_fingerprint:
+                        raise ValueError(
+                            f"レースIDの衝突: {rid} / {first_date} と {date_str} の結果が異なります"
+                        )
+                    duplicate_races += 1
+                    continue
+                seen_races[str(rid)] = (date_str, fingerprint)
 
                 race_name = str(g["race_name"].iloc[0]) if "race_name" in g.columns else None
                 race_info = str(g["race_info"].iloc[0]) if "race_info" in g.columns else None
@@ -1435,11 +1521,14 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     trainer = None if trainer is None or str(trainer).lower() == "nan" else str(trainer)
                     hid = store.get_horse_id(str(name), trainer, date_str, race_class, ground)
 
-                    rank_val = safe_get_scalar(row, "rank")
+                    rank_raw = safe_get_scalar(row, "rank")
+                    rank_val = rank_raw
                     try:
                         rank_val = int(rank_val)
                     except Exception:
                         rank_val = None
+                    status = str(rank_raw).strip() if rank_val is None else "完走"
+                    not_started = status in ("取消", "除外")
 
                     time_str = safe_get_scalar(row, "time_str")
                     time_sec = parse_time_str(time_str)
@@ -1466,7 +1555,7 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     passing_raw = safe_get_scalar(row, "passing")
                     passing_positions = parse_passing_positions(passing_raw)
 
-                    market_prior_adjustment = apply_debut_market_prior(
+                    market_prior_adjustment = 0.0 if not_started else apply_debut_market_prior(
                         store=store,
                         horse_id=hid,
                         ground=ground,
@@ -1480,7 +1569,7 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     pre_surface = store.get_surface_rating(hid, ground)
                     pre_effective = store.get_combined_rating(hid, ground)
 
-                    starters.append({
+                    starter = {
                         "horse_id": hid,
                         "name": str(name),
                         "trainer": trainer,
@@ -1502,7 +1591,14 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                         "pre_surface": pre_surface,
                         "pre_effective": pre_effective,
                         "market_prior_adjustment": market_prior_adjustment,
-                    })
+                        "status": status,
+                        "rating_updated": rank_val is not None and rank_val > 0,
+                    }
+                    if not_started:
+                        # 取消・除外は記録だけ残し、頭数・相手評価・実出走数から除く。
+                        store.entries.append(build_entry_record(starter, str(rid), date_str, surface_key))
+                        continue
+                    starters.append(starter)
 
                 if not starters:
                     continue
@@ -1592,12 +1688,15 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     pre_top5,
                     pre_mean,
                     pre_p50,
+                    weights=store.parameters.level_weights,
                 )
                 result_time_level_adjustment = calc_result_time_level_adjustment(
                     race_best_vs_master_sec,
                     top5_time_vs_master_mean,
                     fast_runner_rate,
                 )
+                if result_time_level_adjustment is not None:
+                    result_time_level_adjustment *= store.parameters.level_time_scale
                 final_race_level_score = calc_final_race_level_score(
                     pre_race_level_score,
                     result_time_level_adjustment,
@@ -1678,12 +1777,18 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                         best_last3f=best_last3f,
                         median_last3f=median_last3f,
                         passing_positions=starter["passing_positions"],
+                        time_scale=store.parameters.performance_time_scale,
                     )
 
                     expected = expected_score(starter["pre_effective"], opp_strength)
                     n_starts = store.start_counts.get(hid, 0)
                     k = k_factor(race_class, n_starts, field_size, winner_margin_sec)
+                    k *= store.parameters.k_scale
                     raw_delta = k * (actual_score - expected)
+                    if not starter["rating_updated"]:
+                        # 中止・失格等は実出走として数え、能力の増減は保留する。
+                        rank_score = actual_score = None
+                        k = raw_delta = 0.0
 
                     pending_updates.append({
                         "starter": starter,
@@ -1700,21 +1805,22 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
 
                 # 第2段階：レース平均を引いて変動量をゼロサム化してから、全更新を確定する。
                 race_mean_delta = mean_or_default(
-                    [float(item["raw_delta"]) for item in pending_updates],
+                    [float(item["raw_delta"]) for item in pending_updates
+                     if item["starter"]["rating_updated"]],
                     0.0,
                 )
                 for pending in pending_updates:
                     starter = pending["starter"]
                     hid = starter["horse_id"]
                     raw_delta = float(pending["raw_delta"])
-                    adjusted_delta = raw_delta - race_mean_delta
+                    adjusted_delta = raw_delta - race_mean_delta if starter["rating_updated"] else 0.0
                     n_starts = int(pending["n_starts"])
 
                     post_overall = starter["pre_overall"] + (adjusted_delta * OVERALL_UPDATE_SHARE)
                     post_surface = starter["pre_surface"] + (adjusted_delta * SURFACE_UPDATE_SHARE)
                     if surface_key:
-                        post_effective = ((1.0 - SURFACE_RATING_WEIGHT) * post_overall) + (
-                            SURFACE_RATING_WEIGHT * post_surface
+                        post_effective = ((1.0 - store.parameters.surface_weight) * post_overall) + (
+                            store.parameters.surface_weight * post_surface
                         )
                     else:
                         post_effective = post_overall
@@ -1726,6 +1832,9 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                     store.ratings_history.append({
                         "horse_id": hid,
                         "race_id": str(rid),
+                        "date": date_str,
+                        "status": starter["status"],
+                        "rating_updated": starter["rating_updated"],
                         "pre_rating": starter["pre_effective"],
                         "post_rating": post_effective,
                         "pre_overall_rating": starter["pre_overall"],
@@ -1756,37 +1865,16 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
                         "ts": datetime.datetime.now().isoformat(timespec="seconds"),
                     })
 
-                    store.entries.append({
-                        "race_id": str(rid),
-                        "horse_id": hid,
-                        "frame": starter["frame"],
-                        "number": starter["number"],
-                        "jockey": starter["jockey"],
-                        "weight": starter["weight"],
-                        "odds": starter["odds"],
-                        "pop": starter["pop"],
-                        "rank": starter["rank"],
-                        "time_str": starter["time_str"],
-                        "time_sec": starter["time_sec"],
-                        "margin_sec": starter["margin_sec"],
-                        "gap_from_winner_sec": gap_map.get(hid),
-                        "last3f": starter["last3f"],
-                        "passing": starter["passing"],
-                        "pre_rating": starter["pre_effective"],
-                        "pre_overall_rating": starter["pre_overall"],
-                        "pre_surface_rating": starter["pre_surface"],
-                        "condition_best_time": cond_best_time,
-                        "time_vs_master_sec": starter["time_vs_master_sec"],
-                        "time_master_score": starter["time_master_score"],
-                        "faster_than_master": starter["faster_than_master"],
-                        "market_prior_adjustment": starter["market_prior_adjustment"],
-                        "surface": surface_key,
-                    })
+                    store.entries.append(build_entry_record(
+                        starter, str(rid), date_str, surface_key, cond_best_time, gap_map.get(hid)
+                    ))
 
                 if best_time is not None:
                     store.condition_best_times.setdefault(condition_key, []).append(best_time)
                     if cond_best_time is not None:
-                        store.condition_day_bias.setdefault(day_bias_key, []).append(best_time - cond_best_time)
+                        # 補正済み基準ではなく、生の基準から当日の残差を測る。
+                        raw_condition_time = cond_best_time - day_bias_sec
+                        store.condition_day_bias.setdefault(day_bias_key, []).append(best_time - raw_condition_time)
                 if median_time is not None:
                     store.condition_median_times.setdefault(condition_key, []).append(median_time)
     finally:
@@ -1806,6 +1894,7 @@ def process_excel_to_memory(xlsx_path: Path) -> MemoryStore:
         if len(unknown_margins) > 50:
             print("       ...（50件のみ表示）")
 
+    print(f"[verify] 同一結果の重複スキップ: {duplicate_races}レース")
     print("[done] 集計完了（メモリ上）")
     return store
 
@@ -2168,6 +2257,7 @@ def main():
     parser = argparse.ArgumentParser(description="racedata_results.xlsx → race_levels.xlsx 変換ツール")
     parser.add_argument("--excel", required=False, default=None, help="入力: racedata_results.xlsx のパス")
     parser.add_argument("--out", required=False, default=None, help="出力: race_levels.xlsx のパス")
+    parser.add_argument("--parameters", type=Path, default=None, help="時系列比較で選んだratingパラメータJSON")
     args = parser.parse_args()
 
     base_dir = BASE_DIR
@@ -2187,7 +2277,11 @@ def main():
     print(f"? 入力: {src}")
     print(f"? 出力: {dst}")
 
-    store = process_excel_to_memory(src)
+    parameters = None
+    if args.parameters is not None:
+        # 指定された比較設定だけを読み込み、既定値を暗黙に変更しない。
+        parameters = RatingParameters(**json.loads(args.parameters.read_text(encoding="utf-8")))
+    store = process_excel_to_memory(src, parameters)
     write_store_to_excel(store, dst, src)
 
 

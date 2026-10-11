@@ -18,5 +18,7 @@ if (-not (Test-Path $Schedule)) { throw "Missing schedule: $Schedule" }
 $argsList = @("-m", "keiba_v2.cli", "t5-runtime", "--input", $Input, "--schedule", $Schedule, "--date", $RaceDate)
 if ($ShowBrowser) { $argsList += "--show-browser" }
 & $Python @argsList
+# T-5失敗を正常完了として親ラッパーへ返さないよう、終了コードを検査します。
+if ($LASTEXITCODE -ne 0) { throw "T-5 SHADOW runtime failed for $RaceDate" }
 
 Write-Host "T-5 SHADOW runtime completed for $RaceDate"

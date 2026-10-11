@@ -63,4 +63,5 @@ shadow:
 tracking:
   enabled: true
   experiment_name: keiba_platform_v2
-  tracking_uri: data/runtime/mlruns
+  # MLflowの記録は、ファイル方式からSQLite方式へ切り替える。
+  tracking_uri: sqlite:///data/runtime/mlflow.db
