@@ -16,7 +16,7 @@ SHEET_NAME = "条件付き再ランキング"
 
 
 def _rid(value: object) -> str:
-    s = re.sub(r"\\D", "", str(value))
+    s = re.sub(r"\D", "", str(value))
     return s.zfill(12) if s else ""
 
 
@@ -35,8 +35,10 @@ def build_conditional_ranking(target: pd.DataFrame, now: pd.DataFrame):
     """Return horse-level ranks and race audit. Never uses actual results."""
     t, n = _key(target), _key(now)
     score_col = "score_raw" if "score_raw" in t.columns else "score"
-    form_col = "recent_form_score"
-    required = [score_col, form_col, "rank", "馬番", "rid_str"]
+    form_col = next((name for name in ("recent_form_score", "近走状態スコア") if name in t.columns), None)
+    required = [score_col, "rank", "馬番", "rid_str"]
+    if form_col is None:
+        raise ValueError("近走状態スコア（recent_form_score）がTARGETにありません")
     missing = [c for c in required if c not in t.columns]
     if missing:
         raise ValueError(f"再ランキングに必要な列がありません: {missing}")
