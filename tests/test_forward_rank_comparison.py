@@ -32,10 +32,16 @@ def test_pre_post_and_immutable(tmp_path):
     m.settle_post(pre, post, actual=actual(), finalized_at="2099-01-01T20:00:00+09:00")
     with pytest.raises(FileExistsError):
         m.settle_post(pre, post, actual=actual(), finalized_at="2099-01-01T20:00:00+09:00")
-    assert m.summarize_post([post], generation="cr_fwd_20990101") == {
-        "races": 1, "changed": 1, "production_wins": 0,
-        "conditional_wins": 1, "production_places": 1, "conditional_places": 1,
-    }
+    summary = m.summarize_post([post], generation="cr_fwd_20990101")
+    assert summary["races"] == 1
+    assert summary["changed"] == 1
+    assert summary["production_wins"] == 0
+    assert summary["conditional_wins"] == 1
+    assert summary["production_places"] == summary["conditional_places"] == 1
+    assert summary["production_win_roi"] == 0.0
+    assert summary["conditional_win_roi"] == 5.0
+    assert summary["production_place_roi"] == 1.2
+    assert summary["conditional_place_roi"] == 1.8
 
 
 def test_missing_and_duplicate_rank_fail(tmp_path):
