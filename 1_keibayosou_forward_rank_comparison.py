@@ -96,7 +96,10 @@ def summarize_post(paths: list[str | Path], *, generation: str) -> dict:
     """Paired comparison; strict scope/generation and unique race IDs."""
     seen = set()
     total = {"races": 0, "changed": 0, "production_wins": 0,
-             "conditional_wins": 0, "production_places": 0, "conditional_places": 0}
+             "conditional_wins": 0, "production_places": 0, "conditional_places": 0,
+             "production_win_return_yen": 0, "conditional_win_return_yen": 0,
+             "production_place_return_yen": 0, "conditional_place_return_yen": 0,
+             "payout_evaluated_races": 0}
     for path in paths:
         item = json.loads(Path(path).read_text(encoding="utf-8"))
         if item.get("scope") != "production_forward" or item.get("generation") != generation or item.get("status") != "post_result":
@@ -118,4 +121,15 @@ def summarize_post(paths: list[str | Path], *, generation: str) -> dict:
             total["conditional_wins"] += int(cf == 1)
             total["production_places"] += int(pf is not None and pf <= 3)
             total["conditional_places"] += int(cf is not None and cf <= 3)
+            payout_fields = ("win_payout", "place_payout")
+            if all(field in actual[str(production["horse_number"])] and field in actual[str(conditional["horse_number"])] for field in payout_fields):
+                total["payout_evaluated_races"] += 1
+                for target, horse in (("production", production), ("conditional", conditional)):
+                    actual_row = actual[str(horse["horse_number"])]
+                    total[f"{target}_win_return_yen"] += int(actual_row["win_payout"] or 0)
+                    total[f"{target}_place_return_yen"] += int(actual_row["place_payout"] or 0)
+    n = total["payout_evaluated_races"]
+    for kind in ("win", "place"):
+        for label in ("production", "conditional"):
+            total[f"{label}_{kind}_roi"] = (total[f"{label}_{kind}_return_yen"] / (n * 100)) if n else None
     return total
