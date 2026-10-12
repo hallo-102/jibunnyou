@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import pandas as pd
+from openpyxl import load_workbook
 
 COEFFICIENT = 0.30
 MAX_SCORE_GAP = 4.0
@@ -110,24 +111,72 @@ def build_conditional_ranking(target: pd.DataFrame, now: pd.DataFrame):
 
 
 def append_conditional_ranking_sheet(excel_path: str) -> int:
-    """Append comparison ranks to TARGET/NOW and a per-race audit sheet."""
+    """Append comparison columns without rewriting existing workbook cells."""
     path = Path(excel_path)
     target = pd.read_excel(path, sheet_name="TARGET", engine="openpyxl")
     now = pd.read_excel(path, sheet_name="今走レース情報", engine="openpyxl")
     rank, audit = build_conditional_ranking(target, now)
-    for name, source in (("TARGET", target), ("今走レース情報", now)):
-        original_cols = [c for c in ("条件付き順位", "条件付き順位変更", "条件付き変更理由") if c in source]
-        base = _key(source.drop(columns=original_cols))
-        updated = base.merge(rank, on=["rid_str", "馬番"], how="left", validate="one_to_one")
-        updated = updated.drop(columns=["rid_str"], errors="ignore") if "rid_str" not in source.columns else updated
-        if name == "TARGET":
-            target = updated
-        else:
-            now = updated
-    with pd.ExcelWriter(path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-        target.to_excel(writer, sheet_name="TARGET", index=False)
-        now.to_excel(writer, sheet_name="今走レース情報", index=False)
-        audit.to_excel(writer, sheet_name=SHEET_NAME, index=False)
+    rank_lookup = {
+        (str(row.rid_str), int(row.馬番)): (
+            int(row.条件付き順位),
+            bool(row.条件付き順位変更),
+            str(row.条件付き変更理由),
+        )
+        for row in rank.itertuples(index=False)
+    }
+
+    wb = load_workbook(path)
+    comparison_headers = ("条件付き順位", "条件付き順位変更", "条件付き変更理由")
+    for sheet_name in ("TARGET", "今走レース情報"):
+        ws = wb[sheet_name]
+        headers = {cell.value: cell.column for cell in ws[1] if isinstance(cell.value, str)}
+        if "馬番" not in headers:
+            raise ValueError(f"{sheet_name}: 馬番列がありません")
+        rid_column = headers.get("rid_str", headers.get("レースID"))
+        if rid_column is None:
+            raise ValueError(f"{sheet_name}: レースID列がありません")
+        number_column = headers["馬番"]
+        write_columns = {}
+        for header in comparison_headers:
+            if header in headers:
+                write_columns[header] = headers[header]
+            else:
+                col = ws.max_column + 1
+                ws.cell(1, col, header)
+                write_columns[header] = col
+        unmatched = []
+        for row_idx in range(2, ws.max_row + 1):
+            rid = _rid(ws.cell(row_idx, rid_column).value)
+            horse = ws.cell(row_idx, number_column).value
+            if not rid or horse is None:
+                continue
+            try:
+                key = (rid, int(horse))
+            except (TypeError, ValueError):
+                unmatched.append(row_idx)
+                continue
+            values = rank_lookup.get(key)
+            if values is None:
+                unmatched.append(row_idx)
+                continue
+            for header, value in zip(comparison_headers, values):
+                ws.cell(row_idx, write_columns[header], value)
+        if unmatched:
+            raise ValueError(
+                f"{sheet_name}: 条件付き順位を照合できない行が{len(unmatched)}件あります。"
+                f"最初の10件={unmatched[:10]}。保存を中止します"
+            )
+
+    if SHEET_NAME in wb:
+        del wb[SHEET_NAME]
+    audit_ws = wb.create_sheet(SHEET_NAME)
+    audit_ws.append(list(audit.columns))
+    for row in audit.itertuples(index=False, name=None):
+        audit_ws.append([
+            None if pd.isna(value) else (value.item() if hasattr(value, "item") else value)
+            for value in row
+        ])
+    wb.save(path)
     count = int(audit["変更"].sum()) if not audit.empty else 0
-    print(f"[INFO] 条件付き再ランキング: {count}/{len(audit)}レースで1位変更（本番rank保持）")
+    print(f"[INFO] 条件付き再ランキング: {count}/{len(audit)}レースで1位変更（既存セル保持）")
     return count
