@@ -60,3 +60,46 @@ def test_baseline_preserves_production_effective_identity():
     assert sum(map(len, effective.values())) == 3131
     # Computed-but-unweighted features retain an implicit zero rather than altering model SHA.
     assert all(group.get('field_size_adjusted_finish', 0.0) == 0.0 for group in effective.values())
+
+def test_offline_generation_cannot_start_without_explicit_scope(monkeypatch):
+    monkeypatch.delenv('KEIBA_FORWARD_SCOPE')
+    with pytest.raises(ModelConfigError, match='本番転用は禁止'):
+        shadow.load_forward_validation_policy()
+
+def test_offline_output_has_a_separate_generation_directory():
+    runtime = shadow.load_shadow_runtime()
+    assert runtime.output_dir == ROOT / 'data/output/shadow_comparison/offline/conditional_rerank_integration_20261013'
+
+def test_offline_data_cannot_enter_forward_aggregate():
+    report = importlib.import_module('tools.report_forward_validation')
+    with pytest.raises(ModelConfigError, match='本番前向き集計へ使用できません'):
+        report.main()
+
+@pytest.mark.parametrize('status,approval', [('pending_approval', True), ('active', True)])
+def test_production_generation_requires_approval(monkeypatch, status, approval):
+    raw = json.loads((ROOT / 'config/forward_validation.json').read_text(encoding='utf-8'))
+    generation = deepcopy(raw['generations'][raw['active_generation']])
+    generation.update(purpose='production_forward', status=status, production_activation_requires_approval=approval)
+    raw['generations']['future_forward_test'] = generation
+    raw['active_generation'] = 'future_forward_test'
+    monkeypatch.setattr(shadow, '_read_json_object', lambda *args: raw)
+    with pytest.raises(ModelConfigError, match='有効化は承認待ち'):
+        shadow.load_forward_validation_policy()
+
+def test_written_replay_records_identify_scope_and_generation(tmp_path):
+    from dataclasses import replace
+    runtime = replace(shadow.load_shadow_runtime(), output_dir=tmp_path)
+    path = shadow.write_shadow_pre_payload(runtime, {'result_status': 'pre_result', 'comparison_date': '20261012'})
+    record = json.loads(path.read_text(encoding='utf-8'))
+    assert record['generation'] == 'conditional_rerank_integration_20261013'
+    assert record['validation_scope'] == 'offline_integration_replay'
+
+@pytest.mark.parametrize('scope,generation', [('offline_integration_replay', 'future'), ('production_forward', 'wrong_generation')])
+def test_forward_aggregate_rejects_foreign_records(monkeypatch, tmp_path, scope, generation):
+    from types import SimpleNamespace
+    report = importlib.import_module('tools.report_forward_validation')
+    monkeypatch.setattr(report, 'load_forward_validation_policy', lambda: {'purpose': 'production_forward', 'active_generation': 'future'})
+    monkeypatch.setattr(report, 'load_shadow_runtime', lambda: SimpleNamespace(output_dir=tmp_path))
+    monkeypatch.setattr(report, '_load_latest_post_per_day', lambda _: [{'generation': generation, 'validation_scope': scope}])
+    with pytest.raises(ModelConfigError, match='異なる世代・scope'):
+        report.main()

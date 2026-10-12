@@ -21,7 +21,7 @@ def prepare():
     RUN.mkdir(parents=True)
     for source in ROOT.glob('*.py'):
         shutil.copy2(source, RUN / source.name)
-    for name in ('config', 'yosou_py', 'tokutyouryou_keisann', 'lap'):
+    for name in ('config', 'yosou_py', 'tokutyouryou_keisann', 'lap', 'tools'):
         shutil.copytree(ROOT / name, RUN / name, ignore=shutil.ignore_patterns('__pycache__'))
     sources = [PROD / 'data/input/馬の競走成績_20261012.xlsx',
                PROD / 'data/master/race_levels.xlsx',
@@ -64,6 +64,8 @@ if __name__ == '__main__':
     sys.dont_write_bytecode = True
     os.chdir(RUN)
     os.environ['TEMP'] = os.environ['TMP'] = str(RUN)
+    # このハーネスは隔離した過去日の再生専用。本番プロセスでは指定しない。
+    os.environ['KEIBA_FORWARD_SCOPE'] = 'offline_replay'
     sys.addaudithook(guard)
     runner = importlib.import_module('1_keibayosou_best_import_roi_runner')
     # Read exactly the copied history, excluding newly generated predictions.

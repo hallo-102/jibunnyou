@@ -1,0 +1,28 @@
+name: Conditional rerank regression
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feature/conditional-rerank-non-maiden-20261012]
+permissions:
+  contents: read
+jobs:
+  portable-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install portable test dependencies
+        # 実Excel・DB・Windows UI依存はアップロードせず、人工fixtureで回帰する。
+        run: python -m pip install pandas numpy openpyxl xlsxwriter pytest
+      - name: Run portable regressions
+        # 既存の保存済み成果物が必要な7件だけを除外。ローカルでは全件実施する。
+        run: >-
+          python -m pytest tests -q --junitxml=pytest-portable.xml
+          --ignore=tests/test_real_file_ranking.py
+          --deselect=tests/test_compare_best_weights_20260817.py::test_comparison_uses_identical_race_and_horse_universe
+          --deselect=tests/test_compare_best_weights_20260817.py::test_test_ratio_counts_reproduce_requested_ratios
+          --deselect=tests/test_compare_best_weights_20260817.py::test_comparison_audit_rejects_prediction_leakage

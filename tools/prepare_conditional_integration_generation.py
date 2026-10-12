@@ -23,7 +23,8 @@ def main():
     old = forward['generations'][forward['active_generation']]
     # Only the approved production promotion and PR runner diff may differ from history.
     allowed = {'config/production_model.json': '2dee82c1a45fca1b253c2fc2a1713d8b4752c3a9',
-               '1_keibayosou_best_import_roi_runner.py': 'ff2fb72eeb16d482505882bc0f23d563ae9179fb'}
+               '1_keibayosou_best_import_roi_runner.py': 'ff2fb72eeb16d482505882bc0f23d563ae9179fb',
+               'shadow_validation.py': '76e42b7d2c695ccccd5dcc98670e1eaf1f09f189'}
     frozen = {}
     for relative, expected in old['frozen_files'].items():
         actual = blob(ROOT / relative)
@@ -44,6 +45,11 @@ def main():
     shadow_path.write_text(json.dumps(shadow, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
     frozen['config/shadow_model.json'] = blob(shadow_path)
     frozen['1_keibayosou_conditional_rerank.py'] = rerank_blob
+    # 集計分離のレビュー済み版のみを追加監査対象にする。
+    report_blob = blob(ROOT / 'tools/report_forward_validation.py')
+    if report_blob != '7bbc414127975aef6a21e34c681b61aa86c08fc0':
+        raise ValueError('未レビューの前向き集計コードです')
+    frozen['tools/report_forward_validation.py'] = report_blob
     candidate = deepcopy(old)
     candidate.update({'status': 'validation_only_pending_activation_approval',
                       'purpose': 'offline_integration_replay',
@@ -51,6 +57,7 @@ def main():
                       'created_at': '2026-10-13', 'previous_generation': forward['active_generation'],
                       'production_activation_requires_approval': True,
                       'do_not_aggregate_with_previous_generations': True,
+                      'output_dir': f'data/output/shadow_comparison/offline/{GENERATION}',
                       'frozen_files': frozen,
                       'provenance': {'production_promotion_commit': '265e0a4fc021f10007c25cc09b9861e3ff8aefda',
                                      'lf_policy_commit': 'd66c425e0163174ca6be377931bb87c498345b18',
