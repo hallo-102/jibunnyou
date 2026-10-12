@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "active_generation": "field_size_adjusted_finish_20260905",
+  "active_generation": "conditional_rerank_integration_20261013",
   "generations": {
     "legacy_20260822": {
       "status": "archived",
@@ -118,6 +118,81 @@
         "1_keibayosou_pipeline.py": "ac4bc3142236768813f9c1514ea6290b3381298d",
         "1_keibayosou_best_import_roi_runner.py": "797202af305006e0c6724deeea9333cc472c9111",
         "tokutyouryou_keisann/config.py": "3c4c433776211fb487eb96aa48f33fe3b96e2155"
+      }
+    },
+    "conditional_rerank_integration_20261013": {
+      "status": "validation_only_pending_activation_approval",
+      "start_date": "20261012",
+      "production_model_config": "config/production_model.json",
+      "shadow_model_config": "config/shadow_model.json",
+      "introduced_changes": [
+        "field_size_adjusted_finishを特徴量定義へ追加",
+        "過去走着順を過去レース頭数で0-1正規化して算出",
+        "本番20260730重みは変更せず、新特徴量の本番影響は0のまま計測"
+      ],
+      "frozen_items": [
+        "20260730重み",
+        "20260817重み",
+        "特徴量定義",
+        "補正処理",
+        "順位計算",
+        "ランク判定",
+        "買い目条件",
+        "購入金額"
+      ],
+      "prediction_interim_gate": {
+        "minimum_racing_days": 8,
+        "minimum_races": 300,
+        "require_both": true
+      },
+      "profit_final_gate": {
+        "minimum_current_trifecta_races": 50,
+        "validation_end_date": "20261031",
+        "insufficient_sample_action": "do_not_promote_by_roi_only"
+      },
+      "primary_metrics": [
+        "current_trifecta_profit",
+        "current_trifecta_roi",
+        "current_trifecta_max_drawdown",
+        "top3_complete_rate"
+      ],
+      "safety_metrics": [
+        "rank1_place_rate",
+        "rank1_average_finish",
+        "top5_point_rate",
+        "daily_monthly_consistency"
+      ],
+      "selection_policy": "一部条件だけの改善では総合採用しない",
+      "optimizer_holdout_start_date": "20261012",
+      "hash_algorithm": "git_blob_sha1",
+      "frozen_files": {
+        "yosou_py/best_feature_weights_20260730.py": "c0f4fdcfe76a045dadeab79c5d5b07c84259f311",
+        "yosou_py/best_feature_weights_20260817.py": "6c1ed66a93b3ed50be695dc21292f136f9a7d212",
+        "config/production_model.json": "2dee82c1a45fca1b253c2fc2a1713d8b4752c3a9",
+        "config/shadow_model.json": "82926baed52e38ae911dd8f0ae1a22b360b56a70",
+        "model_registry.py": "cdef323bf856ace1c188da3b92e731a869172dc0",
+        "shadow_validation.py": "ae23334286079ba4ede3765e689c8200ea3d90b1",
+        "1_keibayosou_config.py": "3ed7cdbbffd0970b5c9a5bfc72511efeebd78888",
+        "1_keibayosou_features.py": "cae10aa7c2bb3c5a5cad2d7e8d3ae7be28d123f5",
+        "1_keibayosou_penalties.py": "f56530a24db26b38a3fad6228f0e989d21e1cac5",
+        "1_keibayosou_ranking.py": "3eca8d7cdc803ee9e45f1383751e11c62a6ae42e",
+        "1_keibayosou_pipeline.py": "ac4bc3142236768813f9c1514ea6290b3381298d",
+        "1_keibayosou_best_import_roi_runner.py": "ff2fb72eeb16d482505882bc0f23d563ae9179fb",
+        "tokutyouryou_keisann/config.py": "3c4c433776211fb487eb96aa48f33fe3b96e2155",
+        "1_keibayosou_conditional_rerank.py": "1f0053b476f49b01a14bd39c5c15e68a9e89d64e"
+      },
+      "purpose": "offline_integration_replay",
+      "created_at": "2026-10-13",
+      "previous_generation": "field_size_adjusted_finish_20260905",
+      "production_activation_requires_approval": true,
+      "do_not_aggregate_with_previous_generations": true,
+      "provenance": {
+        "production_promotion_commit": "265e0a4fc021f10007c25cc09b9861e3ff8aefda",
+        "lf_policy_commit": "d66c425e0163174ca6be377931bb87c498345b18",
+        "pr_head_commit": "d7d779bb28d1f4deefbcd0854c4589192428aa82",
+        "race_id_fix_commit": "290321b",
+        "shadow_sha_change": "CRLF to LF only; identical effective weights",
+        "comparison_role": "same-model identity/integration check, not model efficacy"
       }
     }
   }
