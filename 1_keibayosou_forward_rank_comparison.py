@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -43,7 +42,11 @@ def record_pre(path: str | Path, *, race_date: str, generation: str,
         raise ValueError("記録時刻にはタイムゾーンが必要")
     if not races or len({str(r["race_id"]) for r in races}) != len(races):
         raise ValueError("レース重複・欠損")
+    if timestamp.date().strftime("%Y%m%d") > race_date:
+        raise ValueError("結果日より後の予想は前向き記録にできません")
     for race in races:
+        if not str(race["race_id"]).startswith(race_date[:4]):
+            raise ValueError("レースID年と開催年が一致しません")
         _validate_horses(race["horses"])
         if "finish" in str(race) or "payout" in str(race):
             raise ValueError("preに結果・払戻情報は含められません")
@@ -63,6 +66,10 @@ def settle_post(pre_path: str | Path, post_path: str | Path, *,
     pre_path = Path(pre_path)
     pre_bytes = pre_path.read_bytes()
     pre = json.loads(pre_bytes)
+    pre_time = datetime.fromisoformat(pre["recorded_at"])
+    post_time = datetime.fromisoformat(finalized_at)
+    if post_time.tzinfo is None or post_time <= pre_time:
+        raise ValueError("結果照合日時が予想より後ではありません")
     if pre.get("scope") != "production_forward" or pre.get("status") != "pre_result":
         raise ValueError("前向きpre以外は精算できません")
     if set(actual) != {str(r["race_id"]) for r in pre["races"]}:
