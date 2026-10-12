@@ -17,7 +17,11 @@ SHEET_NAME = "条件付き再ランキング"
 
 
 def _rid(value: object) -> str:
-    s = re.sub(r"\D", "", str(value))
+    # Excel由来の整数IDがfloat化した場合、末尾の小数部をIDへ混入させない。
+    text = str(value).strip()
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
+    s = re.sub(r"\D", "", text)
     return s.zfill(12) if s else ""
 
 
