@@ -161,8 +161,15 @@ def _metrics_for_model(races: list[dict[str, Any]], prefix: str) -> dict[str, An
 def main() -> None:
     """日次post JSONを集約し、昇格せず判定可否状態と差を出力する。"""
     policy = load_forward_validation_policy()
+    # 過去日の再生結果から前向き精度・ROIの認定を作らない。
+    if policy.get("purpose") == "offline_integration_replay":
+        raise ModelConfigError("offline再生記録は本番前向き集計へ使用できません")
     runtime = load_shadow_runtime()
     daily_payloads = _load_latest_post_per_day(runtime.output_dir)
+    # 新しい本番世代では、異なる世代や再生記録の集計を明示的に拒否する。
+    if policy.get("purpose") == "production_forward":
+        if any(p.get("generation") != policy["active_generation"] or p.get("validation_scope") != "production_forward" for p in daily_payloads):
+            raise ModelConfigError("本番前向き集計に異なる世代・scopeの記録があります")
     races = [
         dict(race)
         for payload in daily_payloads
