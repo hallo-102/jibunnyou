@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keiba-platform-v2"
+version = "0.3.0"
+description = "Standalone horse-racing prediction and odds analysis platform"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "openpyxl>=3.1",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+ml = [
+  "lightgbm>=4.5",
+  "scikit-learn>=1.5",
+  "mlflow>=3.0",
+  "prefect>=3.0",
+]
+collection = [
+  "requests>=2.32",
+  "beautifulsoup4>=4.12",
+  "selenium>=4.35",
+  "playwright>=1.55",
+]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+]
+
+[project.scripts]
+keiba-v2 = "keiba_v2.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
