@@ -463,7 +463,7 @@ def test_forward_validation_policy_and_frozen_file_hashes_are_valid() -> None:
     policy = load_forward_validation_policy()
 
     # 旧モデルの開始日を固定せず、今回の独立した再生検証世代を確認する。
-    assert policy["active_generation"] == "conditional_rerank_integration_20261013"
+    assert policy["active_generation"] == "cr_offline_20261013"
     assert policy["start_date"] == "20261012"
     assert policy["purpose"] == "offline_integration_replay"
     assert policy["prediction_interim_gate"]["minimum_racing_days"] == 8

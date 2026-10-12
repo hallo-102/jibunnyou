@@ -5,7 +5,7 @@ import hashlib
 import json
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATION = 'conditional_rerank_integration_20261013'
+GENERATION = 'cr_offline_20261013'
 LF_SHA = 'bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d'
 CRLF_SHA = '83e6126fd01af24ebe553039946dd603c3e6e326b8f6bee0e0a73a7ffd32dcbb'
 
