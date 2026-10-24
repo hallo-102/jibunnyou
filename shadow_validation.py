@@ -108,9 +108,11 @@ def load_shadow_runtime() -> ShadowRuntime:
     return ShadowRuntime(spec=spec, weights_map=weights_map, output_dir=output_dir)
 
 
-def _git_blob_sha1(path: Path) -> str:
-    """Gitがファイル(blob)に使うSHA-1を作る。GitHub Contents APIのshaと一致する。"""
+def _git_blob_sha1(path: Path, *, normalize_crlf: bool = False) -> str:
+    """Git blob SHA-1を計算する。必要な場合だけWindowsのCRLFをLFへ正規化する。"""
     data = path.read_bytes()
+    if normalize_crlf:
+        data = data.replace(b"\r\n", b"\n")
     header = f"blob {len(data)}\0".encode("utf-8")
     return hashlib.sha1(header + data).hexdigest()
 
@@ -212,6 +214,13 @@ def load_forward_validation_policy() -> dict[str, Any]:
 
         if hash_algorithm == "git_blob_sha1":
             actual_sha = _git_blob_sha1(resolved)
+            # GitのtextファイルはWindowsへのcheckout時にLF→CRLFへ変換されうる。
+            # 固定SHAに完全一致する場合に限って改行正規化後の値も許容する。
+            # 内容の変更や予期しないSHAは従来どおり拒否する。
+            if actual_sha != expected_sha and _git_blob_sha1(
+                resolved, normalize_crlf=True
+            ) == expected_sha:
+                actual_sha = expected_sha
         else:
             actual_sha = sha256_file(resolved)
         if actual_sha != expected_sha:
