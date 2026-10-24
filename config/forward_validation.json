@@ -129,7 +129,8 @@
       "introduced_changes": [
         "2026-10-24時点の20260817本番モデル設定を新しい前向き検証世代として固定",
         "本番モデル・重み・順位・買い目の実装は変更しない",
-        "旧世代は履歴保持し、この世代の検証集計に旧世代の結果を混在させない"
+        "旧世代は履歴保持し、この世代の検証集計に旧世代の結果を混在させない",
+        "WindowsのCRLFチェックアウト時に固定Git blob SHAと一致する場合のみLF正規化を許容"
       ],
       "frozen_items": [
         "20260730重み",
@@ -172,7 +173,7 @@
         "config/production_model.json": "2dee82c1a45fca1b253c2fc2a1713d8b4752c3a9",
         "config/shadow_model.json": "4e27b72c61382d5d77d361cd9baa0101d8f33b72",
         "model_registry.py": "cdef323bf856ace1c188da3b92e731a869172dc0",
-        "shadow_validation.py": "ae23334286079ba4ede3765e689c8200ea3d90b1",
+        "shadow_validation.py": "60bad7bc864bd1ee389a7cd88f60fc64eed1902e",
         "1_keibayosou_config.py": "3ed7cdbbffd0970b5c9a5bfc72511efeebd78888",
         "1_keibayosou_features.py": "cae10aa7c2bb3c5a5cad2d7e8d3ae7be28d123f5",
         "1_keibayosou_penalties.py": "f56530a24db26b38a3fad6228f0e989d21e1cac5",
