@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "active_generation": "field_size_adjusted_finish_20260905",
+  "active_generation": "production_20260817_20261024",
   "generations": {
     "legacy_20260822": {
       "status": "archived",
@@ -60,7 +60,7 @@
       }
     },
     "field_size_adjusted_finish_20260905": {
-      "status": "active",
+      "status": "archived",
       "start_date": "20260905",
       "production_model_config": "config/production_model.json",
       "shadow_model_config": "config/shadow_model.json",
@@ -108,6 +108,68 @@
         "yosou_py/best_feature_weights_20260730.py": "c0f4fdcfe76a045dadeab79c5d5b07c84259f311",
         "yosou_py/best_feature_weights_20260817.py": "6c1ed66a93b3ed50be695dc21292f136f9a7d212",
         "config/production_model.json": "f20d595c630be04a6306ae71cef1465f3f127c62",
+        "config/shadow_model.json": "4e27b72c61382d5d77d361cd9baa0101d8f33b72",
+        "model_registry.py": "cdef323bf856ace1c188da3b92e731a869172dc0",
+        "shadow_validation.py": "ae23334286079ba4ede3765e689c8200ea3d90b1",
+        "1_keibayosou_config.py": "3ed7cdbbffd0970b5c9a5bfc72511efeebd78888",
+        "1_keibayosou_features.py": "cae10aa7c2bb3c5a5cad2d7e8d3ae7be28d123f5",
+        "1_keibayosou_penalties.py": "f56530a24db26b38a3fad6228f0e989d21e1cac5",
+        "1_keibayosou_ranking.py": "3eca8d7cdc803ee9e45f1383751e11c62a6ae42e",
+        "1_keibayosou_pipeline.py": "ac4bc3142236768813f9c1514ea6290b3381298d",
+        "1_keibayosou_best_import_roi_runner.py": "797202af305006e0c6724deeea9333cc472c9111",
+        "tokutyouryou_keisann/config.py": "3c4c433776211fb487eb96aa48f33fe3b96e2155"
+      },
+      "closed_before": "20261024"
+    },
+    "production_20260817_20261024": {
+      "status": "active",
+      "start_date": "20261024",
+      "production_model_config": "config/production_model.json",
+      "shadow_model_config": "config/shadow_model.json",
+      "introduced_changes": [
+        "2026-10-24時点の20260817本番モデル設定を新しい前向き検証世代として固定",
+        "本番モデル・重み・順位・買い目の実装は変更しない",
+        "旧世代は履歴保持し、この世代の検証集計に旧世代の結果を混在させない"
+      ],
+      "frozen_items": [
+        "20260730重み",
+        "20260817重み",
+        "特徴量定義",
+        "補正処理",
+        "順位計算",
+        "ランク判定",
+        "買い目条件",
+        "購入金額"
+      ],
+      "prediction_interim_gate": {
+        "minimum_racing_days": 8,
+        "minimum_races": 300,
+        "require_both": true
+      },
+      "profit_final_gate": {
+        "minimum_current_trifecta_races": 50,
+        "validation_end_date": "20261031",
+        "insufficient_sample_action": "do_not_promote_by_roi_only"
+      },
+      "primary_metrics": [
+        "current_trifecta_profit",
+        "current_trifecta_roi",
+        "current_trifecta_max_drawdown",
+        "top3_complete_rate"
+      ],
+      "safety_metrics": [
+        "rank1_place_rate",
+        "rank1_average_finish",
+        "top5_point_rate",
+        "daily_monthly_consistency"
+      ],
+      "selection_policy": "一部条件だけの改善では総合採用しない",
+      "optimizer_holdout_start_date": "20261024",
+      "hash_algorithm": "git_blob_sha1",
+      "frozen_files": {
+        "yosou_py/best_feature_weights_20260730.py": "c0f4fdcfe76a045dadeab79c5d5b07c84259f311",
+        "yosou_py/best_feature_weights_20260817.py": "6c1ed66a93b3ed50be695dc21292f136f9a7d212",
+        "config/production_model.json": "2dee82c1a45fca1b253c2fc2a1713d8b4752c3a9",
         "config/shadow_model.json": "4e27b72c61382d5d77d361cd9baa0101d8f33b72",
         "model_registry.py": "cdef323bf856ace1c188da3b92e731a869172dc0",
         "shadow_validation.py": "ae23334286079ba4ede3765e689c8200ea3d90b1",
