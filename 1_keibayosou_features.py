@@ -1751,9 +1751,48 @@ def build_features_from_excel(
     feat["馬番"] = _normalize_umaban_series(merged["馬番"])
     feat["馬名"] = merged["馬名"].astype(str)
 
+    # 入力NOWに既存の特徴量列があっても、今回計算した値を採用する。
+    # merge時に既存列が優先名となるため、衝突時の計算結果は *_feat 列に入る。
+    # 計算できなかった値を、生成時点不明のNOW列から無条件に補完しない。
+    overridden_features = 0
+    changed_values = 0
+    missing_recomputed = 0
+    recomputed_suffix_cols = []
     for col in FEAT_COLS:
-        if col in merged.columns:
-            feat[col] = pd.to_numeric(merged[col], errors="coerce")
+        recalculated_col = f"{col}_feat" if f"{col}_feat" in merged.columns else col
+        if recalculated_col not in merged.columns:
+            feat[col] = np.nan
+            continue
+
+        recalculated = pd.to_numeric(merged[recalculated_col], errors="coerce")
+        if recalculated_col != col:
+            previous = pd.to_numeric(merged[col], errors="coerce")
+            both_present = previous.notna() & recalculated.notna()
+            differing = both_present & ~pd.Series(
+                np.isclose(
+                    previous.to_numpy(dtype=float),
+                    recalculated.to_numpy(dtype=float),
+                    rtol=1e-9,
+                    atol=1e-9,
+                    equal_nan=True,
+                ),
+                index=merged.index,
+            )
+            changed_values += int(differing.sum())
+            missing_recomputed += int((previous.notna() & recalculated.isna()).sum())
+            overridden_features += 1
+            merged[col] = recalculated
+            recomputed_suffix_cols.append(recalculated_col)
+        feat[col] = recalculated
+
+    if recomputed_suffix_cols:
+        merged = merged.drop(columns=recomputed_suffix_cols)
+    if overridden_features:
+        print(
+            "[INFO] NOW既存値より再計算特徴量を優先: "
+            f"重複特徴量={overridden_features} 差異セル={changed_values} "
+            f"旧値あり・再計算欠損={missing_recomputed}"
+        )
 
     feat = _ensure_cols(feat, FEAT_COLS)
     merged, feat = _exclude_obstacle_races_from_prediction(merged, feat)
