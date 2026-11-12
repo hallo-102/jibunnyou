@@ -362,9 +362,10 @@ def _build_context_match_mask(
     if now_class:
         mask &= class_s.fillna("").astype(str) == now_class
 
-    # 今走シートに想定ペースがある場合だけ一致条件に使う
-    if now_pace:
-        mask &= pace_s.fillna("").astype(str) == now_pace
+    # 過去走の英語表記と今走の日本語表記を共通コードに揃える。
+    normalized_now_pace = normalize_pace(now_pace)
+    if normalized_now_pace:
+        mask &= pace_s.fillna("").map(normalize_pace) == normalized_now_pace
 
     return mask
 
@@ -485,7 +486,7 @@ def _calc_contextual_last3f_features(
     surface_s = one.get("__surface__", pd.Series([""] * len(one), index=one.index)).fillna("").astype(str)
     dist_s = pd.to_numeric(one.get("__dist__", pd.Series([np.nan] * len(one), index=one.index)), errors="coerce")
     class_s = one.get("__class__", pd.Series([""] * len(one), index=one.index)).fillna("").astype(str)
-    pace_s = one.get("__pace__", pd.Series([""] * len(one), index=one.index)).fillna("").astype(str)
+    pace_s = one.get("__pace__", pd.Series([""] * len(one), index=one.index)).fillna("").map(normalize_pace)
     last3_s = pd.to_numeric(one.get("__last3f__", pd.Series([np.nan] * len(one), index=one.index)), errors="coerce")
     time_idx_s = pd.to_numeric(one.get("__time_idx__", pd.Series([np.nan] * len(one), index=one.index)), errors="coerce")
 
