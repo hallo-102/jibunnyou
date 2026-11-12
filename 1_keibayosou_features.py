@@ -1158,8 +1158,14 @@ def _compute_horse_features_from_race_sheets(
             distance_range_reliability = float(range_count / (range_count + 3.0))
 
             track_text = one["__track__"].fillna("").astype(str)
-            good_track_mask = track_text.eq("良") | track_text.str.contains("良", na=False) & ~track_text.str.contains("稍", na=False)
-            bad_track_mask = track_text.str.contains("稍|重|不良", regex=True, na=False)
+            # 「不良」は「良」を含むため、良馬場・道悪を排他的に分類する。
+            # 元データで「不」と略記された不良馬場も道悪に含める。
+            normalized_track = track_text.str.strip()
+            bad_track_mask = (
+                normalized_track.str.contains("稍|重|不良", regex=True, na=False)
+                | normalized_track.eq("不")
+            )
+            good_track_mask = normalized_track.str.contains("良", na=False) & ~bad_track_mask
             good_track_values = time_idx_s[good_track_mask].dropna()
             bad_track_values = time_idx_s[bad_track_mask].dropna()
             good_track_time_idx = float(good_track_values.mean()) if not good_track_values.empty else np.nan
@@ -1173,7 +1179,9 @@ def _compute_horse_features_from_race_sheets(
             )
             bad_track_reliability = float(bad_track_count / (bad_track_count + 3.0))
             current_track_text = str(r_now.get("馬場", r_now.get("馬場状態", "")) or "")
-            current_track_is_bad = float(bool(re.search("稍|重|不良", current_track_text)))
+            current_track_is_bad = float(
+                bool(re.search("稍|重|不良", current_track_text) or current_track_text.strip() == "不")
+            )
             if current_track_is_bad:
                 track_condition_fit = (
                     bad_track_time_idx + (track_condition_time_idx_diff if not np.isnan(track_condition_time_idx_diff) else 0.0)
