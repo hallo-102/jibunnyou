@@ -362,9 +362,10 @@ def _build_context_match_mask(
     if now_class:
         mask &= class_s.fillna("").astype(str) == now_class
 
-    # 今走シートに想定ペースがある場合だけ一致条件に使う
-    if now_pace:
-        mask &= pace_s.fillna("").astype(str) == now_pace
+    # 過去走の英語表記と今走の日本語表記を共通コードに揃える。
+    normalized_now_pace = normalize_pace(now_pace)
+    if normalized_now_pace:
+        mask &= pace_s.fillna("").map(normalize_pace) == normalized_now_pace
 
     return mask
 
@@ -485,7 +486,7 @@ def _calc_contextual_last3f_features(
     surface_s = one.get("__surface__", pd.Series([""] * len(one), index=one.index)).fillna("").astype(str)
     dist_s = pd.to_numeric(one.get("__dist__", pd.Series([np.nan] * len(one), index=one.index)), errors="coerce")
     class_s = one.get("__class__", pd.Series([""] * len(one), index=one.index)).fillna("").astype(str)
-    pace_s = one.get("__pace__", pd.Series([""] * len(one), index=one.index)).fillna("").astype(str)
+    pace_s = one.get("__pace__", pd.Series([""] * len(one), index=one.index)).fillna("").map(normalize_pace)
     last3_s = pd.to_numeric(one.get("__last3f__", pd.Series([np.nan] * len(one), index=one.index)), errors="coerce")
     time_idx_s = pd.to_numeric(one.get("__time_idx__", pd.Series([np.nan] * len(one), index=one.index)), errors="coerce")
 
@@ -1158,8 +1159,14 @@ def _compute_horse_features_from_race_sheets(
             distance_range_reliability = float(range_count / (range_count + 3.0))
 
             track_text = one["__track__"].fillna("").astype(str)
-            good_track_mask = track_text.eq("良") | track_text.str.contains("良", na=False) & ~track_text.str.contains("稍", na=False)
-            bad_track_mask = track_text.str.contains("稍|重|不良", regex=True, na=False)
+            # 「不良」は「良」を含むため、良馬場・道悪を排他的に分類する。
+            # 元データで「不」と略記された不良馬場も道悪に含める。
+            normalized_track = track_text.str.strip()
+            bad_track_mask = (
+                normalized_track.str.contains("稍|重|不良", regex=True, na=False)
+                | normalized_track.eq("不")
+            )
+            good_track_mask = normalized_track.str.contains("良", na=False) & ~bad_track_mask
             good_track_values = time_idx_s[good_track_mask].dropna()
             bad_track_values = time_idx_s[bad_track_mask].dropna()
             good_track_time_idx = float(good_track_values.mean()) if not good_track_values.empty else np.nan
@@ -1173,7 +1180,9 @@ def _compute_horse_features_from_race_sheets(
             )
             bad_track_reliability = float(bad_track_count / (bad_track_count + 3.0))
             current_track_text = str(r_now.get("馬場", r_now.get("馬場状態", "")) or "")
-            current_track_is_bad = float(bool(re.search("稍|重|不良", current_track_text)))
+            current_track_is_bad = float(
+                bool(re.search("稍|重|不良", current_track_text) or current_track_text.strip() == "不")
+            )
             if current_track_is_bad:
                 track_condition_fit = (
                     bad_track_time_idx + (track_condition_time_idx_diff if not np.isnan(track_condition_time_idx_diff) else 0.0)
