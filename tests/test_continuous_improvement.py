@@ -312,6 +312,42 @@ def test_master_pair_rolls_back_both_files_after_final_validation_failure(tmp_pa
     assert (master / "race_levels.xlsx").read_bytes() == b"old levels"
 
 
+def test_master_update_preserves_existing_access_metadata(tmp_path, monkeypatch):
+    import os
+    import shutil
+    import stat
+    from continuous_improvement.bootstrap import publish_pair
+    master = tmp_path / "data/master"
+    master.mkdir(parents=True)
+    sources = []
+    for name in ("racedata_results.xlsx", "race_levels.xlsx"):
+        target = master / name
+        target.write_bytes(b"old")
+        target.chmod(0o644)
+        if os.name == "posix" and os.getuid() == 0:
+            os.chown(target, 1004, 10)
+        source = tmp_path / name
+        source.write_bytes(b"new")
+        source.chmod(0o600)
+        sources.append(source)
+    calls = []
+    original = shutil.copystat
+    def spy(source, destination, **kwargs):
+        # 新しい内容の権限ではなく、置換前の本番マスタのメタデータを使うことを検査する。
+        calls.append((Path(source), Path(destination)))
+        return original(source, destination, **kwargs)
+    monkeypatch.setattr(shutil, "copystat", spy)
+    publish_pair(tmp_path, *sources, "20260809", validator=lambda *args: {"races": 1})
+    for source in sources:
+        target = master / source.name
+        assert target.read_bytes() == b"new"
+        assert (target, master / (source.name + ".bootstrap.tmp")) in calls
+        if os.name == "posix":
+            assert stat.S_IMODE(target.stat().st_mode) == 0o644
+            if os.getuid() == 0:
+                assert (target.stat().st_uid, target.stat().st_gid) == (1004, 10)
+
+
 def test_shadow_market_completion_preserves_ranks_and_raw_popularity(race, monkeypatch):
     import importlib
     from continuous_improvement.shadow import complete_market_columns

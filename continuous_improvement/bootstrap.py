@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import os
 from pathlib import Path
 import shutil
+import stat
 import sys
 
 from .archive import JST, sha256, write_json
@@ -31,11 +33,18 @@ def publish_pair(root: Path, results: Path, levels: Path, day: str, *, validator
     write_json(backup / "update.json", journal)
     try:
         for name, source in sources.items():
+            destination = master / name
+            access = destination.stat()
             temporary = master / (name + ".bootstrap.tmp")
             shutil.copy2(source, temporary)
             if sha256(temporary) != expected[name] or sha256(source) != expected[name]:
                 raise ValueError("更新中にマスタ原本が変更されました")
-            temporary.replace(master / name)
+            # 作業用ファイルのroot専用権限を本番へ持ち込まず、既存のアクセス権を継承する。
+            shutil.copystat(destination, temporary)
+            if os.name == "posix":
+                os.chown(temporary, access.st_uid, access.st_gid)
+            os.chmod(temporary, stat.S_IMODE(access.st_mode))
+            temporary.replace(destination)
         if validator(master / "race_levels.xlsx", day) != stats:
             raise ValueError("正式パスの検証結果が一時ファイルと不一致です")
         if any(sha256(master / name) != expected[name] for name in sources):
