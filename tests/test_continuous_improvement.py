@@ -405,3 +405,26 @@ def test_late_shadow_is_missed_but_valid_saved_shadow_can_resume(race, monkeypat
     else:
         with pytest.raises(ValueError, match="MISSED"):
             shadow.predict(pre)
+
+
+def test_legacy_tied_ranks_are_normalized_for_review_only(tmp_path):
+    from continuous_improvement.review import predictions
+    path = tmp_path / "legacy_ties.xlsx"
+    target = pd.DataFrame({
+        "rid_str": ["202608050312"] * 3,
+        "馬番": [13, 16, 7],
+        "rank": [1, 1, 2],
+        "total": [598.3182458241198, 598.3574111077452, 590.0],
+    })
+    context = pd.DataFrame({
+        "レースID": ["202608050312"],
+        "場所": ["東京"], "コース": ["芝1400"],
+        "クラス": ["3勝"], "馬場": ["良"],
+    })
+    with pd.ExcelWriter(path) as writer:
+        target.to_excel(writer, sheet_name="TARGET", index=False)
+        context.to_excel(writer, sheet_name="今走レース情報", index=False)
+    actual, _ = predictions(path, {"features": [], "feature_names": {}})
+    assert dict(zip(actual["馬番"], actual["pred_rank"])) == {13: 2, 16: 1, 7: 3}
+    assert actual["rank_tiebreak_applied"].all()
+    assert list(pd.read_excel(path, sheet_name="TARGET")["rank"]) == [1, 1, 2]
