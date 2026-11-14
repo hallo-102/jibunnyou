@@ -75,8 +75,29 @@ def predictions(path: Path, metadata: dict) -> tuple[pd.DataFrame, pd.DataFrame]
     if frame.duplicated(["rid_str", "馬番"]).any():
         raise ValueError("予想の主キーが重複しています")
     frame["pred_rank"] = pd.to_numeric(frame["rank"], errors="raise")
+    if frame["pred_rank"].isna().any() or frame["pred_rank"].le(0).any():
+        raise ValueError("予想順位に欠損または不正値があります")
+    # 旧NAS本番では表示スコアを丸めた同点が同順位になることがある。
+    # 発走前の原本は変更せず、回顧専用に実効total・馬番で一意化する。
+    # 既存の異なる順位を逆転させず、同順位の内部だけを決定的に並べる。
+    frame["original_pred_rank"] = frame["pred_rank"]
+    frame["rank_tiebreak_applied"] = False
+    duplicate = frame.duplicated(["rid_str", "pred_rank"], keep=False)
+    if duplicate.any():
+        if "total" not in frame:
+            raise ValueError("順位重複の解消に必要なtotal列がありません")
+        frame["total"] = pd.to_numeric(frame["total"], errors="coerce")
+        if frame.loc[duplicate, "total"].isna().any():
+            raise ValueError("順位重複馬のtotalが欠損しています")
+        affected = set(frame.loc[duplicate, "rid_str"])
+        ranked = frame.loc[frame["rid_str"].isin(affected)].sort_values(
+            ["rid_str", "original_pred_rank", "total", "馬番"],
+            ascending=[True, True, False, True], kind="stable",
+        )
+        frame.loc[ranked.index, "pred_rank"] = ranked.groupby("rid_str").cumcount().add(1).to_numpy()
+        frame.loc[frame["rid_str"].isin(affected), "rank_tiebreak_applied"] = True
     if frame.duplicated(["rid_str", "pred_rank"]).any():
-        raise ValueError("予想順位が重複しています")
+        raise ValueError("回顧用順位の一意化に失敗しました")
     # 日本語出力列を既存設定の対応表から内部特徴量名へ戻す。
     additions = {}
     for feature in metadata["features"]:
@@ -301,6 +322,8 @@ def review(pre: Path, results: Path, *, minimum_races: int = 35, shadow: Path | 
               "unrelated_result_races_quarantined": unrelated_races,
               "excluded_results": horses.loc[horses["rid_str"].isin(excluded)].fillna("").astype(str).to_dict("records"),
               "existing_ticket_roi": ticket_result,
+              "rank_tiebreak_audit": pred.loc[pred["rank_tiebreak_applied"],
+                  ["rid_str", "馬番", "original_pred_rank", "pred_rank", "total"]].to_dict("records"),
               "limitations": ["既存買い目は固定済み回収率重視候補の3連複・馬連・ワイドを100円単位で精算。実購入の証明ではない", "個別除外は加法スコア診断。買い目再生成・完全同点の本番順位再現は別検証", "過去日再計算はretrospective専用。既存世代の前向き実績に算入しない"]}
     write_json(output / "review.json", report)
     (output / "回顧.md").write_text(f"# {manifest['day']} 全レース回顧\n\n区分: {manifest['mode']}\n\n全{report['all_races']}レース、予想対象{overall['races']}、対象外{len(excluded)}。\n\n1位勝率 {overall['rank1_win_rate']}、複勝率 {overall['rank1_place_rate']}、単勝回収率 {overall['win_roi']}、複勝回収率 {overall['place_roi']}。\n\n改善候補 {len(candidates)}件。条件別・全特徴量の結果はreview.json。production採用はユーザー判断。\n", encoding="utf-8")
