@@ -75,8 +75,29 @@ def predictions(path: Path, metadata: dict) -> tuple[pd.DataFrame, pd.DataFrame]
     if frame.duplicated(["rid_str", "馬番"]).any():
         raise ValueError("予想の主キーが重複しています")
     frame["pred_rank"] = pd.to_numeric(frame["rank"], errors="raise")
+    if frame["pred_rank"].isna().any() or frame["pred_rank"].le(0).any():
+        raise ValueError("予想順位に欠損または不正値があります")
+    # 旧NASは丸めたscoreのdense順位。固定ソースの_build_bet_sheetと同じ
+    # score降順・馬番昇順を回顧だけに適用し、totalで買い目順を逆転させない。
+    # 既存の異なる順位を逆転させず、同順位の内部だけを決定的に並べる。
+    frame["original_pred_rank"] = frame["pred_rank"]
+    frame["rank_tiebreak_applied"] = False
+    duplicate = frame.duplicated(["rid_str", "pred_rank"], keep=False)
+    if duplicate.any():
+        if "score" not in frame:
+            raise ValueError("順位重複の解消に必要なscore列がありません")
+        frame["score"] = pd.to_numeric(frame["score"], errors="coerce")
+        if not np.isfinite(frame.loc[duplicate, "score"]).all():
+            raise ValueError("順位重複馬のscoreが欠損または不正です")
+        affected = set(frame.loc[duplicate, "rid_str"])
+        ranked = frame.loc[frame["rid_str"].isin(affected)].sort_values(
+            ["rid_str", "original_pred_rank", "score", "馬番"],
+            ascending=[True, True, False, True], kind="stable",
+        )
+        frame.loc[ranked.index, "pred_rank"] = ranked.groupby("rid_str").cumcount().add(1).to_numpy()
+        frame.loc[frame["rid_str"].isin(affected), "rank_tiebreak_applied"] = True
     if frame.duplicated(["rid_str", "pred_rank"]).any():
-        raise ValueError("予想順位が重複しています")
+        raise ValueError("回顧用順位の一意化に失敗しました")
     # 日本語出力列を既存設定の対応表から内部特徴量名へ戻す。
     additions = {}
     for feature in metadata["features"]:
@@ -127,10 +148,13 @@ def metrics(frame: pd.DataFrame, payouts: dict, rank_col: str = "pred_rank") -> 
             "rank_finish_spearman": float(np.mean(correlation)) if correlation else None,
             "win_return_yen": win_return, "place_return_yen": place_return,
             "win_roi": win_return / (100 * len(top)) if len(top) else None,
-            "place_roi": place_return / (100 * len(top)) if len(top) else None}
+            "place_roi": place_return / (100 * len(top)) if len(top) else None,
+            "rank1_virtual_purchase_yen_per_type": 100 * len(top),
+            "win_profit_yen": win_return - 100 * len(top),
+            "place_profit_yen": place_return - 100 * len(top)}
 
 
-def settle_existing(workbook: Path, payouts: dict, horses: pd.DataFrame) -> dict | None:
+def settle_existing(workbook: Path, payouts: dict, horses: pd.DataFrame, race_ids: set | None = None) -> dict | None:
     # 既存の買い目抽出・3連複精算を再利用し、買い目を結果から再生成しない。
     from shadow_validation import _bet_record, _settle_current_trifecta
     with pd.ExcelFile(workbook) as excel:
@@ -140,6 +164,8 @@ def settle_existing(workbook: Path, payouts: dict, horses: pd.DataFrame) -> dict
     details = []
     for _, row in roi.iterrows():
         rid = key(row["レースID"])
+        if race_ids is not None and rid not in race_ids:
+            continue
         record = _bet_record(pd.DataFrame(), roi, rid)
         current = record["current_trifecta"]
         if current["purchase_yen"] != len(current["tickets"]) * 100:
@@ -175,7 +201,15 @@ def settle_existing(workbook: Path, payouts: dict, horses: pd.DataFrame) -> dict
         details.append(result)
     invest = sum(x["purchase_yen"] for x in details)
     returned = sum(x["return_yen"] for x in details)
-    return {"purchase_yen": invest, "return_yen": returned, "profit_yen": returned - invest,
+    by_type = {}
+    for kind in ("3連複", "馬連", "ワイド"):
+        # 発走前の券だけを同一レース集合で精算し、購入ゼロはROI未定義にする。
+        rows = [x["by_type"].get(kind, {}) for x in details]
+        purchase = sum(x.get("purchase_yen", 0) for x in rows)
+        amount = sum(x.get("return_yen", 0) for x in rows)
+        by_type[kind] = {"purchase_yen": purchase, "return_yen": amount,
+                         "profit_yen": amount - purchase, "roi": amount / purchase if purchase else None}
+    return {"by_type": by_type, "purchase_yen": invest, "return_yen": returned, "profit_yen": returned - invest,
             "roi": returned / invest if invest else None, "races": len(details), "details": details}
 
 
@@ -214,7 +248,16 @@ def review(pre: Path, results: Path, *, minimum_races: int = 35, shadow: Path | 
     joined["馬場"] = joined["実馬場"].combine_first(joined["馬場"])
     if joined["result_status"].isna().any():
         raise ValueError("予想と結果の一意結合に失敗しました")
+    # ROI計算前に1位・TOP5集合への影響を記録する。原順位の同率1位は全頭を数える。
+    rank_impact = []
+    for rid, group in joined.loc[joined["rank_tiebreak_applied"]].groupby("rid_str"):
+        item = {"race_id": rid, "reason": "固定本番_build_bet_sheetのscore降順・馬番昇順。risk/penalty/confidenceは追加キーに使わない"}
+        for label, column in (("original", "original_pred_rank"), ("review", "pred_rank")):
+            item[label + "_rank1"] = sorted(group.loc[group[column].eq(1), "馬番"].tolist())
+            item[label + "_top5"] = sorted(group.loc[group[column].le(5), "馬番"].tolist())
+        rank_impact.append(item)
     overall = metrics(joined, payouts)
+    original_overall = metrics(joined, payouts, "original_pred_rank")
     ticket_result = settle_existing(model_folder / "prediction.xlsx", payouts, horses)
     stratified = []
     for dimensions in [["評価区分"], ["場所"], ["芝ダ"], ["距離帯"], ["クラス"], ["馬場"], ["人気帯"], ["オッズ帯"], ["場所", "芝ダ", "距離帯", "評価区分"]]:
@@ -276,6 +319,8 @@ def review(pre: Path, results: Path, *, minimum_races: int = 35, shadow: Path | 
     first_new = sheet.max_column + 1
     sheet.cell(1, first_new, "確定着順")
     sheet.cell(1, first_new + 1, "確定状態")
+    sheet.cell(1, first_new + 2, "原本予想順位")
+    sheet.cell(1, first_new + 3, "回顧用予想順位")
     lookup = joined.set_index(["rid_str", "馬番"])
     for row in range(2, sheet.max_row + 1):
         rid = key(sheet.cell(row, headers["rid_str"]).value)
@@ -283,6 +328,8 @@ def review(pre: Path, results: Path, *, minimum_races: int = 35, shadow: Path | 
         actual = lookup.loc[(rid, horse)]
         sheet.cell(row, first_new, number(actual["finish"]))
         sheet.cell(row, first_new + 1, actual["result_status"])
+        sheet.cell(row, first_new + 2, int(actual["original_pred_rank"]))
+        sheet.cell(row, first_new + 3, int(actual["pred_rank"]))
     raw_results = pd.read_excel(results, sheet_name=manifest["day"])
     from openpyxl.utils.dataframe import dataframe_to_rows
     actual_sheet = workbook.create_sheet("確定結果_原本")
@@ -296,11 +343,15 @@ def review(pre: Path, results: Path, *, minimum_races: int = 35, shadow: Path | 
               "pre_manifest_sha256": sha256(pre / "manifest.json"),
               "results_sha256": sha256(results), "legacy_forward_generation": None,
               "auto_promote": False, "overall": overall, "stratified": stratified,
+              "original_rank_overall": original_overall, "rank_selection_impact": rank_impact,
+              "prediction_sha256": sha256(model_folder / "prediction.xlsx"),
               "features": features, "high_correlations": high_correlations, "candidates": candidates,
               "all_races": int(expected["rid_str"].nunique()), "excluded_races": excluded,
               "unrelated_result_races_quarantined": unrelated_races,
               "excluded_results": horses.loc[horses["rid_str"].isin(excluded)].fillna("").astype(str).to_dict("records"),
               "existing_ticket_roi": ticket_result,
+              "rank_tiebreak_audit": pred.loc[pred["rank_tiebreak_applied"],
+                  [c for c in ["rid_str", "馬番", "original_pred_rank", "pred_rank", "score", "total"] if c in pred]].to_dict("records"),
               "limitations": ["既存買い目は固定済み回収率重視候補の3連複・馬連・ワイドを100円単位で精算。実購入の証明ではない", "個別除外は加法スコア診断。買い目再生成・完全同点の本番順位再現は別検証", "過去日再計算はretrospective専用。既存世代の前向き実績に算入しない"]}
     write_json(output / "review.json", report)
     (output / "回顧.md").write_text(f"# {manifest['day']} 全レース回顧\n\n区分: {manifest['mode']}\n\n全{report['all_races']}レース、予想対象{overall['races']}、対象外{len(excluded)}。\n\n1位勝率 {overall['rank1_win_rate']}、複勝率 {overall['rank1_place_rate']}、単勝回収率 {overall['win_roi']}、複勝回収率 {overall['place_roi']}。\n\n改善候補 {len(candidates)}件。条件別・全特徴量の結果はreview.json。production採用はユーザー判断。\n", encoding="utf-8")

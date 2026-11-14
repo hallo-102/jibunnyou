@@ -14,7 +14,7 @@ import sys
 import time
 
 from .archive import JST, freeze, sha256, verify_archive, write_json
-from .review import load_results, review, metrics
+from .review import load_results, review, metrics, settle_existing
 from .history import aggregate
 from .optimization import maybe_run
 
@@ -132,6 +132,8 @@ def postprocess(root: Path, pre: Path, *, collect_results: bool = True) -> Path:
                    "common_races": common_races,
                    "common_production": metrics(production_rows.loc[production_rows["rid_str"].isin(common_races)], payouts),
                    "common_shadow": metrics(shadow_rows.loc[shadow_rows["rid_str"].isin(common_races)], payouts),
+                   "common_production_tickets": settle_existing(pre / "prediction.xlsx", payouts, load_results(results, day)[0], set(common_races)),
+                   "common_shadow_tickets": settle_existing(shadow / "prediction.xlsx", payouts, load_results(results, day)[0], set(common_races)),
                    "auto_promote": False, "legacy_forward_generation": None})
     aggregate(root / "data/output/continuous_improvement")
     return output
@@ -246,6 +248,7 @@ def tick(root: Path, now: datetime | None = None) -> dict:
                 out = postprocess(root, pre)
                 record.update(review=str(out), reviewed_at=datetime.now(JST).isoformat())
                 record.pop("error", None)
+                record.pop("retry_at", None)
             except Exception as exc:
                 record.update(error=str(exc), retry_at=(datetime.now(JST) + timedelta(minutes=30)).isoformat())
                 LOG.exception("postprocess_failed day=%s", day)
@@ -254,6 +257,7 @@ def tick(root: Path, now: datetime | None = None) -> dict:
             try:
                 update_masters(root, pre)
                 record["masters_updated"] = datetime.now(JST).isoformat()
+                record.pop("master_update_error", None)
             except Exception as exc:
                 record["master_update_error"] = str(exc)
                 LOG.exception("master_update_failed day=%s", day)
@@ -270,6 +274,7 @@ def tick(root: Path, now: datetime | None = None) -> dict:
             try:
                 upload(root, pre.parent)
                 record["uploaded"] = "post"
+                record.pop("upload_error", None)
             except Exception as exc:
                 record["upload_error"] = str(exc)
             write_json(status_path, state)
@@ -282,6 +287,12 @@ def tick(root: Path, now: datetime | None = None) -> dict:
     last_published = state.get("status_published_at")
     if not last_published or now - datetime.fromisoformat(last_published) >= timedelta(minutes=30):
         try:
+            # 前向き集計履歴も日別成果物とは別の既存ルートへ同期する。
+            history = base / "history.json"
+            if history.exists():
+                run(["rclone", "copyto", str(history), "gdrive:continuous_improvement/history.json",
+                     "--config", str(root / "config/rclone/rclone.conf"), "--drive-root-folder-id",
+                     "1kqYzK2jZjLQThnMu2YtpiTVQ5VZv3qDH"], root, timeout=300)
             run(["rclone", "copyto", str(status_path), "gdrive:continuous_improvement/status.json",
                  "--config", str(root / "config/rclone/rclone.conf"), "--drive-root-folder-id",
                  "1kqYzK2jZjLQThnMu2YtpiTVQ5VZv3qDH"], root, timeout=300)
