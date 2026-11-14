@@ -415,6 +415,7 @@ def test_legacy_tied_ranks_are_normalized_for_review_only(tmp_path):
         "馬番": [13, 16, 7],
         "rank": [1, 1, 2],
         "total": [598.3182458241198, 598.3574111077452, 590.0],
+        "score": [62.63, 62.63, 60.0],
     })
     context = pd.DataFrame({
         "レースID": ["202608050312"],
@@ -425,6 +426,7 @@ def test_legacy_tied_ranks_are_normalized_for_review_only(tmp_path):
         target.to_excel(writer, sheet_name="TARGET", index=False)
         context.to_excel(writer, sheet_name="今走レース情報", index=False)
     actual, _ = predictions(path, {"features": [], "feature_names": {}})
-    assert dict(zip(actual["馬番"], actual["pred_rank"])) == {13: 2, 16: 1, 7: 3}
+    # NASの固定買い目は丸めたscore同点なら馬番昇順。total最大の16を先にしない。
+    assert dict(zip(actual["馬番"], actual["pred_rank"])) == {13: 1, 16: 2, 7: 3}
     assert actual["rank_tiebreak_applied"].all()
     assert list(pd.read_excel(path, sheet_name="TARGET")["rank"]) == [1, 1, 2]
