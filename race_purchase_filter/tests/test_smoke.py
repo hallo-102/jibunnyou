@@ -5,8 +5,30 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from core import aggregate_methods, check_ticket_hit, compute_top5_capture, judge_c, judge_disagreement  # noqa: E402
+from core import aggregate_methods, check_ticket_hit, compute_top5_capture, filter_races_by_place, judge_c, judge_disagreement, list_places  # noqa: E402
 from storage import DuplicateSnapshotError, ResultStore, SnapshotStore, compute_sha256  # noqa: E402
+
+
+class TestPlaceFilter(unittest.TestCase):
+    RACES = [
+        {"place": "福島", "race_id": "1"},
+        {"place": "京都", "race_id": "2"},
+        {"place": "福島", "race_id": "3"},
+        {"place": "不明", "race_id": "4"},
+    ]
+
+    def test_list_places_order_excludes_unknown(self):
+        self.assertEqual(list_places(self.RACES), ["福島", "京都"])
+
+    def test_filter_all(self):
+        self.assertEqual(len(filter_races_by_place(self.RACES, "すべて")), 4)
+        self.assertEqual(len(filter_races_by_place(self.RACES, None)), 4)
+        self.assertEqual(len(filter_races_by_place(self.RACES, "")), 4)
+
+    def test_filter_by_place(self):
+        got = filter_races_by_place(self.RACES, "福島")
+        self.assertEqual([r["race_id"] for r in got], ["1", "3"])
+        self.assertEqual(filter_races_by_place(self.RACES, "東京"), [])
 
 
 class TestJudge(unittest.TestCase):
