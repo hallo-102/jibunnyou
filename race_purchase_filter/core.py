@@ -326,6 +326,24 @@ def aggregate_methods(snapshots, results):
     return {"A": a, "B": b, "C": c, "excluded_target_count": excluded_target_count}
 
 
+def list_places(races):
+    """競馬場の一覧を読込順で返す（「不明」は除く）。"""
+    places = []
+    for r in races or []:
+        p = r.get("place")
+        if p and p != UNKNOWN and p not in places:
+            places.append(p)
+    return places
+
+
+def filter_races_by_place(races, place):
+    """place が None/空/「すべて」なら全件、それ以外はその競馬場のレースのみ返す。"""
+    races = list(races or [])
+    if place is None or str(place).strip() in ("", "すべて"):
+        return races
+    return [r for r in races if r.get("place") == place]
+
+
 def format_money(value):
     return UNKNOWN if value is None else str(value)
 

@@ -19,7 +19,9 @@ from core import (  # noqa: E402
     aggregate_methods,
     check_ticket_hit,
     compute_top5_capture,
+    filter_races_by_place,
     format_rate,
+    list_places,
     is_excluded_race,
     judge_c,
     judge_disagreement,
@@ -52,6 +54,7 @@ class App:
         self.exclude_enabled = tk.BooleanVar(value=True)
 
         nb = ttk.Notebook(root)
+        self.nb = nb
         nb.pack(fill="both", expand=True)
         self.tab_pre = ttk.Frame(nb)
         self.tab_list = ttk.Frame(nb)
@@ -189,15 +192,67 @@ class App:
 
     # --- レース一覧 ---
     def _build_list(self):
-        self.list_text = tk.Text(self.tab_list, height=30)
+        f = self.tab_list
+        self.place_filter = tk.StringVar(value="すべて")
+        self.filter_frame = ttk.Frame(f)
+        self.filter_frame.pack(fill="x", padx=8, pady=4)
+        ttk.Label(f, text="レースをクリックすると出走馬を表示、ダブルクリックで事前判定入力へ送ります").pack(anchor="w", padx=8)
+        self.race_listbox = tk.Listbox(f, height=12)
+        self.race_listbox.pack(fill="x", padx=8, pady=4)
+        self.race_listbox.bind("<<ListboxSelect>>", self._on_race_select)
+        self.race_listbox.bind("<Double-Button-1>", self._on_race_send)
+        ttk.Button(f, text="事前判定入力へ送る", command=self._on_race_send).pack(anchor="w", padx=8)
+        self.list_text = tk.Text(f, height=16)
         self.list_text.pack(fill="both", expand=True, padx=8, pady=8)
+        self._filtered_races = []
+
+    def _rebuild_filter_buttons(self):
+        for w in self.filter_frame.winfo_children():
+            w.destroy()
+        races = self.loaded.get("races", [])
+        ttk.Label(self.filter_frame, text="競馬場:").pack(side="left")
+        places = ["すべて"] + list_places(races)
+        for p in places:
+            count = len(races) if p == "すべて" else len(filter_races_by_place(races, p))
+            ttk.Button(self.filter_frame, text=f"{p} ({count})",
+                       command=lambda x=p: self._set_place_filter(x)).pack(side="left", padx=2)
+
+    def _set_place_filter(self, place):
+        self.place_filter.set(place)
+        self.refresh_race_list()
 
     def refresh_race_list(self):
+        self._rebuild_filter_buttons()
+        self._filtered_races = filter_races_by_place(self.loaded.get("races", []), self.place_filter.get())
+        self.race_listbox.delete(0, "end")
+        for r in self._filtered_races:
+            self.race_listbox.insert("end", f"{r.get('date')} {r.get('place')} {r.get('race_no')}R race_id={r.get('race_id')} {r.get('race_name')}（{len(r.get('horses', []))}頭）")
         self.list_text.delete("1.0", "end")
-        for r in self.loaded.get("races", []):
-            self.list_text.insert("end", f"{r.get('date')} {r.get('place')} {r.get('race_no')}R race_id={r.get('race_id')} {r.get('race_name')}\n")
-            for h in r.get("horses", []):
-                self.list_text.insert("end", f"  {h.get('horse_no')} {h.get('horse_name')}\n")
+
+    def _selected_race(self):
+        sel = self.race_listbox.curselection()
+        if not sel or sel[0] >= len(self._filtered_races):
+            return None
+        return self._filtered_races[sel[0]]
+
+    def _on_race_select(self, _event=None):
+        race = self._selected_race()
+        self.list_text.delete("1.0", "end")
+        if race is None:
+            return
+        self.list_text.insert("end", f"{race.get('date')} {race.get('place')} {race.get('race_no')}R race_id={race.get('race_id')} {race.get('race_name')}\n")
+        for h in race.get("horses", []):
+            self.list_text.insert("end", f"  {h.get('horse_no')} {h.get('horse_name')}\n")
+
+    def _on_race_send(self, _event=None):
+        race = self._selected_race()
+        if race is None:
+            return
+        if race.get("race_id") not in (None, "", "不明"):
+            self.vars["race_id"].set(str(race["race_id"]))
+        if race.get("race_name") not in (None, "", "不明"):
+            self.vars["race_name"].set(str(race["race_name"]))
+        self.nb.select(self.tab_pre)
 
     # --- レース後結果 ---
     def _build_result(self):
