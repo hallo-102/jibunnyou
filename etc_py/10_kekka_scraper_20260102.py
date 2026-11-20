@@ -15,6 +15,9 @@ SCROLL_MAX = 20
 # ▼ 以下、ライブラリimportや各種設定
 # ───────────────────────────────
 import os
+import argparse
+import json
+import shutil
 import time
 import re
 import sys
@@ -29,8 +32,13 @@ from configparser import ConfigParser
 from tqdm import tqdm
 
 from selenium import webdriver
-from selenium.webdriver.edge.options import Options
-from selenium.webdriver.edge.service import Service
+if os.name == "nt":
+    from selenium.webdriver.edge.options import Options
+    from selenium.webdriver.edge.service import Service
+else:
+    # NASで正常稼働しているシステムChromiumの構成を再利用する。
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import JavascriptException, TimeoutException
 
@@ -39,14 +47,14 @@ from selenium.common.exceptions import JavascriptException, TimeoutException
 # ───────────────────────────────
 # このファイル: my_python_cursor/keiba_yosou_2025/netkeiba_entry_scraper_20251130.py
 # BASE_DIR   : my_python_cursor
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(os.getenv("KEIBA_BASE_DIR", str(Path(__file__).resolve().parent.parent)))
 
 # racedata_results.xlsx を保存するフォルダ
-OUTPUT_DIR = BASE_DIR / "data" / "master"
+OUTPUT_DIR = Path(os.getenv("KEIBA_MASTER_DIR", str(BASE_DIR / "data" / "master")))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # credentials.ini の場所
-CREDENTIALS_PATH = BASE_DIR / "config" / "credentials.ini"
+CREDENTIALS_PATH = Path(os.getenv("KEIBA_CREDENTIALS_PATH", str(BASE_DIR / "config" / "credentials.ini")))
 
 # ───────────────────────────────
 # ① 資格情報（パス固定）
@@ -86,6 +94,7 @@ def setup_browser() -> webdriver.Edge:
         opts.add_argument("--headless=new")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--lang=ja")
     # Edge/Chromium の内部ログが標準エラーに大量出力されるのを抑制する
     opts.add_argument("--log-level=3")
@@ -94,6 +103,13 @@ def setup_browser() -> webdriver.Edge:
     opts.add_experimental_option("excludeSwitches", ["enable-logging"])
 
     # EdgeDriver 側のログも不要なので OS の null デバイスへ捨てる
+    if os.name != "nt":
+        chromium = os.getenv("KEIBA_CHROMIUM_BIN", "") or shutil.which("chromium")
+        driver_path = os.getenv("KEIBA_CHROMEDRIVER_BIN", "") or shutil.which("chromedriver")
+        if chromium:
+            opts.binary_location = chromium
+        service = Service(executable_path=driver_path, log_output=os.devnull) if driver_path else Service(log_output=os.devnull)
+        return webdriver.Chrome(service=service, options=opts)
     service = Service(log_output=os.devnull)
     # service = Service(edge_path, log_output=os.devnull)  # 明示的にServiceを使う場合
     return webdriver.Edge(service=service, options=opts)
@@ -208,6 +224,17 @@ def get_race_ids_for_date(driver: webdriver.Edge, race_list_url: str) -> List[st
 # ───────────────────────────────
 # ⑤ レース詳細スクレイピング
 # ───────────────────────────────
+def payout_combinations(numbers: List[str], kind: str) -> List[str]:
+    """単複は1頭ずつ、他券種は券種の頭数と順序を保って分割する。"""
+    if kind in ("単勝", "複勝"):
+        return list(numbers)
+    step = 3 if kind in ("3連複", "3連単") else 2
+    if len(numbers) % step:
+        raise ValueError(f"{kind}の払戻組合せの頭数が不正です")
+    separator = "→" if kind in ("馬単", "3連単") else "-"
+    return [separator.join(numbers[i:i + step]) for i in range(0, len(numbers), step)]
+
+
 def scrape_one_race(driver: webdriver.Edge, race_id: str) -> pd.DataFrame:
     result_url = (
         f"https://race.netkeiba.com/race/result.html?race_id={race_id}&rf=race_list"
@@ -259,15 +286,7 @@ def scrape_one_race(driver: webdriver.Edge, race_id: str) -> pd.DataFrame:
             pops = tr.find("td", class_="Ninki")
             pops = pops.get_text("|", strip=True).split("|") if pops else []
 
-            if name == "複勝":
-                # 複勝だけはそのまま1頭ずつ
-                pairings = nums
-            else:
-                step = 3 if name in ("3連複", "3連単") else 2
-                sep = "→" if name in ("馬単", "3連単") else "-"
-                pairings = [
-                    sep.join(nums[i : i + step]) for i in range(0, len(nums), step)
-                ]
+            pairings = payout_combinations(nums, name)
 
             for i in range(len(pays)):
                 data_pay.append(
@@ -342,7 +361,11 @@ def save_to_excel(df: pd.DataFrame, file_name: str, sheet_name: str) -> None:
 # ⑦ メイン処理
 # ───────────────────────────────
 def main():
-    race_date = input("対象レース日付を YYYYMMDD 形式で入力してください: ").strip()
+    parser = argparse.ArgumentParser(description="固定済み出馬表のレースだけを結果収集する")
+    parser.add_argument("race_date", nargs="?")
+    parser.add_argument("--race-ids-file", help="固定済み出馬表由来のレースID配列JSON")
+    args = parser.parse_args()
+    race_date = (args.race_date or input("対象レース日付を YYYYMMDD 形式で入力してください: ")).strip()
     if not re.fullmatch(r"\d{8}", race_date):
         raise ValueError("対象レース日付は YYYYMMDD の8桁で入力してください")
 
@@ -355,7 +378,13 @@ def main():
     driver = setup_browser()
     try:
         login(driver, user, pw)
-        race_ids = get_race_ids_for_date(driver, race_list_url)
+        if args.race_ids_file:
+            # 一覧ページに隣接日のリンクがあっても対象日の固定IDだけを取得する。
+            race_ids = json.loads(Path(args.race_ids_file).read_text(encoding="utf-8"))
+            if not isinstance(race_ids, list) or not race_ids or any(not re.fullmatch(r"\d{12}", str(r)) for r in race_ids) or len(set(race_ids)) != len(race_ids):
+                raise ValueError("固定レースID一覧が不正です")
+        else:
+            race_ids = get_race_ids_for_date(driver, race_list_url)
         print(f"▶ レースID取得: {len(race_ids)} 件")
 
         all_dfs: List[pd.DataFrame] = []

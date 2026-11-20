@@ -825,6 +825,7 @@ def _publish_candidate_and_best(
     weights_map,
     decision: str,
     candidate_already_saved: bool = False,
+    shadow_only: bool = False,
 ) -> tuple[str, list[str], str, bool]:
     """candidateは保存し、不採用または既存bestありならbestを一切変更しない。"""
     if not candidate_already_saved:
@@ -833,6 +834,12 @@ def _publish_candidate_and_best(
     adopted_path = ""
     best_updated = False
     final_decision = decision
+    if shadow_only:
+        # 自動運用ではゲート合格もcandidateに留め、best・本番設定へ昇格させない。
+        if decision == "adopted":
+            final_decision = "shadow_only"
+            reasons.append("検証ゲート合格。ユーザー採用判断までShadow候補として保存")
+        return final_decision, reasons, adopted_path, best_updated
     if decision == "adopted":
         if best_path.exists():
             final_decision = "rejected"
@@ -1797,6 +1804,7 @@ def main(argv: list[str] | None = None) -> None:
             weights_map,
             requested_decision,
             candidate_already_saved=True,
+            shadow_only=True,
         )
     )
     adoption_reasons.extend(publish_reasons)
@@ -1828,6 +1836,8 @@ def main(argv: list[str] | None = None) -> None:
         ).astimezone().isoformat()
     decision_payload = {
         "decision": adoption_decision,
+        "validation_decision": requested_decision,
+        "shadow_only": True,
         "adopted": adoption_decision == "adopted",
         # candidate判定とbestファイル保存は本番昇格ではない。
         # 昇格はtools/promote_production_model.pyの明示操作でのみ行う。
