@@ -274,7 +274,9 @@ def test_effective_weights_apply_completion_sign_guard_and_disabled_zero(tmp_pat
 
     # 外部ファイルにない場所group・特徴量は本番組み込み重みから補完される。
     assert "札幌" in effective
-    assert set(production_config.FEAT_COLS).issubset(effective["__default__"])
+    # 補完対象は本番組込重み。計算専用特徴量を追加して実効SHAを変えない。
+    assert set(production_config.BUILTIN_FEATURE_WEIGHTS["__default__"]).issubset(effective["__default__"])
+    assert effective["__default__"].get("field_size_adjusted_finish", 0.0) == 0.0
     # 実績符号ガードと無効特徴量0固定も本番configと同じ順番で適用される。
     assert effective["__default__"]["avg_last3f"] == -2.0
     assert effective["__default__"]["style_pressure_fit"] == 0.0
