@@ -1,0 +1,43 @@
+﻿2026年11月21日 結果確認
+
+結論：race_purchase_filter の保存記録は0件。今日の収支・A/B比較の効果は評価不能。
+data/snapshots.jsonl と data/results.jsonl はどちらも存在しない。data/には .gitkeep のみ。
+未記録は実購入ゼロや損益ゼロを意味しない。
+別フォルダの回顧CSV：24レース（京都12R・福島12R）、馬別記録347行。
+全24行で prediction_top1 は空欄。prediction_error_type は当日予想未生成（運用処理未完了）。
+不一致数・事前TOP5・購入券・金額が不足しており、前向き検証の再現はできない。
+
+公開結果と照合した主要2レース：
+福島11R 福島記念：13マリアイリダータ、3ゼンダンハヤブサ、1カラマティアノス。
+京都11R シトリンS：12メルカントゥール、10テーオーマルコーニ、9レッドプロフェシー。
+全24RはPDFの6ページ参照。主要2レース以外はローカルCSVの転記で、オンライン再照合は未実施。
+
+確認元ファイル：
+C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026-2\race_purchase_filter\app.py
+C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026-2\race_purchase_filter\core.py
+C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026-2\race_purchase_filter\storage.py
+C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026-2\race_purchase_filter\excel_loader.py
+C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026-2\race_purchase_filter\README.md
+C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026-2\races_review\2026\202611\race_review_20261121.csv
+C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026-2\races_review\2026\202611\horse_review_20261121.csv
+C:\Users\okino\OneDrive\ドキュメント\my_python_cursor\keiba_yosou_2026-2\races_review\2026\202611\model_review_20261121.csv
+
+公開確認元：
+https://www.jra.go.jp/keiba/calendar2026/2026/11/1121.html
+https://race.netkeiba.com/race/result.html?race_id=202603030511
+https://race.netkeiba.com/race/result.html?race_id=202608050511
+
+操作説明書の注意：
+画面図は実装ラベルを用いた模式図。実画面キャプチャではない。
+購入レース数は券付き結果レコード単位。複数券で同じrace_idを保存すると重複計数される。
+結果CSVと券CSVの着順は集計時に相互補完されない。
+枠連は馬番で照合する実装のため、枠連の的中実績判定に使わない。
+既存アプリ・元データの編集や、結果の取り込みは行っていない。
+run.bat は python app.py を使用する。今回のシェルでは python コマンドが見つからなかった。
+説明書の作成にはCodexの同梱Pythonを使用した。
+
+イラスト生成：組み込みimage_gen。最終プロンプトの要旨：
+日本語の6コマ操作ガイド。起動→Excel読込→レース選択→手動不一致数と事前保存→結果入力→A/B/C比較。
+馬のマスコット、フォルダ・マウス・馬券・グラフで図解。紺・緑・橙の配色。
+不一致0〜1頭は購入候補、2頭以上は見送り候補、不明は保留。C未算出。自動投票なし、事前記録変更不可。
+実績値は記載せず、画面は概念図と明記。

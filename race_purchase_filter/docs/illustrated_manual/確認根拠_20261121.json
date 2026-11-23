@@ -1,0 +1,57 @@
+{
+  "checked_at_jst": "2026-11-21T23:18:27.795358+09:00",
+  "target_date": "2026-11-21",
+  "snapshot_file_exists": false,
+  "result_file_exists": false,
+  "race_count": 24,
+  "horse_rows": 347,
+  "place_counts": {
+    "福島": 12,
+    "京都": 12
+  },
+  "missing_prediction_top1": 24,
+  "prediction_status_counts": {
+    "当日予想未生成（運用処理未完了）": 24
+  },
+  "sources": [
+    {
+      "path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026-2\\race_purchase_filter\\app.py",
+      "sha256": "fd9faa084e76f2225ea72613a89e288f6b3e887d82a8dde420ffc2791bb1ad19"
+    },
+    {
+      "path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026-2\\race_purchase_filter\\core.py",
+      "sha256": "2ea07f91d23117564c487c4a453b4a8665f3b31bee53888083dd3900653410fc"
+    },
+    {
+      "path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026-2\\race_purchase_filter\\storage.py",
+      "sha256": "3bd0318b232d6b2031b5734a25faabe213e7434a2bfa123c9bcd8c2644ba9e40"
+    },
+    {
+      "path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026-2\\race_purchase_filter\\excel_loader.py",
+      "sha256": "aae7054ce74f8c11303d78c9ff4acd0b9d0c985962c61ba72b8fb22ebe447934"
+    },
+    {
+      "path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026-2\\race_purchase_filter\\README.md",
+      "sha256": "42cca740a7c93eedf602bd28dd8eff0e6b1287ffe4de573271422a67200eb1dc"
+    },
+    {
+      "path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026-2\\races_review\\2026\\202611\\race_review_20261121.csv",
+      "sha256": "8c28b0e71f5e6023b871e03324d563ffe1dd476fb01a12213101d418a1f42fc6"
+    },
+    {
+      "path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026-2\\races_review\\2026\\202611\\horse_review_20261121.csv",
+      "sha256": "c0dd6367fdb8322a25e3e6c094b8d802d19d2061b740be9c53f153d737fc6319"
+    },
+    {
+      "path": "C:\\Users\\okino\\OneDrive\\ドキュメント\\my_python_cursor\\keiba_yosou_2026-2\\races_review\\2026\\202611\\model_review_20261121.csv",
+      "sha256": "432432997c8594ca993fd9971e8fde7955d09f47c5c97b9d5d01ad07345ded4a"
+    }
+  ],
+  "online_checks": [
+    "https://www.jra.go.jp/keiba/calendar2026/2026/11/1121.html",
+    "https://race.netkeiba.com/race/result.html?race_id=202603030511",
+    "https://race.netkeiba.com/race/result.html?race_id=202608050511"
+  ],
+  "online_scope": "JRA開催予定と主要2レースの上位3頭を照合。全24レースの再照合ではない。",
+  "image_generation": "組み込みimage_genツール。概念図と実画面は異なる。"
+}

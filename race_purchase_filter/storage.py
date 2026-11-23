@@ -85,6 +85,24 @@ class ResultStore:
         return record
 
 
+class EvaluationStore:
+    """自動評価を原本・レース・方式バージョン単位で固定し、再読込時は再利用する。"""
+
+    def __init__(self, path):
+        self.path = path
+
+    def load_all(self):
+        return _load_jsonl(self.path)
+
+    def get_or_append(self, record):
+        key = (str(record.get("race_key") or record["race_id"]), record.get("input_fingerprint") or record["sha256"], record["condition_version"])
+        for existing in self.load_all():
+            if (str(existing.get("race_key") or existing.get("race_id")), existing.get("input_fingerprint") or existing.get("sha256"), existing.get("condition_version")) == key:
+                return existing
+        _append_jsonl(self.path, record)
+        return record
+
+
 def default_data_paths(base_dir=None):
     if base_dir is None:
         base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -92,4 +110,5 @@ def default_data_paths(base_dir=None):
     return {
         "snapshots": os.path.join(base_dir, "snapshots.jsonl"),
         "results": os.path.join(base_dir, "results.jsonl"),
+        "evaluations": os.path.join(base_dir, "evaluations.jsonl"),
     }

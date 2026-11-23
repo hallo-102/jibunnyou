@@ -1,9 +1,4 @@
-"""Pure logic for race purchase suitability filter.
-
-No GUI imports. No automatic calculation of evaluation-disagreement count:
-that formula is unconfirmed in the original source, so the count is manual
-input only (see README).
-"""
+"""共通処理と旧手動方式の互換API。新しい自動独立評価はindependent.pyを使う。"""
 from __future__ import annotations
 
 # Judgement labels
@@ -350,3 +345,42 @@ def format_money(value):
 
 def format_rate(value):
     return UNCALCULATED if value is None else f"{value:.1f}%"
+
+
+def race_overview(race, snapshot=None, exclude_enabled=True):
+    """原本の判定・対象設定・保存済み手動判定を、一覧用に分けて返す。"""
+    snapshot = snapshot or {}
+    original_excluded = (
+        race.get("prediction_status") == "NO_PREDICTION"
+        or race.get("prediction_availability") == "予想対象外"
+        or race.get("bet_judgement") == "NO_BET"
+    )
+    configured_excluded = is_excluded_race(race.get("race_name"), exclude_enabled)
+    excluded = original_excluded or configured_excluded
+    count = snapshot.get("disagreement_count")
+    # Excelのランクや購入判定から、定義未確定の不一致数を作り出さない。
+    judgement = judge_disagreement(count)
+    roi = race.get("roi_judgement")
+    roi = str(roi) if roi not in (None, "", UNKNOWN) else "記載なし"
+    excel = race.get("excel_judgement")
+    excel = str(excel) if excel not in (None, "", UNKNOWN) else "記載なし"
+    if original_excluded:
+        excel = "予想対象外"
+    if original_excluded:
+        reason = race.get("exclusion_reason")
+        if reason in (None, "", UNKNOWN):
+            reason = "原本で予想・買い目の対象外とされています。"
+    elif configured_excluded:
+        reason = "アプリの設定で新馬・未勝利戦を対象外としています。"
+    else:
+        reason = "対象レースです。原本の判定と不一致判定を確認してください。"
+    return {
+        "target": "対象外" if excluded else "対象",
+        "excel_rank": race.get("excel_rank") if race.get("excel_rank") not in (None, "", UNKNOWN) else "-",
+        "excel_judgement": excel,
+        "roi_judgement": roi,
+        "disagreement_count": "未入力" if count is None else str(count),
+        "disagreement_judgement": judgement,
+        "reason": reason,
+        "tag": "excluded" if excluded else ("buy" if roi == "購入" else "normal"),
+    }

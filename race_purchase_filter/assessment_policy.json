@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "beta": null,
+  "weights": null,
+  "rank_gap_threshold": null,
+  "selection_start": null,
+  "selection_end": null,
+  "frozen_at": null,
+  "selection_evidence": null,
+  "max_history_days": 365,
+  "max_history_runs": 5,
+  "half_life_days": 180,
+  "long_rest_days": 180
+}

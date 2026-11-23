@@ -1,0 +1,7 @@
+使用ツール：組み込み image_gen（CLI/APIの直接利用なし）
+transparent_background: false
+
+最終生成プロンプト（実際に送信した本文）：
+
+Use case: infographic-diagram
+Create a polished Japanese illustrated quick-start instruction poster for a Windows tkinter app named 独立レース購入適性判定. Portrait, high resolution, clear Japanese typography, cream background, navy headings, teal, orange accents, small friendly racehorse mascot and desktop/file/ticket/chart illustrations. A visual guide with 6 numbered panels in reading order, arrows joining panels. Exact Japanese text: Title「レース購入適性判定 操作ガイド」 Subtitle「レース前に記録 → レース後に比較」 Panel 1「① 起動」「run.bat をダブルクリック」 with folder and cursor. Panel 2「② Excel読込」「事前判定入力 → xlsx 読込」 with spreadsheet icon. Panel 3「③ レースを選ぶ」「レース一覧 → 競馬場 → ダブルクリック」 with list and mouse. Panel 4「④ 事前判定を保存」「評価不一致数は手動入力」「0〜1頭：購入候補」「2頭以上：見送り候補」「不明：判定保留」「発走前に保存」 with traffic-light cards and padlock. Panel 5「⑤ レース後に入力」「確定着順・買い目・金額・払戻」 with ticket and finish flag. Panel 6「⑥ 方式比較」「A：記録した購入全体」「B：不一致0〜1頭のみ」「C：未算出」 with comparison chart but no fabricated numbers. Bottom note「検証用の暫定判定です。自動投票は行いません。」「事前記録は変更・削除できません。」 Small label「画面は概念図」. Do not add actual race results or invented performance. This is a complete one-page readable illustrated manual, not just an illustration. No English except technical filenames and A B C.
