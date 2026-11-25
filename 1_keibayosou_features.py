@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from datetime import date
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import re
@@ -185,6 +186,29 @@ def _parse_yyyymmdd(x: Any) -> Optional[pd.Timestamp]:
         except Exception:
             return None
     return None
+
+
+def _parse_validation_date(value: Any) -> Optional[pd.Timestamp]:
+    """区切り付き日付と8桁の年月日を、桁の境界を保ったまま読む。"""
+    if pd.isna(value):
+        return None
+    if isinstance(value, date):
+        return pd.Timestamp(pd.Timestamp(value).date())
+
+    text = str(value).strip()
+    match = re.fullmatch(r"([0-9]{4})([/.-])([0-9]{1,2})\2([0-9]{1,2})", text)
+    if match:
+        year, month, day = match.group(1, 3, 4)
+    else:
+        match = re.fullmatch(r"([0-9]{4})([0-9]{2})([0-9]{2})(?:\.0+)?", text)
+        if not match:
+            return None
+        year, month, day = match.groups()
+
+    try:
+        return pd.Timestamp(date(int(year), int(month), int(day)))
+    except ValueError:
+        return None
 
 
 def _parse_laps_to_min_1f(lap_text: Any) -> Optional[float]:
@@ -776,6 +800,8 @@ def _compute_horse_features_from_race_sheets(
     now_df: pd.DataFrame,
     levels_df: Optional[pd.DataFrame],
     raceday: str = "",
+    *,
+    validation: bool = False,
 ) -> pd.DataFrame:
     """
     馬の競走成績ブック内の「レースIDシート」から、horse-level の特徴量を計算する。
@@ -821,7 +847,11 @@ def _compute_horse_features_from_race_sheets(
     field_size_map = now.groupby("rid_str")["頭数"].first().map(_to_field_size).to_dict() if "頭数" in now.columns else {}
 
     now_date = None
-    if raceday and re.fullmatch(r"\d{8}", raceday):
+    if validation:
+        now_date = _parse_validation_date(raceday)
+        if now_date is None:
+            raise ValueError("特徴量検証には有効な開催日が必要です")
+    elif raceday and re.fullmatch(r"\d{8}", raceday):
         now_date = pd.to_datetime(raceday, format="%Y%m%d")
 
     rows: list[dict[str, Any]] = []
@@ -868,6 +898,9 @@ def _compute_horse_features_from_race_sheets(
             continue
 
         df["__horse_name__"] = df[c_name].astype(str).str.strip()
+        if validation and c_date:
+            df["__date__"] = pd.to_datetime(df[c_date].map(_parse_validation_date), errors="coerce")
+            df = df.loc[df["__date__"].lt(now_date)]
 
         def _select_past_rows_for_horse(horse_name_val: Any) -> pd.DataFrame:
             """今走馬名に対応し、かつRACEDAYより前の過去走行だけを抽出する。"""
@@ -879,6 +912,10 @@ def _compute_horse_features_from_race_sheets(
             if selected.empty:
                 key = re.sub(r"\s+", "", name_text)
                 selected = df[df["__horse_name__"].map(lambda x: re.sub(r"\s+", "", str(x))) == key].copy()
+            if validation:
+                if c_date is None:
+                    return selected.iloc[0:0]
+                return selected
             if now_date is not None:
                 if c_date is None:
                     # 日付を証明できない行は過去データへ自動混入させない。
@@ -975,7 +1012,8 @@ def _compute_horse_features_from_race_sheets(
             one["__remark__"] = one[c_remark].fillna("").astype(str) if c_remark else ""
 
             if c_date and not one.empty:
-                one["__date__"] = one[c_date].map(_parse_yyyymmdd)
+                if not validation:
+                    one["__date__"] = one[c_date].map(_parse_yyyymmdd)
                 one = one.sort_values("__date__", ascending=False, kind="mergesort")
 
             finish_s = _to_float_series(one[c_finish]) if c_finish else pd.Series(dtype=float)
@@ -1030,7 +1068,7 @@ def _compute_horse_features_from_race_sheets(
 
             days_off = np.nan
             if now_date is not None and c_date and not one.empty:
-                d = one[c_date].map(_parse_yyyymmdd).dropna()
+                d = one["__date__"].dropna()
                 if not d.empty:
                     last_date = d.max()
                     days_off = float((now_date - last_date).days)
@@ -1669,8 +1707,12 @@ def build_features_from_excel(
     base_time_df: Optional[pd.DataFrame] = None,
     odds_df: Optional[pd.DataFrame] = None,
     raceday: str = "",
+    *,
+    validation: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
+    validation=True は開催日を必須とする検証用の特徴量再計算。
+
     返り値：
       merged_df : 今走レース情報（NOW_SHEET）に horses を必要に応じて結合したもの
       feat_df   : rid_str/馬番/馬名 + FEAT_COLS を含む特徴量テーブル
@@ -1690,10 +1732,14 @@ def build_features_from_excel(
 
     horses_df = book.get(HORSES_SHEET)
 
-    if raceday:
+    if raceday or validation:
         date_cols = ["日付", "開催日", "日付(月日)", "年月日", "raceday"]
         date_col = next((c for c in date_cols if c in now_df.columns), None)
-        if date_col:
+        if date_col and validation:
+            now_df = now_df.loc[now_df[date_col].map(_parse_validation_date).eq(
+                _parse_validation_date(raceday)
+            )].copy()
+        elif date_col:
             s = now_df[date_col].astype(str).str.replace("/", "", regex=False).str.replace("-", "", regex=False)
             now_df = now_df.loc[s.str.contains(str(raceday), na=False)].copy()
 
@@ -1716,9 +1762,12 @@ def build_features_from_excel(
     if "馬番" in merged.columns:
         merged["馬番"] = _normalize_umaban_series(merged["馬番"])
 
-    computed_feat = _compute_horse_features_from_race_sheets(book, merged, levels_df, raceday=raceday)
+    computed_feat = _compute_horse_features_from_race_sheets(
+        book, merged, levels_df, raceday=raceday, validation=validation,
+    )
 
-    if horses_df is not None and isinstance(horses_df, pd.DataFrame) and not horses_df.empty:
+    # horses の既計算値は、過去走の日付検証を経ていない。
+    if not validation and isinstance(horses_df, pd.DataFrame) and not horses_df.empty:
         h = horses_df.copy()
         h = _ensure_rid_str(h, label="HORSES")
         if "馬番" not in h.columns:

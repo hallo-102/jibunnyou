@@ -430,9 +430,9 @@ def _attach_dl_features(merged: pd.DataFrame, feat_df: pd.DataFrame) -> pd.DataF
 # ============================================================
 # メイン：1ファイルから特徴量作成
 # ============================================================
-def build_features_from_one_file(xlsx_path: str) -> pd.DataFrame:
+def build_features_from_one_file(xlsx_path: str, *, validation: bool = False) -> pd.DataFrame:
     """
-    最適化コード側の特徴量作成入口。
+    最適化コード側の特徴量作成入口。validation=True で共通の検証用計算を使う。
 
     重要：
     ここでは独自特徴量を作らず、本番予想コード側の
@@ -472,6 +472,7 @@ def build_features_from_one_file(xlsx_path: str) -> pd.DataFrame:
         base_time_df,
         odds_df,
         raceday=raceday,
+        validation=validation,
     )
 
     if feat_df is None or feat_df.empty:
