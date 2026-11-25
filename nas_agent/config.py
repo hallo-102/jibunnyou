@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import re
 
-from .files import isolated, private_json
+from .files import admin_json, isolated, private_json
 from .schema import REPOSITORY, TYPES, Rejected
 
 CODE_ROOT = Path(__file__).resolve().parents[1]
@@ -52,7 +52,7 @@ def load_config(path, role):
 
 
 def load_policy(path):
-    policy = private_json(path)
+    policy = admin_json(path)
     if policy.get("schema_version") != 1 or policy.get("repository") != REPOSITORY:
         raise Rejected("INVALID_POLICY")
     if not set(policy["job_types"]) <= TYPES or not all(type(x) is int and x > 0 for x in policy["requester_ids"]):

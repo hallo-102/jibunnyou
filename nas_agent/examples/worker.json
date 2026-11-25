@@ -6,7 +6,7 @@
   "state_dir": "/volume1/docker/keiba_nas_agent/worker-state",
   "spool_dir": "/volume1/docker/keiba_nas_agent/spool",
   "token_file": null,
-  "policy_file": "/volume1/docker/keiba_nas_agent/config/policy.json",
+  "policy_file": "/volume1/docker/keiba_nas_agent/admin/policy.json",
   "checkout_root": "/volume1/docker/keiba_nas_agent/checkouts",
   "validation_root": "/volume1/docker/keiba_nas_agent_validation",
   "validation_python": "/volume1/docker/keiba_nas_agent/validation-venv/bin/python",

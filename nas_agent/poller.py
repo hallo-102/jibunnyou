@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import time
 
-from .files import atomic_json, beneath, single_worker, spool_json
+from .files import atomic_json, beneath, single_worker, spool_json, spool_page
 from .report import comment
 from .schema import Rejected, digest, request, utcnow
 from .state import State
@@ -35,7 +35,7 @@ class Poller:
                         continue
                 atomic_json(hint_path, hint)
             self.state.meta("last_poll_at", utcnow().isoformat())
-            for path in sorted((self.spool / "outbox").glob("*.json"))[:1000]:
+            for path in spool_page(self.spool / "outbox", self.state, "outbox_cursor"):
                 if path.is_symlink() or not path.stem.isdigit() or path.stat().st_size > 65536:
                     continue
                 payload = spool_json(self.spool / "outbox", path, 65536)

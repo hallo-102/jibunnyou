@@ -8,13 +8,14 @@ GitHub Issueの新規作成権限があるChatGPT接続を使い、対象repoに
 
 ## 個別承認
 
-NAS管理者がworkerの専用権限で以下を実行する。repo/type/SHA/inputの上位許可範囲はpolicyで先にレビューする。approveはhashを追加するだけで、上位範囲を緩めない。
+NAS管理者(root)が承認専用CLIで以下を実行する。常駐workerのconfig/state/tokenは使わない。repo/type/SHA/inputの上位許可範囲は管理者所有のadmin/policy.jsonで先にレビューする。ファイル0640と全親ディレクトリのroot所有・group/other書込不可を検査する。approveはhashを追加するだけで、上位範囲を緩めない。workerはpolicyの読取専用で、同じCLIを実行しても承認書込は拒否する。
 
 ```sh
-# 現在のGitHub本文・作成者・hashを独立取得してレビューする。
-python3.11 -m nas_agent inspect --config /volume1/docker/keiba_nas_agent/config/worker.json --issue <ジョブIssue番号>
+# NAS管理者(root)でレビュー済みagent codeから実行する。token値は引数に含めない。
+export PYTHONDONTWRITEBYTECODE=1  # 読取専用のcodeを維持する。
+python3.11 -m nas_agent inspect --policy-file /volume1/docker/keiba_nas_agent/admin/policy.json --agent-commit <レビュー済みagent完全SHA> --token-file /volume1/docker/keiba_nas_agent/admin-secrets/github-read.token --issue <ジョブIssue番号>
 # inspectで確認した完全hashを明示する。本文が変われば拒否する。
-python3.11 -m nas_agent approve --config /volume1/docker/keiba_nas_agent/config/worker.json --issue <ジョブIssue番号> --expected-hash <64桁hash>
+python3.11 -m nas_agent approve --policy-file /volume1/docker/keiba_nas_agent/admin/policy.json --agent-commit <レビュー済みagent完全SHA> --token-file /volume1/docker/keiba_nas_agent/admin-secrets/github-read.token --issue <ジョブIssue番号> --expected-hash <64桁hash>
 ```
 
 同一の許可SHA/type/input/date範囲を繰り返す場合、管理者は期限付きgrantsをpolicyへ追加できる。例は以下の形。初回は個別承認のみ、grantsは空のまま始める。新しいSHA、Dockerfile/依存、host helperの変更は範囲へ自動追加しない。
@@ -36,6 +37,10 @@ python3.11 -m nas_agent approve --config /volume1/docker/keiba_nas_agent/config/
 
 GitHubのmarker付き状態コメントを確認する。状態履歴・開始/終了/heartbeat・commit・集計・成果物SHAだけを投稿する。元Excel/馬別比較/生ログはNASのprivate workspaceに残す。Driveはdry-runで、既存同期先には転送しない。
 
+ジョブのSUCCEEDEDは固定処理が完了した意味。受入のacceptance=PASSとは別で、Windows参照なし/ARM64証拠不足ならSUCCEEDEDでもPARTIALになる。PASSには両runのREADY/STATUS/SHA、同一レビューcommit、data/model/implementation一致、全必須比較列、非空の馬集合、全レース分類/除外理由と通常券/固定券/TOP5一致、候補runtimeとimageのARM64確認が必要。必須比較情報の欠落や差異は明示停止し、ジョブをFAILEDにする。
+
+protected_unchangedは指定ファイル（当日OZZU CSVを含む）とcontainer測定値の前後一致だけを意味する。本番全体やscheduler設定の不変証明ではない。
+
 QUEUEDは実行可能時間等を待つ状態、WAIT_APPROVALはローカル承認/範囲/build確認待ち。RUNNINGの本文変更は実行に反映しない。キャンセルはIssueをcloseする。開始前または実行中の次回確認（通常15秒、HTTP応答待ちと停止処理の時間を加算）で停止する。close後にreopenしても終端jobは自動再実行しない。
 
 ```sh
@@ -48,7 +53,9 @@ GitHubでheartbeatが古い/依頼に応答がない場合、NAS OFF・poller/wo
 
 ## 中断・timeout・報告失敗
 
-再起動でRUNNINGが残っていればINTERRUPTED。副作用ジョブは自動再実行しない。GitHub報告の失敗だけならoutboxとSQLiteから再送し、処理自体は再実行しない。POST応答だけ失われた場合も既存markerコメントを再利用する。
+再起動でRUNNINGが残っていればINTERRUPTED。副作用ジョブは自動再実行しない。実行済み副作用ジョブの失敗/中断/キャンセル状態と復旧バリアは同じSQLite transactionで保存する。GitHub報告の失敗だけならoutboxとSQLiteから再送し、処理自体は再実行しない。POST応答だけ失われた場合も既存markerコメントを再利用する。
+
+inbox/outboxは1回最大1000ファイルを永続cursorの続きから走査する。処理済みの履歴も削除せず残すため、新規ファイルは次回以降の巡回でも処理できる。API失敗時もcursorは進み、当該ファイルは一巡後に再試行する。全Issue走査と匿名API枠の実測は初回導入で確認し、必要ならworker用read-only tokenを設定する。
 
 issue16_acceptanceの失敗/キャンセル/中断後はrecovery_requiredで後続全体を停止する。管理者がprivate log、候補成果物、該当instanceのDocker container、daemon側buildの停止/完了を調べる。既存本番のstop/downや無差別docker pruneを行わない。
 

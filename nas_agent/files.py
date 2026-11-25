@@ -10,6 +10,28 @@ import tempfile
 
 from .schema import Rejected
 
+POSIX = os.name == "posix"
+
+
+def validate_admin_file(path, *, for_write=False):
+    """管理者(root)所有の承認ファイルと全親を検査する。workerは更新できない。"""
+    if not POSIX:
+        raise Rejected("ADMIN_POLICY_REQUIRES_POSIX")
+    if for_write and os.geteuid() != 0:
+        raise Rejected("ADMIN_APPROVAL_REQUIRED")
+    path = Path(path).absolute()
+    for item in (path, *path.parents):
+        info = item.lstat()
+        if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise Rejected("UNTRUSTED_ADMIN_POLICY_PERMISSIONS")
+        if item == path and not stat.S_ISREG(info.st_mode):
+            raise Rejected("UNTRUSTED_ADMIN_POLICY_PERMISSIONS")
+
+
+def admin_json(path):
+    validate_admin_file(path)
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
 
 def private_json(path):
     path = Path(path)
@@ -22,7 +44,7 @@ def private_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def atomic_json(path, payload, *, mode=0o640):
+def atomic_json(path, payload, *, mode=0o640, gid=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_symlink():
@@ -34,6 +56,8 @@ def atomic_json(path, payload, *, mode=0o640):
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temporary, mode)
+        if gid is not None:
+            os.chown(temporary, -1, gid)  # 管理者の承認更新でも読取専用groupを維持する。
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
@@ -67,6 +91,17 @@ def spool_json(root, path, limit):
     if len(data) > limit:
         raise Rejected("UNSAFE_SPOOL_FILE")
     return json.loads(data.decode("utf-8"))
+
+
+def spool_page(root, state, key, limit=1000):
+    """履歴を残し、永続cursorの次から一巡する。失敗したファイルにも次回を独占させない。"""
+    paths = sorted(Path(root).glob("*.json"))
+    cursor = state.meta(key) or ""
+    following = [path for path in paths if path.name > cursor]
+    preceding = [path for path in paths if path.name <= cursor]
+    for path in (following + preceding)[:limit]:
+        state.meta(key, path.name)
+        yield path
 
 
 @contextmanager

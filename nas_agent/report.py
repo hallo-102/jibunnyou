@@ -5,7 +5,7 @@ import re
 from .schema import STATES, utcnow
 
 SUMMARY = {"architecture", "python_version", "acceptance", "protected_unchanged", "ready_verified", "input_match",
-           "windows_comparison", "races", "horses", "excluded_races", "changed_horses", "top5_changed_races", "fixed_tickets_changed_races"}
+           "windows_comparison", "arm64_verified", "races", "horses", "excluded_races", "changed_horses", "top5_changed_races", "tickets_changed_races", "fixed_tickets_changed_races"}
 WORDS = {"aarch64", "arm64", "AMD64", "x86_64", "unknown", "PASS", "PARTIAL", "NOT_AVAILABLE", "MATCH", "MISMATCH"}
 
 

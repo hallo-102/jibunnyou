@@ -42,7 +42,9 @@ class MockGitHub(GitHub):
             return {"permission": "read", "user": {"id": 43}}
         prefix = f"/repos/{REPOSITORY}/issues"
         if path.startswith(prefix + "?"):
-            return deepcopy(list(self.rows.values()))
+            from urllib.parse import parse_qs
+            page = int(parse_qs(path.split("?", 1)[1]).get("page", ["1"])[0])
+            return deepcopy(list(self.rows.values())[(page - 1) * 100:page * 100])
         if "/comments?" in path:
             return deepcopy(self.comments)
         if method == "POST" and path.endswith("/comments"):
@@ -78,7 +80,10 @@ class CountingBackend:
 
 
 @pytest.fixture
-def setup(tmp_path):
+def setup(tmp_path, monkeypatch):
+    # 模擬API試験では管理者操作を模擬する。実POSIX境界は専用テストで別途検査する。
+    monkeypatch.setattr('nas_agent.files.validate_admin_file', lambda *a, **k: None)
+    monkeypatch.setattr('nas_agent.__main__.validate_admin_file', lambda *a, **k: None)
     production = tmp_path / "production"
     production.mkdir()
     examples = Path(__file__).resolve().parents[1] / "nas_agent/examples"
@@ -418,3 +423,180 @@ def test_fixed_compose_refuses_escape_and_missing_limits(tmp_path, mutation):
         service["environment"]["GITHUB_TOKEN"] = "secret"
     with pytest.raises(Rejected):
         validate_compose({"services": {"candidate": service}}, checked, source.resolve(), limits)
+
+
+def comparison_fixture():
+    # PR17 nas.compareが返す最小の非空レース・馬・分類を表す。
+    row = {'レースID': 'race1', '予想状態': 'PREDICTED', '予想可否': '数値予想済み', '対象外理由コード': None, '対象外理由': None}
+    side = {'horses': 1, 'top5': [1], 'bet_row': [row]}
+    report = {'attribution': {'data': 'SAME', 'model': 'SAME', 'implementation': 'SAME'},
+              'common_horses': 1, 'unavailable_columns': {'left': [], 'right': []},
+              'horse_differences': [], 'left_only': [], 'right_only': [],
+              'races': [{'race_id': 'race1', 'left': deepcopy(side), 'right': deepcopy(side),
+                         'top5_changed': False, 'tickets_changed': False, 'fixed_tickets_changed': False}]}
+    excluded = {'horses': 0, 'top5': [], 'bet_row': [{'レースID': 'race2', '予想状態': 'NO_PREDICTION', '予想可否': '予想対象外',
+                                                   '対象外理由コード': 'FIXTURE_REASON', '対象外理由': 'fixture exclusion'}]}
+    report['races'].append({'race_id': 'race2', 'left': deepcopy(excluded), 'right': deepcopy(excluded),
+                            'top5_changed': False, 'tickets_changed': False, 'fixed_tickets_changed': False})
+    runtime = {'source_commit': PR17_SHA, 'features': ['feature1'],
+               'excel_validation': {'source_race_count': 2, 'predicted_race_count': 1, 'unsupported_race_count': 1},
+               'population': {'predicted_horses': 1, 'excluded_races': ['race2']}}
+    return report, runtime
+
+
+@pytest.mark.parametrize('mutation,error', [
+    ('missing_column', 'COMPARISON_COLUMNS_INCOMPLETE'), ('implementation', 'COMPARISON_IDENTITY_MISMATCH'),
+    ('commit', 'REFERENCE_COMMIT_MISMATCH'), ('tickets', 'WINDOWS_LINUX_MISMATCH'),
+    ('reason', 'RACE_CLASSIFICATION_MISMATCH'), ('empty', 'EMPTY_COMPARISON'),
+])
+def test_acceptance_rejects_false_match(mutation, error):
+    from nas_agent.acceptance_host import comparison_summary
+    report, runtime = comparison_fixture()
+    reference = deepcopy(runtime)
+    if mutation == 'missing_column':
+        report['unavailable_columns']['left'] = ['score_raw', 'feature1']
+    elif mutation == 'implementation':
+        report['attribution']['implementation'] = 'DIFFERENT'
+    elif mutation == 'commit':
+        reference['source_commit'] = 'a' * 40
+    elif mutation == 'tickets':
+        report['races'][0]['tickets_changed'] = True
+    elif mutation == 'reason':
+        report['races'][1]['left']['bet_row'][0]['対象外理由'] = 'different'
+    else:
+        report.update(common_horses=0, races=[])
+    if mutation in {'missing_column', 'implementation'}:
+        # 旧判定が差分ゼロとして通す代表例。不足列/異実装でもdata/modelだけは同じ。
+        assert report['attribution']['data'] == report['attribution']['model'] == 'SAME'
+        assert not report['horse_differences'] and not report['left_only'] and not report['right_only']
+        assert not any(r['top5_changed'] or r['fixed_tickets_changed'] for r in report['races'])
+    with pytest.raises(Rejected, match=error):
+        comparison_summary(report, reference, runtime, PR17_SHA)
+
+
+def test_acceptance_requires_candidate_arm64_evidence():
+    from nas_agent.acceptance_host import arm64_verified, comparison_summary
+    report, runtime = comparison_fixture()
+    assert comparison_summary(report, runtime, runtime, PR17_SHA)['windows_comparison'] == 'MATCH'
+    assert not arm64_verified({'platform': 'Linux-aarch64'}, None)  # 未確認はPASSにしない。
+    assert not arm64_verified({}, {'architecture': 'arm64', 'os': 'linux'})
+    assert arm64_verified({'platform': 'Linux-6.1-aarch64-with-glibc2.36'}, {'architecture': 'arm64', 'os': 'linux'})
+    with pytest.raises(Rejected, match='ARM64'):
+        arm64_verified({'platform': 'Linux-x86_64'}, {'architecture': 'amd64', 'os': 'linux'})
+
+
+@pytest.mark.parametrize('recover', [False, True])
+def test_terminal_and_recovery_barrier_rollback_together(setup, recover):
+    import sqlite3
+    config, _, api, job, _ = setup
+    job['job_type'] = 'issue16_acceptance'
+    state = Worker(config, api, CountingBackend(config)).state
+    state.observe(31, 'a' * 64, job)
+    state.set(job['job_id'], 'RUNNING')
+    # barrier保存時に故障を注入し、終端状態と履歴もロールバックすることを確認する。
+    state.db.execute("CREATE TRIGGER fail_barrier BEFORE INSERT ON meta WHEN NEW.key='recovery_required' BEGIN SELECT RAISE(ABORT, 'injected'); END")
+    state.db.commit()
+    with pytest.raises(sqlite3.DatabaseError):
+        if recover:
+            state.recover()
+        else:
+            state.set(job['job_id'], 'FAILED', error='TIMEOUT')
+    assert state.get(job['job_id'])['status'] == 'RUNNING'
+    assert state.get(job['job_id'])['history'][-1]['status'] == 'RUNNING'
+    assert state.meta('recovery_required') is None
+    state.db.execute('DROP TRIGGER fail_barrier')
+    state.db.commit()
+    state.recover()
+    assert state.get(job['job_id'])['status'] == 'INTERRUPTED'
+    assert state.meta('recovery_required') == '1'
+
+
+def test_audit_includes_raceday_odds(tmp_path, monkeypatch):
+    from nas_agent import acceptance_host
+    odds = tmp_path / 'data/ozzu_csv/OZZU_20260809.csv'
+    odds.parent.mkdir(parents=True)
+    odds.write_text('synthetic odds', encoding='utf-8')
+    monkeypatch.setattr(acceptance_host.subprocess, 'check_output', lambda *a, **k: 'fixture-container')
+    monkeypatch.setattr(acceptance_host, 'docker_json', lambda *a: {})
+    before = acceptance_host.audit(tmp_path, '20260809', {})
+    odds.write_text('changed synthetic odds', encoding='utf-8')
+    after = acceptance_host.audit(tmp_path, '20260809', {})
+    name = 'data/ozzu_csv/OZZU_20260809.csv'
+    assert name in before['files'] and before['files'][name] != after['files'][name]
+
+
+def test_spool_paging_reaches_new_job_and_report_after_1000_old_files(setup):
+    from nas_agent.report import record
+    config, poll_config, api, job, _ = setup
+    approve(config, api)
+    worker, poller = Worker(config, api, CountingBackend(config)), Poller(poll_config, api)
+    spool = Path(config['spool_dir'])
+    worker.state.observe(31, request(api.rows[31])[1], job)
+    worker.state.set(job['job_id'], 'SUCCEEDED')
+    payload = record(config, worker.state.get(job['job_id']))
+    for number in range(1000, 2001):
+        api.rows[number] = {'title': 'not a job', 'number': number}
+        atomic_json(spool / 'inbox' / f'{number}.json', {'issue_number': number})
+        atomic_json(spool / 'outbox' / f'{number}.json', {**payload, 'issue_number': number})
+    # 1001件目の有効依頼は辞書順で最後。古い履歴は削除しない。
+    api.add({**job, 'job_id': 'health_new'}, number=3000)
+    approve(config, api, number=3000)
+    atomic_json(spool / 'inbox/3000.json', {'issue_number': 3000})
+    worker.cycle()
+    worker.cycle()
+    assert len(worker.backend.calls) == 1
+    assert worker.state.get('health_new')['status'] == 'SUCCEEDED'
+    # 過去の終端報告1000件も処理済みのまま残し、新規報告へ進む。
+    from nas_agent.report import comment
+    from nas_agent.schema import digest
+    for number in range(1000, 2001):
+        old = {**payload, 'issue_number': number}
+        marker, _ = comment(old)
+        poller.state.meta('report:' + digest(marker), json.dumps({'revision': digest(old)}))
+    poller.cycle()
+    poller.cycle()
+    assert any('health_new' in row['body'] for row in api.comments)
+    assert (spool / 'outbox/1000.json').is_file()
+
+
+@pytest.mark.parametrize('case', ['valid', 'worker_owner', 'writable_parent', 'worker_parent', 'symlink', 'worker_approval'])
+def test_admin_policy_owner_parent_and_writer_boundary(tmp_path, monkeypatch, case):
+    from types import SimpleNamespace
+    import stat
+    from nas_agent import files
+    path = (tmp_path / 'admin/policy.json').absolute()
+    monkeypatch.setattr(files, 'POSIX', True)
+    monkeypatch.setattr(files.os, 'geteuid', lambda: 1001 if case == 'worker_approval' else 0, raising=False)
+    def metadata(item):
+        mode = stat.S_IFREG | 0o640 if item == path else stat.S_IFDIR | 0o750
+        owner = 0
+        if case == 'worker_owner' and item == path:
+            owner = 1001
+        if case == 'worker_parent' and item == path.parent:
+            owner = 1001
+        if case == 'writable_parent' and item == path.parent:
+            mode |= 0o020
+        if case == 'symlink' and item == path.parent:
+            mode = stat.S_IFLNK | 0o777
+        return SimpleNamespace(st_mode=mode, st_uid=owner)
+    monkeypatch.setattr(Path, 'lstat', metadata)
+    if case == 'valid':
+        files.validate_admin_file(path, for_write=True)
+    else:
+        with pytest.raises(Rejected, match='ADMIN'):
+            files.validate_admin_file(path, for_write=True)
+
+
+def test_admin_cli_approval_does_not_use_worker_config_or_state(setup, monkeypatch, capsys):
+    from nas_agent import __main__ as cli
+    _, _, api, _, policy = setup
+    monkeypatch.setattr(cli, 'GitHub', lambda *a: api)
+    monkeypatch.setattr(cli, 'verify_install', lambda cfg: None)
+    monkeypatch.setattr(cli, 'load_config', lambda *a: pytest.fail('admin command must not load worker config'))
+    request_hash = request(api.rows[31])[1]
+    monkeypatch.setattr(sys, 'argv', ['nas_agent', 'approve', '--policy-file', str(policy), '--agent-commit', 'a' * 40,
+                                    '--issue', '31', '--expected-hash', request_hash])
+    cli.main()
+    assert request_hash in private_json(policy)['approved_requests']
+    assert request_hash in capsys.readouterr().out
+    assert (policy.parent / '.approval.lock').exists()

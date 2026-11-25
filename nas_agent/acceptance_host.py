@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,7 @@ def audit(production, day, env):
             files[path.relative_to(production).as_posix()] = sha(path)
     names = ["compose.yaml", "Dockerfile", "requirements.txt", "config/production_model.json", "config/shadow_model.json", "config/forward_validation.json",
              f"data/input/馬の競走成績_{day}.xlsx", "data/master/race_levels.xlsx", "data/master/場所_馬場_タイム.xlsx", "data/master/racedata_results.xlsx",
+             f"data/ozzu_csv/OZZU_{day}.csv",
              f"data/output/馬の競走成績_with_feat_{day}.xlsx", f"data/output/status/READY_{day}.json", f"data/output/status/STATUS_{day}.json"]
     for name in names:
         path = production / name
@@ -87,6 +89,58 @@ def validate_compose(config, checked, source, limits):
         raise Rejected("RESOURCE_LIMITS_NOT_APPLIED")
 
 
+def arm64_verified(runtime, image):
+    """ホストのarchitectureではなく、候補の実行記録と実imageの両方を検査する。"""
+    candidate_platform = runtime.get("platform", "").lower()
+    if image and (image.get("architecture") != "arm64" or image.get("os") != "linux"):
+        raise Rejected("ARM64_IMAGE_REQUIRED")
+    if candidate_platform and (not candidate_platform.startswith("linux") or re.search(r"x86_64|amd64|armv7", candidate_platform)):
+        raise Rejected("ARM64_RUNTIME_REQUIRED")
+    return bool(image and candidate_platform.startswith("linux") and re.search(r"aarch64|arm64", candidate_platform))
+
+
+def comparison_summary(comparison, reference_runtime, runtime, commit):
+    """PR17の比較結果を受入判定する。欠損や空集合を差分ゼロとして採用しない。"""
+    if reference_runtime.get("source_commit") != commit or runtime.get("source_commit") != commit:
+        raise Rejected("REFERENCE_COMMIT_MISMATCH")
+    if any(comparison["attribution"].get(key) != "SAME" for key in ("data", "model", "implementation")):
+        raise Rejected("COMPARISON_IDENTITY_MISMATCH")
+    if not runtime.get("features") or reference_runtime.get("features") != runtime["features"] or any(comparison["unavailable_columns"].get(side, ["unknown"]) for side in ("left", "right")):
+        raise Rejected("COMPARISON_COLUMNS_INCOMPLETE")
+    races = comparison["races"]
+    if comparison["common_horses"] <= 0 or not races:
+        raise Rejected("EMPTY_COMPARISON")
+    classification = ("予想状態", "予想可否", "対象外理由コード", "対象外理由")
+    for side, metadata in (("left", reference_runtime), ("right", runtime)):
+        seen, excluded, predicted, horses = set(), set(), 0, 0
+        for race in races:
+            rows = race[side]["bet_row"]
+            if len(rows) != 1 or race["race_id"] in seen or rows[0].get("レースID") != race["race_id"] or not set(classification) <= rows[0].keys():
+                raise Rejected("RACE_CLASSIFICATION_INCOMPLETE")
+            row = rows[0]
+            seen.add(race["race_id"])
+            if (row["予想状態"], row["予想可否"]) == ("PREDICTED", "数値予想済み") and race[side]["horses"] > 0 and race[side]["top5"]:
+                predicted += 1
+            elif (row["予想状態"], row["予想可否"]) == ("NO_PREDICTION", "予想対象外") and row["対象外理由コード"] and row["対象外理由"] and race[side]["horses"] == 0:
+                excluded.add(race["race_id"])
+            else:
+                raise Rejected("RACE_CLASSIFICATION_INCOMPLETE")
+            horses += race[side]["horses"]
+        validation = metadata["excel_validation"]
+        if len(seen) != validation["source_race_count"] or predicted != validation["predicted_race_count"] or len(excluded) != validation["unsupported_race_count"] or excluded != set(metadata["population"]["excluded_races"]) or horses != metadata["population"]["predicted_horses"] or horses != comparison["common_horses"]:
+            raise Rejected("RACE_POPULATION_MISMATCH")
+    for race in races:
+        if any((race["left"]["bet_row"][0][key] or None) != (race["right"]["bet_row"][0][key] or None) for key in classification):
+            raise Rejected("RACE_CLASSIFICATION_MISMATCH")
+    summary = {"windows_comparison": "MATCH", "changed_horses": len(comparison["horse_differences"]),
+               "top5_changed_races": sum(row["top5_changed"] for row in races),
+               "tickets_changed_races": sum(row["tickets_changed"] for row in races),
+               "fixed_tickets_changed_races": sum(row["fixed_tickets_changed"] for row in races)}
+    if comparison["left_only"] or comparison["right_only"] or any(summary[key] for key in ("changed_horses", "top5_changed_races", "tickets_changed_races", "fixed_tickets_changed_races")):
+        raise Rejected("WINDOWS_LINUX_MISMATCH")
+    return summary
+
+
 def run(spec):
     if os.name != "posix" or os.geteuid() == 0:
         raise Rejected("NONROOT_LINUX_HOST_REQUIRED")
@@ -128,7 +182,8 @@ def run(spec):
         output.mkdir()
         env.update(checked)
         limits = policy["limits"]
-        override = {"services": {"candidate": {"cpus": limits["cpus"], "mem_limit": f"{limits['memory_mb']}m", "pids_limit": limits["pids"],
+        image_name = spec["project"] + "-candidate"
+        override = {"services": {"candidate": {"image": image_name, "cpus": limits["cpus"], "mem_limit": f"{limits['memory_mb']}m", "pids_limit": limits["pids"],
                      "labels": {"io.keiba.nas_agent.instance": spec["instance_id"], "io.keiba.nas_agent.job": job["job_id"]}}}}
         atomic_json(workspace / "limits.compose.json", override)
         command = ["docker", "compose", "-p", spec["project"], "-f", str(source / "nas/compose.yaml"), "-f", str(workspace / "limits.compose.json")]
@@ -146,24 +201,28 @@ def run(spec):
         runtime = json.loads((candidate / "runtime.json").read_text(encoding="utf-8"))
         if runtime["source_commit"] != job["commit_sha"] or runtime["input_manifest_sha256"] != entry["manifest_sha256"]:
             raise Rejected("RUNTIME_IDENTITY_MISMATCH")
+        image = None
+        try:
+            # 設定上のplatformだけで実ARM64を断定しない。imageの秘密/Envは取得しない。
+            image = docker_json(["image", "inspect", "--format", '{"architecture":{{json .Architecture}},"os":{{json .Os}}}', image_name], env)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass  # 実行成功と受入PASSを区別し、証拠不足はPARTIALに残す。
+        arm_verified = arm64_verified(runtime, image)
         summary = {"architecture": platform.machine(), "python_version": runtime["python"], "ready_verified": True, "input_match": True,
                    "races": runtime["excel_validation"]["predicted_race_count"], "horses": runtime["population"]["predicted_horses"],
-                   "excluded_races": len(runtime["population"]["excluded_races"]), "windows_comparison": "NOT_AVAILABLE", "acceptance": "PARTIAL"}
+                   "excluded_races": len(runtime["population"]["excluded_races"]), "windows_comparison": "NOT_AVAILABLE", "acceptance": "PARTIAL", "arm64_verified": arm_verified}
         artifacts = {"candidate_manifest.json": sha(candidate / "manifest.json"), "prediction.xlsx": sha(candidate / "prediction.xlsx")}
         if entry.get("reference_root"):
             reference = Path(entry["reference_root"]).resolve(strict=True)
             if sha(reference / "manifest.json") != entry["reference_manifest_sha256"]:
                 raise Rejected("REFERENCE_IDENTITY_MISMATCH")
-            verify_archive(reference)
+            verify_completed(reference)
+            reference_runtime = json.loads((reference / "runtime.json").read_text(encoding="utf-8"))
             from nas.compare import compare
             comparison = compare(reference / "prediction.xlsx", candidate / "prediction.xlsx", workspace / "comparisons/windows_linux.json", runtime, workspace=workspace)
-            if comparison["attribution"]["data"] != "SAME" or comparison["attribution"]["model"] != "SAME":
-                raise Rejected("COMPARISON_IDENTITY_MISMATCH")
-            summary.update(windows_comparison="MATCH", acceptance="PASS", changed_horses=len(comparison["horse_differences"]),
-                           top5_changed_races=sum(row["top5_changed"] for row in comparison["races"]),
-                           fixed_tickets_changed_races=sum(row["fixed_tickets_changed"] for row in comparison["races"]))
-            if summary["changed_horses"] or comparison["left_only"] or comparison["right_only"] or summary["top5_changed_races"] or summary["fixed_tickets_changed_races"]:
-                raise Rejected("WINDOWS_LINUX_MISMATCH")
+            summary.update(comparison_summary(comparison, reference_runtime, runtime, job["commit_sha"]))
+            if arm_verified:
+                summary["acceptance"] = "PASS"
             artifacts["windows_linux.json"] = sha(workspace / "comparisons/windows_linux.json")
         verify_archive(original)
         if sha(original / "manifest.json") != entry["manifest_sha256"]:

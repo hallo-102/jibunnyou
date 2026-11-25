@@ -12,7 +12,7 @@ import time
 
 from .backend import AGENT_CODE, Backend, clean_environment
 from .config import load_config, load_policy
-from .files import atomic_json, single_worker
+from .files import atomic_json, single_worker, validate_admin_file
 from .github import GitHub, Unavailable
 from .poller import Poller
 from .schema import REPOSITORY, Rejected, request, timestamp, utcnow
@@ -42,23 +42,42 @@ def admin_approve(config, github, number, expected=None):
     if expected != request_hash or issue["state"] != "open" or timestamp(job["expires_at"]) <= utcnow():
         raise Rejected("APPROVAL_REQUEST_CHANGED_OR_EXPIRED")
     # 上位のcommit/type/input範囲外は個別承認を追加しても実行されない。
-    with single_worker(Path(config["state_dir"]) / "approval.lock"):
+    validate_admin_file(config["policy_file"], for_write=True)
+    with single_worker(Path(config["policy_file"]).parent / ".approval.lock"):
         policy = load_policy(config["policy_file"])
         if request_hash not in policy["approved_requests"]:
             policy["approved_requests"].append(request_hash)
-            atomic_json(config["policy_file"], policy, mode=0o600)
+            group = Path(config["policy_file"]).stat().st_gid if os.name == "posix" else None
+            atomic_json(config["policy_file"], policy, mode=0o640, gid=group)
     return {"approved_request_hash": request_hash, "job_id": job["job_id"]}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["poll", "worker", "inspect", "approve", "status", "verify-github", "ack-interrupted"])
-    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--policy-file", type=Path)
+    parser.add_argument("--token-file", type=Path)
+    parser.add_argument("--agent-commit")
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--issue", type=int)
     parser.add_argument("--expected-hash")
     parser.add_argument("--confirm-build-idle", action="store_true")
     args = parser.parse_args()
+    if args.command in {"inspect", "approve"}:
+        # 管理者用経路。worker設定/私有state/tokenを読まず、管理者自身のread tokenを使う。
+        if not args.policy_file or not args.policy_file.is_absolute() or not args.agent_commit or not args.issue or (args.command == "approve" and not args.expected_hash):
+            raise Rejected("ADMIN_POLICY_COMMIT_ISSUE_REQUIRED")
+        config = {"policy_file": args.policy_file, "agent_commit": args.agent_commit, "state_dir": args.policy_file.parent}
+        load_policy(args.policy_file)
+        if args.command == "approve":
+            validate_admin_file(args.policy_file, for_write=True)
+        verify_install(config)
+        github = GitHub(args.token_file)
+        print(json.dumps(admin_approve(config, github, args.issue, args.expected_hash if args.command == "approve" else None), ensure_ascii=False))
+        return
+    if not args.config:
+        raise Rejected("CONFIG_REQUIRED")
     role = "poller" if args.command == "poll" else "worker"
     if args.command in {"status", "verify-github"}:
         from .files import private_json
@@ -89,11 +108,6 @@ def main():
         github.api(f"/repos/{REPOSITORY}/commits/3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92")
         print(json.dumps({"repository": repo["full_name"], "private": repo["private"], "contents_read": True,
                           "issues_read": True, "issues_write": "UNVERIFIED_UNTIL_FIRST_REPORT"}))
-        return
-    if args.command in {"inspect", "approve"}:
-        if not args.issue or (args.command == "approve" and not args.expected_hash):
-            raise Rejected("ISSUE_AND_EXPLICIT_HASH_REQUIRED")
-        print(json.dumps(admin_approve(config, github, args.issue, args.expected_hash if args.command == "approve" else None), ensure_ascii=False))
         return
     backend = Backend(config, github.token) if role == "worker" else None
     stopped = [False]

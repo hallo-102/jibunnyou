@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 
 from .config import load_policy
-from .files import atomic_json, beneath, single_worker, spool_json
+from .files import atomic_json, beneath, single_worker, spool_json, spool_page
 from .github import Unavailable
 from .report import record
 from .schema import TERMINAL, Rejected, authorized, request, timestamp, utcnow
@@ -44,7 +44,7 @@ class Worker:
             inbox = self.spool / "inbox"
             if not inbox.exists():
                 return
-            for path in sorted(inbox.glob("*.json"))[:1000]:
+            for path in spool_page(inbox, self.state, "inbox_cursor"):
                 policy = load_policy(self.config["policy_file"])
                 if not path.stem.isdigit() or path.is_symlink():
                     continue
@@ -124,14 +124,10 @@ class Worker:
                     control()
                 except Abort as exc:
                     row = self.state.set(job["job_id"], exc.state, error=exc.code)
-                    if job["job_type"] == "issue16_acceptance":
-                        self.state.meta("recovery_required", "1")
                 except (Exception, KeyboardInterrupt) as exc:
                     code = "GITHUB_UNAVAILABLE" if isinstance(exc, Unavailable) else "HANDLER_FAILED"
                     status = "INTERRUPTED" if isinstance(exc, KeyboardInterrupt) else "FAILED"
                     row = self.state.set(job["job_id"], status, error=code)
-                    if job["job_type"] == "issue16_acceptance":
-                        self.state.meta("recovery_required", "1")
                 else:
                     row = self.state.set(job["job_id"], "SUCCEEDED", result=result)
                 self.publish(row)

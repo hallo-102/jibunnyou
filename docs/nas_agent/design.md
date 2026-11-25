@@ -25,6 +25,8 @@ workerはspool内の内容を実行命令として信用せず、固定repoのGi
 
 request_hashはrepo・Issue番号・数値requester ID・正規化した全ジョブJSONを束ねたSHA256。初期は管理者がinspectで確認し、そのhashをローカルpolicyへ個別承認する。globalの許可type/SHA/入力と個別hashの両方が必要。新コード/Dockerfile/依存/実行方式は固定SHAまたは導入agent自体の新規レビュー対象で、自動更新しない。
 
+policyと個別hashはroot所有admin/policy.jsonにまとめ、workerは専用groupで読取だけを行う。全親ディレクトリもroot所有でgroup/other書込不可を検査する。承認CLIは常駐workerの起動経路と分け、管理者自身のread tokenと導入agent SHAを指定し、rootだけが更新できる。Docker権限がroot相当という信頼境界は残り、悪意あるworkerの完全隔離は主張しない。
+
 後続のgrantsは既に許可されたSHA/type/input/date範囲にだけ限定する。初回観測時にcreated_atとupdated_atが異なるIssueは保守的に個別承認を要求する。以後意味のある本文変更を検知したIssueはgrantを使わず再承認する。空白等で正規化JSONが同一なら同じ依頼。RUNNING時の変更は実行パラメータに反映しない。終端済みjob_idは別Issue/本文でも再使用不可で、新job_idが必要。
 
 ## 実行/停止/報告
@@ -33,6 +35,8 @@ OSファイルロックでworkerを1個に限定し、私有SQLiteにjob_id/hash
 
 電源断・異常終了後に残るRUNNINGはINTERRUPTEDへ変える。issue16_acceptanceは後続ジョブ全体を管理者確認まで止める。Dockerのbuildはクライアント停止後もdaemon側に残り得るため、コンテナ停止とbuild idleの確認を自動成功と扱わない。ack-interruptedは該当instanceの残存containerなしと管理者の明示確認を要求し、中断ジョブそのものは再実行しない。
 
+実行済み副作用ジョブの非成功終端・履歴・recovery_requiredは同一SQLite transactionで保存する。RUNNING復旧も同じ更新APIを通し、バリアだけ未保存となる電源断の窓をなくす。inbox/outboxは永続cursorで最大1000件ずつ巡回し、過去ファイルを残しても新規分が先頭1000件の外に滞留し続けない。
+
 GitHubへの報告はpollerが別途実行する。POST保存後の応答喪失時は自分のmarkerコメントを再発見してPATCHし、同じジョブを再実行しない。ローカル保存結果を再送できる。RUNNING heartbeatは15秒間隔でローカル保存、GitHubの更新は5分間隔。未応答/古いheartbeatはNAS電源OFF・通信/サービス停止等を含み、FAILEDとは断定しない。初期pollは60秒、ETag、Retry-After/RateLimit-Reset、指数backoffを使い、待機期限は再起動後にも維持する。
 
 ## PR #17の再利用と権限
@@ -40,6 +44,8 @@ GitHubへの報告はpollerが別途実行する。POST保存後の応答喪失�
 target checkoutは固定HTTPS repoから40桁SHAでGit取得し、HEAD/remote/clean状態/余分なignored fileなしを検証する。初期SHAは `3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92`。sourceと依存venv、秘密、状態、snapshot、出力は別のルート。
 
 固定host helperはそのcheckoutの `nas.workspace.initialize`、`nas.launch.checked_environment`、`verify_archive`、`nas.candidate.verify_completed`、任意のWindows比較には `nas.compare.compare` を直接使用する。予想/順位/買い目を再実装しない。既存CLIは固定project名でリソースoverrideの引数を持たないため、同じパス検査APIとcomposeを使う最小host wrapperで、instance/job固有projectと管理者固定の制限を付ける。
+
+Windows比較では双方のverify_completedと同一レビューSHAを要求し、既存compare結果のimplementation/data/model、unavailable_columns、非空の共通馬、全レース分類/除外理由、通常券/固定券/TOP5まで判定する。欠損/不一致は明示停止。実行完了SUCCEEDEDと受入PASSを分け、候補runtimeのLinux ARM64と実imageのlinux/arm64の証拠が揃わなければPARTIALとする。
 
 実行前に展開済みComposeを検査し、snapshot/markerはro、候補runsだけrw、network none、非root、read_only、cap drop、no-new-privileges、socket/秘密/host namespaceなしを要求する。job指定のcomposeは受け付けない。CPU/RAM/PIDの例は1 CPU/2GiB/256。worker自身にも専用サービスのCPU/メモリ制限を設定できる。buildは実行と別の信頼境界で、allow_buildの明示承認と非重複時間帯が必要。
 
@@ -52,7 +58,7 @@ target checkoutは固定HTTPS repoから40桁SHAでGit取得し、HEAD/remote/cl
 | 入力/権限 | 防御/限界 |
 |---|---|
 | 他人がIssue/ラベルを変更 | 独立GET、数値ID/権限、厳格schema、承認hash/固定範囲。ラベルを承認根拠にしない |
-| pollerの侵害 | Dockerグループなし、受付socketなし、worker私有state/policy/checkoutへ書込不可。workerはGitHubから再取得。spoolの不正値/リンク/非通常ファイルを拒否 |
+| pollerの侵害 | Dockerグループなし、受付socketなし、worker私有state/checkoutと管理者policyへ書込不可。workerはGitHubから再取得。spoolの不正値/リンク/非通常ファイルを拒否 |
 | 任意SHA/任意path | ローカルallowlistと固定input辞書、専用ルート、PR17パス検査。global範囲外は個別hashを追加しても実行不可 |
 | worker/管理者の侵害 | Docker権限は実質root相当。ここは信頼する境界であり、任意コードsandboxではない。agent code・policy・新規SHAの管理者レビューとOS所有権が必要 |
 | build/上流依存 | 承認SHAのDockerfile/依存だけをbuild。contextにPAT/本番dataを置かない。PR17のbase tagと依存の供給網・NAS実測は別途確認が必要 |

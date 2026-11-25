@@ -59,11 +59,14 @@ class State:
     def set(self, job_id, status, *, error=None, result=None):
         now = utcnow().isoformat()
         before = self.get(job_id)
-        if before["status"] != status or before["error_code"] != error:
-            self.db.execute("INSERT INTO events VALUES(?,?,?,?,?)", (job_id, before["request_hash"], status, now, error))
-        self.db.execute("UPDATE jobs SET status=?,error_code=?,heartbeat_at=?,started_at=CASE WHEN ?='RUNNING' THEN COALESCE(started_at,?) ELSE started_at END,finished_at=CASE WHEN ? IN ('SUCCEEDED','FAILED','CANCELLED','INTERRUPTED') THEN ? ELSE finished_at END,result=? WHERE job_id=?",
-                        (status, error, now, status, now, status, now, canonical(result or {}), job_id))
-        self.db.commit()
+        # 終端・履歴・復旧バリアは、電源断時にも全部保存または全部rollbackとなる。
+        with self.db:
+            if before["status"] != status or before["error_code"] != error:
+                self.db.execute("INSERT INTO events VALUES(?,?,?,?,?)", (job_id, before["request_hash"], status, now, error))
+            self.db.execute("UPDATE jobs SET status=?,error_code=?,heartbeat_at=?,started_at=CASE WHEN ?='RUNNING' THEN COALESCE(started_at,?) ELSE started_at END,finished_at=CASE WHEN ? IN ('SUCCEEDED','FAILED','CANCELLED','INTERRUPTED') THEN ? ELSE finished_at END,result=? WHERE job_id=?",
+                            (status, error, now, status, now, status, now, canonical(result or {}), job_id))
+            if before["started_at"] and status in TERMINAL - {"SUCCEEDED"} and json.loads(before["job"])["job_type"] == "issue16_acceptance":
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES('recovery_required','1')")
         return self.get(job_id)
 
     def meta(self, key, value=None):
@@ -76,10 +79,7 @@ class State:
     def recover(self):
         rows = self.db.execute("SELECT * FROM jobs WHERE status='RUNNING'").fetchall()
         for row in rows:
-            job = json.loads(row["job"])
             self.set(row["job_id"], "INTERRUPTED", error="WORKER_RESTARTED")
-            if job["job_type"] == "issue16_acceptance":
-                self.meta("recovery_required", "1")
         return [self.get(row["job_id"]) for row in rows]
 
     def all(self):

@@ -11,7 +11,7 @@
 python -m pytest tests/test_nas_agent.py -q
 ```
 
-35件成功。次を確認した。
+初回35件成功。一次レビュー修正後は53件成功（既存35件と追加18件）。次を確認した。
 
 | 対象 | 確認内容 |
 |---|---|
@@ -36,6 +36,20 @@ GitHub ActionsにはUbuntu/Python 3.11で同じ模擬テストを実行する専
 - 同一snapshot/modelのWindows比較。参照を登録しない実行はPARTIALであり、Windows一致を表さない。
 - Windows電源OFFでの一連動作、NAS停止中の依頼、電源断後の復旧、長時間運用時のrate limit。
 - Driveはdry-run固定。検証専用先への転送機能は今回有効化していない。既存rclone設定を使用/変更していない。
+
+## PR #19 一次レビューへの対応
+
+対象レビューは [comment-7157650552](https://github.com/hallo-102/jibunnyou/pull/19#issuecomment-7157650552)。今回の5指摘に限定した。
+
+| 指摘 | 修正・回帰確認 |
+|---|---|
+| S1 誤PASS | 双方のverify_completed、同一レビューSHA、data/model/implementation、全必須比較列、非空の馬/レース、全レース分類・対象外理由、通常券/固定券/TOP5を検査。不足列/異実装/異SHA/通常券差/理由差/空集合fixtureを拒否。候補runtimeとimageのARM64証拠不足はPARTIAL、既知の異architectureは停止 |
+| S2 復旧バリア | 終端・履歴・バリアを同一SQLite transactionで保存。meta挿入にABORT triggerを注入し、通常の失敗更新とRUNNING復旧の両方が全体rollbackすることを確認。再復旧後はINTERRUPTEDとバリアが揃う |
+| S3 管理者境界 | root所有policyと全親の非書込検査、rootのみの承認CLIへ変更。worker所有/親書込可/親worker所有/リンク/worker承認を拒否。管理者CLIがworker config/stateを使わないことを確認。POSIX所有情報を模擬したテストであり実NASの権限試験ではない |
+| A1 監査・導入 | 当日OZZU CSVの変更を前後hashで検出するfixture。監査の限定範囲と未確認schedulerを明示。新規user/group→管理者ディレクトリ→専用venv→認証→個別承認→受入→専用サービスの順序を具体化 |
+| A2 滞留 | inbox/outboxに古い履歴を1000件以上残し、後続の新規依頼実行と報告が次回巡回で到達することを確認。永続cursorだけを追加し、履歴削除や大規模キューは導入しない |
+
+追加比較fixtureはPR17 compareの返すレポート構造を用いた合成データで、実データのWindows/Linux一致の証拠ではない。ジョブSUCCEEDEDは固定処理完了、acceptance=PASSは完全な受入確認として分ける。必須比較情報欠落/不一致は明示停止し、ARM64証拠不足や参照未登録によるPARTIALをPASSへ昇格しない。
 
 ## 別承認後の最小実機受入
 
