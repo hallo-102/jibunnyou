@@ -97,3 +97,30 @@ def test_d02_pace_features(calculate):
     })
     assert legacy.iloc[0][["cond_pace_fast_last3f", "cond_pace_slow_last3f"]].tolist() == [34, 36]
     assert validation.iloc[0][["cond_pace_fast_last3f", "cond_pace_slow_last3f"]].tolist() == [36, 34]
+
+
+@pytest.mark.parametrize(("race_class", "legacy", "corrected"), [
+    ("GI", "G1", "G1"),
+    ("GII", "G1", "G2"),
+    ("GIII", "G1", "G3"),
+    ("レース（ＧⅢ）", "G3", "G3"),
+    ("Jpn2", "G2", "G2"),
+    ("G10", "G1", ""),
+    ("GIFT", "G1", ""),
+])
+def test_d03_grade_tokens(race_class, legacy, corrected):
+    assert shared._parse_class_name_from_text(race_class) == legacy
+    assert shared._parse_class_name_from_text(race_class, validation=True) == corrected
+
+
+def test_d03_class_specific_finish_section(calculate):
+    legacy, validation = calculate(
+        {
+            "日付": ["2026/11/03", "2026/11/02", "2026/11/01"],
+            "レース名": ["レース(GI)", "レース(GII)", "レース(GIII)"],
+            "上り": [33, 34, 38],
+        },
+        race_class="GII",
+    )
+    assert legacy.iloc[0]["last3f_class_diff"] == 0
+    assert validation.iloc[0]["last3f_class_diff"] == 1

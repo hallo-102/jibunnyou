@@ -31,6 +31,7 @@ from datetime import date
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import re
+import unicodedata
 import numpy as np
 import pandas as pd
 
@@ -286,19 +287,25 @@ def _bucket_distance(dist: Optional[int]) -> str:
     return "long"
 
 
-def _parse_class_name_from_text(text_val: Any) -> str:
+def _parse_class_name_from_text(text_val: Any, *, validation: bool = False) -> str:
     if text_val is None or (isinstance(text_val, float) and np.isnan(text_val)):
         return ""
     s = _to_str(text_val)
-    s = s.replace("　", "").replace(" ", "")
-    s = s.upper()
+    if validation:
+        normalized = unicodedata.normalize("NFKC", s).upper()
+        grade = re.search(r"(?<![A-Z0-9])(?:G|JPN)\s*(III|II|I|[123])(?![A-Z0-9])", normalized)
+        if grade:
+            number = {"I": "1", "II": "2", "III": "3"}.get(grade[1], grade[1])
+            return "G" + number
 
-    if "G1" in s or "GI" in s or "ＧⅠ" in s or "Ｇ1" in s or "JPN1" in s:
-        return "G1"
-    if "G2" in s or "GII" in s or "ＧⅡ" in s or "Ｇ2" in s or "JPN2" in s:
-        return "G2"
-    if "G3" in s or "GIII" in s or "ＧⅢ" in s or "Ｇ3" in s or "JPN3" in s:
-        return "G3"
+    s = s.replace("　", "").replace(" ", "").upper()
+    if not validation:
+        if "G1" in s or "GI" in s or "ＧⅠ" in s or "Ｇ1" in s or "JPN1" in s:
+            return "G1"
+        if "G2" in s or "GII" in s or "ＧⅡ" in s or "Ｇ2" in s or "JPN2" in s:
+            return "G2"
+        if "G3" in s or "GIII" in s or "ＧⅢ" in s or "Ｇ3" in s or "JPN3" in s:
+            return "G3"
     if "リステッド" in s:
         return "L"
     if re.search(r"(^|[^A-Z])L([^A-Z]|$)", s):
@@ -1000,7 +1007,10 @@ def _compute_horse_features_from_race_sheets(
             one["__place__"] = one[c_place].map(_normalize_place_text) if c_place else ""
             one["__surface__"] = one[c_surface].map(_parse_surface) if c_surface else ""
             one["__dist__"] = one[c_dist].map(_parse_distance_m) if c_dist else np.nan
-            one["__class__"] = one[c_race_name].map(_parse_class_name_from_text) if c_race_name else ""
+            one["__class__"] = (
+                one[c_race_name].map(lambda name: _parse_class_name_from_text(name, validation=validation))
+                if c_race_name else ""
+            )
             one["__pace__"] = one[c_lap].map(lambda lap: _parse_pace_from_laps(lap, validation=validation)) if c_lap else ""
             one["__last3f__"] = last3_s
             one["__time_idx__"] = time_idx_s
@@ -1072,7 +1082,9 @@ def _compute_horse_features_from_race_sheets(
 
             now_place = _normalize_place_text(r_now.get("場所"))
             now_surface = _parse_surface(r_now.get("コース")) if "コース" in now.columns else _parse_surface(r_now.get("芝・ダ"))
-            now_class = _parse_class_name_from_text(r_now.get("クラス", r_now.get("レース名", "")))
+            now_class = _parse_class_name_from_text(
+                r_now.get("クラス", r_now.get("レース名", "")), validation=validation,
+            )
             now_pace = inferred_race_pace
 
             context_feats = _calc_contextual_last3f_features(
