@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "scope": "offline",
+  "model_config": "config/production_model.json",
+  "model_name": "best_feature_weights_20260817",
+  "file_sha256": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
+  "effective_sha256": "8325f5c0748aa49076631b02424f2104a7924d0b39a4148d4703f687a937a789",
+  "auto_promote": false,
+  "upload_mode": "dry-run"
+}

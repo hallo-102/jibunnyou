@@ -1,0 +1,22 @@
+name: NAS candidate basic tests
+on:
+  pull_request:
+    paths: ['nas/**', 'continuous_improvement/**', 'tests/test_nas_integration.py', '.github/workflows/nas-candidate.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU dependencies
+        run: |
+          # x86 CIではCUDA配布物を不要にする。ARM64イメージとは別の基本検証。
+          pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r nas/requirements.txt pytest==8.4.1
+      - name: Verify isolation and shared ranking
+        run: python -m pytest tests/test_nas_integration.py tests/test_unique_ranking.py -q
