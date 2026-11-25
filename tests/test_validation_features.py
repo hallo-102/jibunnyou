@@ -73,3 +73,27 @@ def test_d01_validation_requires_cutoff():
         shared._compute_horse_features_from_race_sheets(
             {}, pd.DataFrame({"rid_str": [], "馬名": []}), None, validation=True,
         )
+
+
+@pytest.mark.parametrize(("laps", "legacy", "corrected"), [
+    ("11.0-11.0-12.0-12.0-12.0-12.0", "slow", "fast"),
+    ("12.0-12.0-12.0-11.0-11.0-12.0", "fast", "slow"),
+    ("11.0-12.0-12.0-11.0-12.0-12.0", "mid", "mid"),
+])
+def test_d02_pace_direction(laps, legacy, corrected):
+    assert shared._parse_pace_from_laps(laps) == legacy
+    assert shared._parse_pace_from_laps(laps, validation=True) == corrected
+
+
+def test_d02_pace_features(calculate):
+    legacy, validation = calculate({
+        "日付": ["2026/11/03", "2026/11/02", "2026/11/01"],
+        "上り": [36.0, 34.0, 35.0],
+        "ラップタイム": [
+            "11.0-11.0-12.0-12.0-12.0-12.0",
+            "12.0-12.0-12.0-11.0-11.0-12.0",
+            "11.0-12.0-12.0-11.0-12.0-12.0",
+        ],
+    })
+    assert legacy.iloc[0][["cond_pace_fast_last3f", "cond_pace_slow_last3f"]].tolist() == [34, 36]
+    assert validation.iloc[0][["cond_pace_fast_last3f", "cond_pace_slow_last3f"]].tolist() == [36, 34]

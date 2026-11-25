@@ -320,13 +320,8 @@ def _parse_class_name_from_text(text_val: Any) -> str:
     return ""
 
 
-def _parse_pace_from_laps(lap_text: Any) -> str:
-    """
-    前半3F と 後半3F の差で pace を簡易判定
-    - diff <= -0.6 : slow
-    - diff >=  0.6 : fast
-    - それ以外     : mid
-    """
+def _parse_pace_from_laps(lap_text: Any, *, validation: bool = False) -> str:
+    """前後半3Fの差で判定する。検証では前半が速い場合を fast とする。"""
     if lap_text is None or (isinstance(lap_text, float) and np.isnan(lap_text)):
         return ""
     nums = re.findall(r"\d+\.\d+", str(lap_text))
@@ -339,6 +334,8 @@ def _parse_pace_from_laps(lap_text: Any) -> str:
     first3 = sum(laps[:3])
     last3 = sum(laps[-3:])
     diff = first3 - last3
+    if validation:
+        diff = round(-diff, 10)
     if diff <= -0.6:
         return "slow"
     if diff >= 0.6:
@@ -1004,7 +1001,7 @@ def _compute_horse_features_from_race_sheets(
             one["__surface__"] = one[c_surface].map(_parse_surface) if c_surface else ""
             one["__dist__"] = one[c_dist].map(_parse_distance_m) if c_dist else np.nan
             one["__class__"] = one[c_race_name].map(_parse_class_name_from_text) if c_race_name else ""
-            one["__pace__"] = one[c_lap].map(_parse_pace_from_laps) if c_lap else ""
+            one["__pace__"] = one[c_lap].map(lambda lap: _parse_pace_from_laps(lap, validation=validation)) if c_lap else ""
             one["__last3f__"] = last3_s
             one["__time_idx__"] = time_idx_s
             one["__field_size__"] = pd.to_numeric(one[c_field_size], errors="coerce") if c_field_size else np.nan
