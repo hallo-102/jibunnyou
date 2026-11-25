@@ -25,7 +25,7 @@ python -m pytest tests/test_nas_agent.py -q
 
 追加smokeでは公開GitHubからPR #17の完全SHAを実際に取得し、clean checkout、既存 `nas.launch.checked_environment`、実際の `docker compose config --format json` と独自安全検査を通した。入力は新規temp内の合成fixtureだけ。Docker build/runは実行していない。[機械可読記録](smoke_result.json)を参照。
 
-GitHub ActionsにはUbuntu/Python 3.11で同じ模擬テストを実行する専用workflowを追加した。クラウド実行であり、NAS runner、NAS認証、デプロイ、定期起動は含まない。workflowの実結果はPRのChecksで確認する。
+GitHub ActionsにはUbuntu/Python 3.11で同じ模擬テストを実行する専用workflowを追加した。[初回実行は成功](https://github.com/hallo-102/jibunnyou/actions/runs/45578325574)。クラウド実行であり、NAS runner、NAS認証、デプロイ、定期起動は含まない。最新commitの結果はPRのChecksで確認する。
 
 ## 実NASで未検証の事項
 
