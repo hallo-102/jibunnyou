@@ -2,7 +2,7 @@
 
 本番採用の判定ではなく、隔離した統合候補の検証結果。実データ由来のExcel/CSV、入力、馬/レース単位比較JSON、ログ、認証はGitHubへ登録していない。集計のみ [real_day_summary.json](real_day_summary.json) に記載する。
 
-このファイルの旧23件・実データ集計はd60258e以前の初回検証記録。PR #17の修正内容・最新39件の最小回帰は [pr17_review.md](pr17_review.md) を参照する。共通特徴量/補正を固定した重みだけの統制比較と機械的な出所照合を追加した。最新手順はworkspace必須のrunbookに更新済み。
+このファイルの旧23件・実データ集計はd60258e以前の初回検証記録。PR #17の修正内容・最新39件の最小回帰は [pr17_review.md](pr17_review.md)、988e1fdでの最終通し検証は [review_summary.json](review_summary.json) を参照する。共通特徴量/補正を固定した重みだけの統制比較と機械的な出所照合を追加した。最新手順はworkspace必須のrunbookに更新済み。
 
 ## 検証済み
 

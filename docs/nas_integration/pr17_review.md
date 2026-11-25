@@ -24,7 +24,13 @@ python -m pytest tests/test_nas_review.py tests/test_nas_integration.py tests/te
 git diff --check  # 空白の不正がないことを確認する。
 ```
 
-代表日の生の比較・入力・Excel・ログ・weight_controlの馬別記録は候補専用workspaceに保存し、GitHubへ登録しない。最終通し検証の集計は別のreview_summary.jsonに記録する。
+代表日の生の比較・入力・Excel・ログ・weight_controlの馬別記録は候補専用workspaceに保存し、GitHubへ登録しない。最終通し検証の集計は [review_summary.json](review_summary.json) に記録した。
+
+検証実装commitは `988e1fdc534e145e5757d903241c036e70e70904`。20260809の36レース495頭を新規workspaceで固定し、候補27レース376頭・対象外9を確認した。TARGET/分類/一意順位再計算、公開コピー、COMPLETED/READY、全manifest SHA、実行時core/adapter SHAが一致した。ローカルNAS静的ソース・Windows比較対象・元入力/オッズ/2マスタ/旧予想のSHAも不変。
+
+同一snapshotの旧NAS再生と候補は、両側ともVERIFIED_SAVED_RECORDS、data=SAME、model/implementation=DIFFERENT。共通特徴量/補正上の重みだけの統制比較は27レース376頭で補正値が完全一致し、20260817結果は通常候補と完全一致した。重み差だけでは順位225頭・1位7レース・TOP5集合16レースが変化した。旧NAS対候補の順位233頭・1位8・TOP5 17という複合差と直接引き算して寄与率を出さず、相互作用を含む全分解やROI改善を認定しない。
+
+ホスト検査を経たcompose configは終了0。比較JSONは実際のOneDrive上で新規保存でき、同じ結果名での再実行を拒否して既存結果を保持した。クラウドCIは修正コミットのPush前のため未実行。実機に関する未検証事項は以下の通り維持する。
 
 OneDrive上でhardlink作成がWinError 5になったため、比較結果の保存はO_EXCLの新規ファイル作成へ変更した。書込途中のI/O故障は失敗として例外を返す。新規の不完全ファイルが残った場合も上書き再試行せず、別の新規結果名を使用する。比較JSONをREADYと同じ原子的成功マーカーとして扱わない。
 
