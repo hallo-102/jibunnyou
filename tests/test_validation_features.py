@@ -143,3 +143,24 @@ def test_d04_unfinished_run_with_numeric_placeholder(calculate):
     })
     assert legacy.iloc[0][["ta_n", "avg_finish"]].tolist() == [2, 50]
     assert validation.iloc[0][["ta_n", "avg_finish"]].tolist() == [2, 1]
+
+
+def test_d05_recent_window_precedes_missing_value_removal(calculate):
+    values = [9, 1, None, 3]
+    legacy, validation = calculate({
+        "日付": ["2026/11/01", "2026/11/04", "2026/11/03", "2026/11/02"],
+        "距離": ["芝1600"] * 4,
+        "着順": values,
+        "人気": values,
+        "上り": values,
+        "タイム指数": values,
+        "着差": values,
+    })
+    recent_columns = [
+        "recent3_finish", "recent3_pop", "recent3_last3f", "recent3_time_idx",
+        "recent_distance_time_idx",
+    ]
+    assert legacy.iloc[0][recent_columns].tolist() == pytest.approx([13 / 3] * 5)
+    assert validation.iloc[0][recent_columns].tolist() == [2] * 5
+    assert legacy.iloc[0]["recent_margin_improvement"] == 0
+    assert validation.iloc[0]["recent_margin_improvement"] == pytest.approx(13 / 3 - 2)

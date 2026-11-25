@@ -403,8 +403,10 @@ def _safe_series_mean(s: pd.Series) -> float:
     return float(s_num.mean()) if not s_num.dropna().empty else np.nan
 
 
-def _safe_recent_mean(s: pd.Series, n: int = 3) -> float:
-    """日付降順に並んだ Series から、直近 n 件の平均を返す。"""
+def _safe_recent_mean(s: pd.Series, n: int = 3, *, validation: bool = False) -> float:
+    """日付降順の Series から近走平均を返す。検証では直近 n 走内の有効値を使う。"""
+    if validation:
+        return _safe_series_mean(s.head(n))
     s_num = pd.to_numeric(s, errors="coerce").dropna()
     return float(s_num.head(n).mean()) if not s_num.empty else np.nan
 
@@ -1060,10 +1062,10 @@ def _compute_horse_features_from_race_sheets(
             avg_last3f = float(last3_s.mean()) if not last3_s.dropna().empty else np.nan
             avg_margin = float(margin_s.mean()) if not margin_s.dropna().empty else np.nan
             avg_time_idx = float(time_idx_s.mean()) if not time_idx_s.dropna().empty else np.nan
-            recent3_finish = _safe_recent_mean(finish_s, n=3)
-            recent3_pop = _safe_recent_mean(pop_s, n=3)
-            recent3_last3f = _safe_recent_mean(last3_s, n=3)
-            recent3_time_idx = _safe_recent_mean(time_idx_s, n=3)
+            recent3_finish = _safe_recent_mean(finish_s, validation=validation)
+            recent3_pop = _safe_recent_mean(pop_s, validation=validation)
+            recent3_last3f = _safe_recent_mean(last3_s, validation=validation)
+            recent3_time_idx = _safe_recent_mean(time_idx_s, validation=validation)
             recent_finish_trend = (
                 avg_finish - recent3_finish
                 if not np.isnan(avg_finish) and not np.isnan(recent3_finish)
@@ -1213,9 +1215,9 @@ def _compute_horse_features_from_race_sheets(
             range_count = int(range_distance_mask.sum())
             distance_exact_top3_rate = float(top3_mask[exact_distance_mask].mean()) if exact_count else np.nan
             distance_range_top3_rate = float(top3_mask[range_distance_mask].mean()) if range_count else np.nan
-            distance_time_values = time_idx_s[range_distance_mask].dropna()
-            distance_time_idx = float(distance_time_values.mean()) if not distance_time_values.empty else np.nan
-            recent_distance_time_idx = float(distance_time_values.head(3).mean()) if not distance_time_values.empty else np.nan
+            distance_time_values = time_idx_s[range_distance_mask]
+            distance_time_idx = _safe_series_mean(distance_time_values)
+            recent_distance_time_idx = _safe_recent_mean(distance_time_values, validation=validation)
             condition_match_reliability = float(exact_count / (exact_count + 3.0))
             distance_range_reliability = float(range_count / (range_count + 3.0))
 
@@ -1265,7 +1267,7 @@ def _compute_horse_features_from_race_sheets(
                 if not np.isnan(recent3_time_idx) and not np.isnan(avg_time_idx)
                 else np.nan
             )
-            recent_margin = _safe_recent_mean(margin_s, n=3)
+            recent_margin = _safe_recent_mean(margin_s, validation=validation)
             recent_margin_improvement = (
                 avg_margin - recent_margin
                 if not np.isnan(avg_margin) and not np.isnan(recent_margin)
