@@ -15,7 +15,7 @@ def purchase_decision(ordered, race, rid, assessment):
     observed = race["observed"]
     horses = [
         {"horse_no": int(h["馬番"]), "horse_name": h["馬名"], "production_rank": int(h["rank"]),
-         "popularity_rank": integer(h["人気"]), "popularity_observed_at": observed.isoformat(),
+         "popularity_rank": integer(h["人気"]), "popularity_observed_at": race["pop_observed"].isoformat(),
          "ai_observed_at": observed.isoformat()}
         for h in ordered.to_dict("records")
     ]
@@ -116,11 +116,24 @@ def summarize(rows, unit, high_payout_n):
 
 def grouped_summary(race_rows, unit, high_payout_n):
     comparison, breakdown = [], []
+    # 除外する高額払戻レースの和集合で、4方式の投資対象を揃えた感度も計算する。
+    high_ids = defaultdict(set)
+    for (baseline, _), rows in race_rows.items():
+        for stage in ("validation", "forward"):
+            eligible = [r for r in rows if r["stage"] == stage and r["common_purchase"] and r["ticket_payout"]]
+            highest = sorted(eligible, key=lambda row: (-row["ticket_payout"], row["race_id"]))[:high_payout_n]
+            high_ids[baseline, stage].update(row["race_id"] for row in highest)
     for (baseline, method), rows in race_rows.items():
         for stage in ("validation", "forward"):
             cohort = [row for row in rows if row["stage"] == stage]
             fields = {"baseline": baseline, "method": method, "stage": stage}
-            comparison.append({**fields, **summarize(cohort, unit, high_payout_n)})
+            removed = high_ids[baseline, stage]
+            retained = [r for r in cohort if r["common_purchase"] and r["ticket_investment"] is not None
+                        and r["race_id"] not in removed]
+            comparison.append({**fields, **summarize(cohort, unit, high_payout_n),
+                               "common_top_payout_race_ids": sorted(removed),
+                               **{"filtered_without_common_top_payout_" + key: value
+                                  for key, value in money(retained).items()}})
             for dimension in ("month", "place", "distance", "race_class", "popularity_band"):
                 groups = defaultdict(list)
                 for row in cohort:

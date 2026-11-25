@@ -20,7 +20,7 @@ from tokutyouryou_keisann.scoring import compute_scores_with_optimizer_weights
 
 from tools.ab_comparison_diagnostics import diagnostic_builders, git
 from tools.ab_comparison_inputs import feature_missingness, load_races, pipeline, read_results, score, training_set
-from tools.ab_comparison_metrics import common_purchase, grouped_summary, purchase_decision, race_metrics
+from tools.ab_comparison_metrics import common_purchase, grouped_summary, purchase_decision, race_metrics, summarize
 
 DEFAULT_PERIODS = {
     "train": ["2025-06-14", "2026-06-30"],
@@ -169,8 +169,14 @@ def diagnosis(rid, race, fixed, stage, ticket_args, result, metadata):
                 changes[col] = int((~same).sum())
         rank_changes = int(left["rank"].ne(right["rank"]).sum())
         score_changes = int((~np.isclose(left["score_raw"], right["score_raw"], atol=1e-9, rtol=0)).sum())
+        values = {}
+        if name.endswith(("D-04", "D-09")):
+            for col in ("ta_n", "win_rate"):
+                values[col] = {str(n): [None if pd.isna(before) else float(before),
+                                        None if pd.isna(after) else float(after)]
+                               for n, before, after in zip(left.index, right[col], left[col])}
         rows.append({
-            **row, "status": "different" if changes or rank_changes or score_changes else "equal",
+            **row, "horse_value_reference_then_candidate": values, "status": "different" if changes or rank_changes or score_changes else "equal",
             "changed_feature_cells": changes, "rank_changes": rank_changes, "score_changes": score_changes,
             "candidate_metrics": race_metrics(left.reset_index().sort_values("rank"), result, *ticket_args),
             "reference_metrics": race_metrics(right.reset_index().sort_values("rank"), result, *ticket_args),
@@ -196,11 +202,15 @@ def evaluate(races, results, baselines, trained, ticket_args, metadata, assessme
                        for method, mode in METHODS.items()}
             decisions = {method: purchase_decision(frame, race, rid, assessment) for method, frame in ordered.items()}
             shared = common_purchase(decisions.values())
+            method_metrics = {method: race_metrics(frame, result, *ticket_args) for method, frame in ordered.items()}
             for method, frame in ordered.items():
                 row = {"baseline": label, "method": method, "race_id": rid, "stage": stage,
                        "start_at": race["start"].isoformat(), "month": race["start"].strftime("%Y-%m"),
                        "horses": len(frame), "purchase_decision": decisions[method], "common_purchase": shared,
-                       **race_metrics(frame, result, *ticket_args)}
+                       "result_finalized_date": result["finalized"].date().isoformat() if result else None,
+                       **method_metrics[method],
+                       "model_popularity_band": method_metrics[method]["popularity_band"],
+                       "popularity_band": method_metrics["A"]["popularity_band"]}
                 race_rows[label, method].append(row)
     return race_rows, diagnostic_rows
 
@@ -291,10 +301,18 @@ def run(config_path, output):
     trained, weights_manifest, search = optimize(races, results, periods, code_sha, setting, output)
     rows, diagnostic_rows = evaluate(races, results, baselines, trained, (unit, box_size), diagnostics, assessment)
     summary, breakdown = grouped_summary(rows, unit, high)
-    candidate = candidate_selection(summary, selection_min, baselines)
+    # 採用候補は検証期間内に確定した払戻だけで選ぶ。
+    cutoff = periods["validation"][1].isoformat()
+    selection_summary = [
+        {"baseline": label, "method": method, "stage": "validation",
+         **summarize([r for r in method_rows if r["stage"] == "validation" and r["result_finalized_date"]
+                      and r["result_finalized_date"] <= cutoff], unit, high)}
+        for (label, method), method_rows in rows.items()
+    ]
+    candidate = candidate_selection(selection_summary, selection_min, baselines)
     parity = Counter(item["status"] for item in diagnostic_rows if item["comparison"] == "main_parity")
     flat_rows = [row for method_rows in rows.values() for row in method_rows]
-    for name, values in (("comparison", summary), ("breakdown", breakdown), ("races", flat_rows),
+    for name, values in (("comparison", summary), ("validation_selection", selection_summary), ("breakdown", breakdown), ("races", flat_rows),
                          ("diagnostics", diagnostic_rows), ("exclusions", excluded)):
         save_json(output / f"{name}.json", values)
         save_csv(output / f"{name}.csv", values)
@@ -324,10 +342,11 @@ def run(config_path, output):
                      "cohort": "intersection_of_buy_candidates_across_A_to_D_per_baseline",
                      "ticket": "3連複", "box_size": box_size, "unit_yen": unit, "top_payout_races": high},
         "validation_selection": {"sort": ["filtered_profit_yen DESC", "filtered_roi_pct DESC", "method ASC"],
-                                 "min_settled_races": selection_min, "baselines": candidate},
+                                 "result_finalized_date_max": cutoff, "min_settled_races": selection_min, "baselines": candidate},
         "diagnostics": {"variants": diagnostics, "main_parity_candidate": "legacy", "main_parity_tolerance": 1e-9,
                         "main_parity_counts": dict(parity)},
     }
+    manifest["output_sha256"] = {path.name: sha256_file(path) for path in sorted(output.iterdir())}
     save_json(output / "manifest.json", manifest)
     return manifest
 

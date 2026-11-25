@@ -3,6 +3,7 @@
 from collections import Counter
 from datetime import datetime
 import importlib
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 import re
@@ -12,7 +13,7 @@ import pandas as pd
 
 from model_registry import sha256_file
 from race_purchase_filter.evaluation_utils import JST, integer
-from tokutyouryou_keisann.common import _norm_name, _normalize_surface_name
+from tokutyouryou_keisann.common import _norm_name
 from tokutyouryou_keisann.config import FEAT_COLS
 from tokutyouryou_keisann.features import _parse_distance_to_int
 
@@ -21,7 +22,7 @@ pipeline = importlib.import_module("1_keibayosou_pipeline")
 features = importlib.import_module("1_keibayosou_features")
 
 NOW_COLUMNS = (
-    "レースID", "馬番", "馬名", "頭数", "場所", "コース", "芝・ダ", "距離", "馬場", "クラス", "レース名",
+    "レースID", "馬番", "馬名", "頭数", "場所", "コース", "芝・ダ", "距離", "馬場", "クラス", "レース名", "備考",
 )
 HISTORY_COLUMNS = (
     "馬名", "日付", "着順", "着 順", "人気", "人 気", "距離", "上り", "上り3F", "上り３F", "後3F",
@@ -31,6 +32,10 @@ HISTORY_COLUMNS = (
     "備考", "脚注", "コメント", "競走状態", "出走状態", "状態", "異常区分",
 )
 BET_TYPES = {"単勝": 1, "複勝": 1, "3連複": 3}
+
+
+class RosterUnavailable(ValueError):
+    """A〜D で照合可能な完全な出走表を作れない。"""
 
 
 def timestamp(value):
@@ -50,9 +55,14 @@ def checked_path(root, record, key):
 def load_snapshot(root, record, start, counted, builders):
     """同じ安全な入力を共通特徴量生成関数で2回処理する。"""
     rid = record["race_id"]
-    path = checked_path(root, record, "workbook")
-    book = pd.read_excel(BytesIO(path.read_bytes()), sheet_name=None, engine="openpyxl")
-    now = book[features.NOW_SHEET]
+    path = (root / record["workbook"]).resolve()
+    content = path.read_bytes()
+    if sha256(content).hexdigest() != record["workbook_sha256"]:
+        raise ValueError(f"SHA-256不一致: {path}")
+    book = pd.read_excel(BytesIO(content), sheet_name=None, engine="openpyxl")
+    now = book.get(features.NOW_SHEET)
+    if now is None or not {"レースID", "馬番", "馬名", "頭数"}.issubset(now.columns):
+        raise RosterUnavailable("今走シートまたは必須列がありません")
     ids = features._normalize_rid_series(now["レースID"])
     now = now.loc[ids.eq(rid), list(now.columns.intersection(NOW_COLUMNS))].copy()
     day = start.date()
@@ -62,10 +72,10 @@ def load_snapshot(root, record, start, counted, builders):
     if (not count or now["馬番"].isna().any() or now["馬番"].duplicated().any()
             or now["馬番"].le(0).any() or not now["頭数"].map(integer).eq(count).all()
             or now["馬名"].isna().any() or now["馬名"].astype(str).str.strip().eq("").any()):
-        raise ValueError(f"{rid}: 発走前の馬番・馬名・頭数が不完全です")
+        raise RosterUnavailable("発走前の馬番・馬名・頭数が不完全です")
     names = now["馬名"].map(_norm_name)
     if names.eq("").any() or names.duplicated().any():
-        raise ValueError(f"{rid}: 馬名を一意に照合できません")
+        raise RosterUnavailable("馬名を一意に照合できません")
     history = book.get(rid, pd.DataFrame(columns=["馬名", "日付"]))
     history = history.loc[:, list(history.columns.intersection(HISTORY_COLUMNS))].copy()
     raw_dates = history.get("日付", pd.Series(None, index=history.index, dtype=object))
@@ -129,10 +139,13 @@ def load_snapshot(root, record, start, counted, builders):
     primary = [frames["legacy"], frames["corrected"]]
     if any(merged.empty for merged, _ in primary):
         if not all(merged.empty for merged, _ in primary):
-            raise ValueError(f"{rid}: 特徴量方式間で対象レースが異なります")
+            raise RosterUnavailable("特徴量方式間で対象レースが異なります")
         return None
 
     popularity = record.get("popularity", {})
+    pop_observed = timestamp(record.get("popularity_observed_at", record["observed_at"]))
+    if pop_observed > timestamp(record["observed_at"]):
+        raise ValueError(f"{rid}: 人気の取得が予想スナップショットより後です")
     if set(popularity) - {str(n) for n in now["馬番"]}:
         raise ValueError(f"{rid}: 人気の馬番が出走表にありません")
     pop_ranks = {n: integer(popularity.get(str(n))) for n in now["馬番"]}
@@ -160,19 +173,19 @@ def load_snapshot(root, record, start, counted, builders):
     for label, (merged, feat) in frames.items():
         if sorted(feat["馬番"].tolist()) != sorted(now["馬番"].tolist()):
             if label in {"legacy", "corrected"}:
-                raise ValueError(f"{rid}: 特徴量作成後の出走馬が一致しません")
+                raise RosterUnavailable("特徴量作成後の出走馬が一致しません")
             counted["diagnostic_roster_mismatch_" + label] += 1
             continue
         feat["name_norm"] = feat["馬名"].map(_norm_name)
         first = merged.iloc[0].fillna("")
-        feat["place_name"] = str(first["場所"])
-        feat["surface_name"] = _normalize_surface_name(first["芝・ダ"])
+        feat["place_name"] = pipeline._normalize_place(first["場所"])
+        feat["surface_name"] = pipeline._normalize_surface(first["芝・ダ"])
         feat["distance_m"] = _parse_distance_to_int(first["距離"])
         feat["race_class"] = str(first.get("クラス") or first.get("レース名") or "")
         feat["人気"] = feat["馬番"].map(pop_ranks).astype(float)
         feat["頭数"] = count
         feat["馬場"] = str(first["馬場"])
-        feat["備考"] = ""
+        feat["備考"] = now.set_index("馬番").get("備考", pd.Series(dtype=object)).reindex(feat["馬番"]).fillna("").to_numpy()
         if dl:
             probs = feat["馬番"].map(lambda n: dl[str(n)]["probability"])
             span = probs.max() - probs.min()
@@ -267,6 +280,10 @@ def load_races(root, rows, periods, builders):
             continue
         try:
             frames = load_snapshot(root, row, start, missing[stage], builders)
+        except RosterUnavailable as exc:
+            missing[stage]["unusable_roster"] += 1
+            excluded.append({"race_id": rid, "stage": stage, "reason": "unusable_roster", "detail": str(exc)})
+            continue
         except FileNotFoundError as exc:
             missing[stage]["missing_snapshot_file"] += 1
             excluded.append({"race_id": rid, "stage": stage, "reason": "missing_snapshot_file", "file": str(exc.filename)})
@@ -275,7 +292,8 @@ def load_races(root, rows, periods, builders):
             missing[stage]["excluded_obstacle_races"] += 1
             excluded.append({"race_id": rid, "stage": stage, "reason": "obstacle_race"})
             continue
-        races[rid] = {"start": start, "observed": observed, "stage": stage, "frames": frames}
+        races[rid] = {"start": start, "observed": observed, "stage": stage, "frames": frames,
+                      "pop_observed": timestamp(row.get("popularity_observed_at", row["observed_at"]))}
     return races, coverage, missing, excluded
 
 
