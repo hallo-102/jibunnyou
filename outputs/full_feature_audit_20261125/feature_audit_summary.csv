@@ -1,0 +1,304 @@
+stage,feature,targets,valid,missing,missing_pct,anomaly_candidates,iqr_evaluated,compared,different,contribution_n,signed_contribution_sum,absolute_contribution_sum,absolute_contribution_share_pct,status,calculation_source
+shared_generator,avg_finish,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1222
+shared_generator,avg_last3f,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1227
+shared_generator,avg_margin,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1228
+shared_generator,avg_pop,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1224
+shared_generator,avg_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1239
+shared_generator,avg_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1229
+shared_generator,bad_track_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1287
+shared_generator,bad_track_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1289
+shared_generator,bad_track_style_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1246
+shared_generator,bad_track_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1285
+shared_generator,bad_track_top3_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1286
+shared_generator,closer_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1269
+shared_generator,cond_avg_last3f,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:474, 1_keibayosou_features.py:541, 1_keibayosou_features.py:1301"
+shared_generator,cond_avg_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:475, 1_keibayosou_features.py:542, 1_keibayosou_features.py:1302"
+shared_generator,cond_match_count,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:540, 1_keibayosou_features.py:1300"
+shared_generator,cond_pace_fast_last3f,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:476, 1_keibayosou_features.py:543, 1_keibayosou_features.py:1303"
+shared_generator,cond_pace_slow_last3f,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:477, 1_keibayosou_features.py:544, 1_keibayosou_features.py:1304"
+shared_generator,condition_change_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1297
+shared_generator,condition_match_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1282
+shared_generator,course_style_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1245
+shared_generator,current_track_is_bad,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1290
+shared_generator,days_off,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1226
+shared_generator,delay_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:747, 1_keibayosou_features.py:1265"
+shared_generator,dist_diff,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1225
+shared_generator,distance_change_signed,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1275
+shared_generator,distance_exact_top3_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1278
+shared_generator,distance_extension,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1276
+shared_generator,distance_range_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1283
+shared_generator,distance_range_top3_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1279
+shared_generator,distance_shortening,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1277
+shared_generator,distance_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1280
+shared_generator,dl_rank_score,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_pipeline.py:2245, tokutyouryou_keisann/features.py:214, tokutyouryou_keisann/features.py:337, tokutyouryou_keisann/features.py:403"
+shared_generator,early_position_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:700, 1_keibayosou_features.py:739, 1_keibayosou_features.py:1257"
+shared_generator,escape_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1266
+shared_generator,escape_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:745, 1_keibayosou_features.py:1263"
+shared_generator,fast_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1238
+shared_generator,final_corner_position_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:701, 1_keibayosou_features.py:740, 1_keibayosou_features.py:1258"
+shared_generator,front_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1267
+shared_generator,front_pressure,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1272
+shared_generator,front_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:742, 1_keibayosou_features.py:1260"
+shared_generator,front_style_ratio,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1270
+shared_generator,good_track_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1284
+shared_generator,inferred_pace_code,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1273
+shared_generator,known_style_ratio,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1271
+shared_generator,lap_match_bonus,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1250
+shared_generator,last3f_class_diff,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:480, 1_keibayosou_features.py:547, 1_keibayosou_features.py:1307"
+shared_generator,last3f_context_value,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:481, 1_keibayosou_features.py:548, 1_keibayosou_features.py:1308"
+shared_generator,last3f_dist_diff,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:479, 1_keibayosou_features.py:546, 1_keibayosou_features.py:1306"
+shared_generator,last3f_place_surface_diff,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:478, 1_keibayosou_features.py:545, 1_keibayosou_features.py:1305"
+shared_generator,late_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:744, 1_keibayosou_features.py:1262"
+shared_generator,leg_type_suitability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1240
+shared_generator,local_small_course_front_bonus,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1248
+shared_generator,long_straight_late_bonus,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1249
+shared_generator,master_rating,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+shared_generator,master_rating_confidence,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+shared_generator,master_rating_confidence_adjusted,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:458
+shared_generator,master_rating_field_percentile,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:456, 1_keibayosou_pipeline.py:863, 1_keibayosou_pipeline.py:896"
+shared_generator,master_rating_volatility,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+shared_generator,master_rating_vs_field_mean,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:454
+shared_generator,master_recent_rating,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+shared_generator,master_recent_rating_field_percentile,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:457
+shared_generator,master_recent_rating_vs_field_mean,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:455
+shared_generator,master_recent_start_count_180d,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+shared_generator,master_start_count,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+shared_generator,middle_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:743, 1_keibayosou_features.py:1261"
+shared_generator,pace_adjusted_course_style_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1247
+shared_generator,pace_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1274
+shared_generator,past_racelevel_top5_avg3,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1255
+shared_generator,past_racelevel_top5_best,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1256
+shared_generator,position_gain_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:702, 1_keibayosou_features.py:741, 1_keibayosou_features.py:1259"
+shared_generator,rating_field_percentile,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:1323, 1_keibayosou_features.py:1326"
+shared_generator,rating_now,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1254
+shared_generator,rating_vs_field_mean,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:1322, 1_keibayosou_features.py:1325"
+shared_generator,rebound_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1335
+shared_generator,rebound_score_base,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1298
+shared_generator,recent3_finish,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1230
+shared_generator,recent3_last3f,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1232
+shared_generator,recent3_pop,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1231
+shared_generator,recent3_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:1233, 1_keibayosou_pipeline.py:867, 1_keibayosou_pipeline.py:899"
+shared_generator,recent_delay_flag,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1292
+shared_generator,recent_distance_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1281
+shared_generator,recent_finish_trend,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1234
+shared_generator,recent_margin_improvement,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1296
+shared_generator,recent_pop_trend,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1235
+shared_generator,recent_time_idx_maintained,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1295
+shared_generator,recent_time_idx_trend,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1236
+shared_generator,recent_trouble_flag,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1294
+shared_generator,running_style_code,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1243
+shared_generator,running_style_confidence,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:738, 1_keibayosou_features.py:929, 1_keibayosou_features.py:1244"
+shared_generator,stalker_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1268
+shared_generator,style_change_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:746, 1_keibayosou_features.py:1264"
+shared_generator,style_confidence,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:927, 1_keibayosou_features.py:1242"
+shared_generator,style_pressure_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1241
+shared_generator,ta_n,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1253
+shared_generator,ta_spkm_avg3,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1252
+shared_generator,ta_spkm_best,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1251
+shared_generator,time_idx_context_value,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:482, 1_keibayosou_features.py:549, 1_keibayosou_features.py:1309"
+shared_generator,track_condition_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1291
+shared_generator,track_condition_time_idx_diff,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1288
+shared_generator,trouble_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1293
+shared_generator,win_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1237
+legacy_scoring_input,avg_finish,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1222
+legacy_scoring_input,avg_last3f,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1227
+legacy_scoring_input,avg_margin,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1228
+legacy_scoring_input,avg_pop,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1224
+legacy_scoring_input,avg_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1239
+legacy_scoring_input,avg_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1229
+legacy_scoring_input,bad_track_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1287
+legacy_scoring_input,bad_track_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1289
+legacy_scoring_input,bad_track_style_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1246
+legacy_scoring_input,bad_track_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1285
+legacy_scoring_input,bad_track_top3_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1286
+legacy_scoring_input,closer_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1269
+legacy_scoring_input,cond_avg_last3f,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:474, 1_keibayosou_features.py:541, 1_keibayosou_features.py:1301"
+legacy_scoring_input,cond_avg_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:475, 1_keibayosou_features.py:542, 1_keibayosou_features.py:1302"
+legacy_scoring_input,cond_match_count,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:540, 1_keibayosou_features.py:1300"
+legacy_scoring_input,cond_pace_fast_last3f,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:476, 1_keibayosou_features.py:543, 1_keibayosou_features.py:1303"
+legacy_scoring_input,cond_pace_slow_last3f,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:477, 1_keibayosou_features.py:544, 1_keibayosou_features.py:1304"
+legacy_scoring_input,condition_change_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1297
+legacy_scoring_input,condition_match_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1282
+legacy_scoring_input,course_style_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1245
+legacy_scoring_input,current_track_is_bad,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1290
+legacy_scoring_input,days_off,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1226
+legacy_scoring_input,delay_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:747, 1_keibayosou_features.py:1265"
+legacy_scoring_input,dist_diff,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1225
+legacy_scoring_input,distance_change_signed,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1275
+legacy_scoring_input,distance_exact_top3_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1278
+legacy_scoring_input,distance_extension,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1276
+legacy_scoring_input,distance_range_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1283
+legacy_scoring_input,distance_range_top3_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1279
+legacy_scoring_input,distance_shortening,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1277
+legacy_scoring_input,distance_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1280
+legacy_scoring_input,dl_rank_score,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_pipeline.py:2245, tokutyouryou_keisann/features.py:214, tokutyouryou_keisann/features.py:337, tokutyouryou_keisann/features.py:403"
+legacy_scoring_input,early_position_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:700, 1_keibayosou_features.py:739, 1_keibayosou_features.py:1257"
+legacy_scoring_input,escape_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1266
+legacy_scoring_input,escape_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:745, 1_keibayosou_features.py:1263"
+legacy_scoring_input,fast_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1238
+legacy_scoring_input,final_corner_position_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:701, 1_keibayosou_features.py:740, 1_keibayosou_features.py:1258"
+legacy_scoring_input,front_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1267
+legacy_scoring_input,front_pressure,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1272
+legacy_scoring_input,front_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:742, 1_keibayosou_features.py:1260"
+legacy_scoring_input,front_style_ratio,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1270
+legacy_scoring_input,good_track_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1284
+legacy_scoring_input,inferred_pace_code,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1273
+legacy_scoring_input,known_style_ratio,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1271
+legacy_scoring_input,lap_match_bonus,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1250
+legacy_scoring_input,last3f_class_diff,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:480, 1_keibayosou_features.py:547, 1_keibayosou_features.py:1307"
+legacy_scoring_input,last3f_context_value,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:481, 1_keibayosou_features.py:548, 1_keibayosou_features.py:1308"
+legacy_scoring_input,last3f_dist_diff,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:479, 1_keibayosou_features.py:546, 1_keibayosou_features.py:1306"
+legacy_scoring_input,last3f_place_surface_diff,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:478, 1_keibayosou_features.py:545, 1_keibayosou_features.py:1305"
+legacy_scoring_input,late_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:744, 1_keibayosou_features.py:1262"
+legacy_scoring_input,leg_type_suitability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1240
+legacy_scoring_input,local_small_course_front_bonus,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1248
+legacy_scoring_input,long_straight_late_bonus,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1249
+legacy_scoring_input,master_rating,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+legacy_scoring_input,master_rating_confidence,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+legacy_scoring_input,master_rating_confidence_adjusted,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:458
+legacy_scoring_input,master_rating_field_percentile,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:456, 1_keibayosou_pipeline.py:863, 1_keibayosou_pipeline.py:896"
+legacy_scoring_input,master_rating_volatility,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+legacy_scoring_input,master_rating_vs_field_mean,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:454
+legacy_scoring_input,master_recent_rating,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+legacy_scoring_input,master_recent_rating_field_percentile,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:457
+legacy_scoring_input,master_recent_rating_vs_field_mean,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:455
+legacy_scoring_input,master_recent_start_count_180d,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+legacy_scoring_input,master_start_count,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+legacy_scoring_input,middle_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:743, 1_keibayosou_features.py:1261"
+legacy_scoring_input,pace_adjusted_course_style_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1247
+legacy_scoring_input,pace_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1274
+legacy_scoring_input,past_racelevel_top5_avg3,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1255
+legacy_scoring_input,past_racelevel_top5_best,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1256
+legacy_scoring_input,position_gain_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:702, 1_keibayosou_features.py:741, 1_keibayosou_features.py:1259"
+legacy_scoring_input,rating_field_percentile,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:1323, 1_keibayosou_features.py:1326"
+legacy_scoring_input,rating_now,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1254
+legacy_scoring_input,rating_vs_field_mean,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:1322, 1_keibayosou_features.py:1325"
+legacy_scoring_input,rebound_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1335
+legacy_scoring_input,rebound_score_base,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1298
+legacy_scoring_input,recent3_finish,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1230
+legacy_scoring_input,recent3_last3f,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1232
+legacy_scoring_input,recent3_pop,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1231
+legacy_scoring_input,recent3_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:1233, 1_keibayosou_pipeline.py:867, 1_keibayosou_pipeline.py:899"
+legacy_scoring_input,recent_delay_flag,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1292
+legacy_scoring_input,recent_distance_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1281
+legacy_scoring_input,recent_finish_trend,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1234
+legacy_scoring_input,recent_margin_improvement,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1296
+legacy_scoring_input,recent_pop_trend,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1235
+legacy_scoring_input,recent_time_idx_maintained,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1295
+legacy_scoring_input,recent_time_idx_trend,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1236
+legacy_scoring_input,recent_trouble_flag,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1294
+legacy_scoring_input,running_style_code,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1243
+legacy_scoring_input,running_style_confidence,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:738, 1_keibayosou_features.py:929, 1_keibayosou_features.py:1244"
+legacy_scoring_input,stalker_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1268
+legacy_scoring_input,style_change_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:746, 1_keibayosou_features.py:1264"
+legacy_scoring_input,style_confidence,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:927, 1_keibayosou_features.py:1242"
+legacy_scoring_input,style_pressure_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1241
+legacy_scoring_input,ta_n,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1253
+legacy_scoring_input,ta_spkm_avg3,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1252
+legacy_scoring_input,ta_spkm_best,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1251
+legacy_scoring_input,time_idx_context_value,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:482, 1_keibayosou_features.py:549, 1_keibayosou_features.py:1309"
+legacy_scoring_input,track_condition_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1291
+legacy_scoring_input,track_condition_time_idx_diff,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1288
+legacy_scoring_input,trouble_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1293
+legacy_scoring_input,win_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1237
+export_target,avg_finish,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1222
+export_target,avg_last3f,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1227
+export_target,avg_margin,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1228
+export_target,avg_pop,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1224
+export_target,avg_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1239
+export_target,avg_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1229
+export_target,bad_track_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1287
+export_target,bad_track_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1289
+export_target,bad_track_style_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1246
+export_target,bad_track_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1285
+export_target,bad_track_top3_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1286
+export_target,closer_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1269
+export_target,cond_avg_last3f,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:474, 1_keibayosou_features.py:541, 1_keibayosou_features.py:1301"
+export_target,cond_avg_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:475, 1_keibayosou_features.py:542, 1_keibayosou_features.py:1302"
+export_target,cond_match_count,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:540, 1_keibayosou_features.py:1300"
+export_target,cond_pace_fast_last3f,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:476, 1_keibayosou_features.py:543, 1_keibayosou_features.py:1303"
+export_target,cond_pace_slow_last3f,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:477, 1_keibayosou_features.py:544, 1_keibayosou_features.py:1304"
+export_target,condition_change_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1297
+export_target,condition_match_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1282
+export_target,course_style_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1245
+export_target,current_track_is_bad,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1290
+export_target,days_off,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1226
+export_target,delay_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:747, 1_keibayosou_features.py:1265"
+export_target,dist_diff,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1225
+export_target,distance_change_signed,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1275
+export_target,distance_exact_top3_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1278
+export_target,distance_extension,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1276
+export_target,distance_range_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1283
+export_target,distance_range_top3_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1279
+export_target,distance_shortening,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1277
+export_target,distance_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1280
+export_target,dl_rank_score,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_pipeline.py:2245, tokutyouryou_keisann/features.py:214, tokutyouryou_keisann/features.py:337, tokutyouryou_keisann/features.py:403"
+export_target,early_position_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:700, 1_keibayosou_features.py:739, 1_keibayosou_features.py:1257"
+export_target,escape_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1266
+export_target,escape_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:745, 1_keibayosou_features.py:1263"
+export_target,fast_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1238
+export_target,final_corner_position_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:701, 1_keibayosou_features.py:740, 1_keibayosou_features.py:1258"
+export_target,front_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1267
+export_target,front_pressure,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1272
+export_target,front_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:742, 1_keibayosou_features.py:1260"
+export_target,front_style_ratio,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1270
+export_target,good_track_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1284
+export_target,inferred_pace_code,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1273
+export_target,known_style_ratio,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1271
+export_target,lap_match_bonus,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1250
+export_target,last3f_class_diff,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:480, 1_keibayosou_features.py:547, 1_keibayosou_features.py:1307"
+export_target,last3f_context_value,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:481, 1_keibayosou_features.py:548, 1_keibayosou_features.py:1308"
+export_target,last3f_dist_diff,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:479, 1_keibayosou_features.py:546, 1_keibayosou_features.py:1306"
+export_target,last3f_place_surface_diff,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:478, 1_keibayosou_features.py:545, 1_keibayosou_features.py:1305"
+export_target,late_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:744, 1_keibayosou_features.py:1262"
+export_target,leg_type_suitability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1240
+export_target,local_small_course_front_bonus,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1248
+export_target,long_straight_late_bonus,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1249
+export_target,master_rating,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+export_target,master_rating_confidence,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+export_target,master_rating_confidence_adjusted,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:458
+export_target,master_rating_field_percentile,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:456, 1_keibayosou_pipeline.py:863, 1_keibayosou_pipeline.py:896"
+export_target,master_rating_volatility,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+export_target,master_rating_vs_field_mean,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:454
+export_target,master_recent_rating,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+export_target,master_recent_rating_field_percentile,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:457
+export_target,master_recent_rating_vs_field_mean,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:455
+export_target,master_recent_start_count_180d,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+export_target,master_start_count,0,0,0,,0,0,0,0,0,,,,未検証,動的生成・補完。対応する入力列と欠損状態を確認
+export_target,middle_run_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:743, 1_keibayosou_features.py:1261"
+export_target,pace_adjusted_course_style_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1247
+export_target,pace_reliability,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1274
+export_target,past_racelevel_top5_avg3,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1255
+export_target,past_racelevel_top5_best,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1256
+export_target,position_gain_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:702, 1_keibayosou_features.py:741, 1_keibayosou_features.py:1259"
+export_target,rating_field_percentile,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:1323, 1_keibayosou_features.py:1326"
+export_target,rating_now,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1254
+export_target,rating_vs_field_mean,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:1322, 1_keibayosou_features.py:1325"
+export_target,rebound_score,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1335
+export_target,rebound_score_base,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1298
+export_target,recent3_finish,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1230
+export_target,recent3_last3f,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1232
+export_target,recent3_pop,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1231
+export_target,recent3_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:1233, 1_keibayosou_pipeline.py:867, 1_keibayosou_pipeline.py:899"
+export_target,recent_delay_flag,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1292
+export_target,recent_distance_time_idx,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1281
+export_target,recent_finish_trend,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1234
+export_target,recent_margin_improvement,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1296
+export_target,recent_pop_trend,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1235
+export_target,recent_time_idx_maintained,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1295
+export_target,recent_time_idx_trend,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1236
+export_target,recent_trouble_flag,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1294
+export_target,running_style_code,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1243
+export_target,running_style_confidence,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:738, 1_keibayosou_features.py:929, 1_keibayosou_features.py:1244"
+export_target,stalker_candidate_count,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1268
+export_target,style_change_rate,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:746, 1_keibayosou_features.py:1264"
+export_target,style_confidence,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:927, 1_keibayosou_features.py:1242"
+export_target,style_pressure_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1241
+export_target,ta_n,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1253
+export_target,ta_spkm_avg3,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1252
+export_target,ta_spkm_best,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1251
+export_target,time_idx_context_value,0,0,0,,0,0,0,0,0,,,,未検証,"1_keibayosou_features.py:482, 1_keibayosou_features.py:549, 1_keibayosou_features.py:1309"
+export_target,track_condition_fit,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1291
+export_target,track_condition_time_idx_diff,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1288
+export_target,trouble_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1293
+export_target,win_rate,0,0,0,,0,0,0,0,0,,,,未検証,1_keibayosou_features.py:1237
