@@ -28,7 +28,6 @@
   },
   "rank1_changed_races": 8,
   "top5_changed_races": 17,
-  "trifecta_or_rank_bet_changed_races": 36,
   "roi_bet_rows_changed_races": 11,
   "unavailable_columns": {
     "left": [
@@ -47,8 +46,10 @@
   "atol": 1e-09,
   "rtol": 1e-09,
   "input_manifest_sha256": "e7a8ecd1879fb6798b6adc755d19ca3196db28e67ec87ab135be52f4ac384338",
-  "candidate_prediction_sha256": "623d86e374a58b015f6e38f520967edbef953f059375b7cd5f0cb7e96b422cc2",
+  "candidate_prediction_sha256": "6f36cbb8681c14d2d3efcb5952ae42ffea4ebb68cd54efc8567caea6a4adefda",
   "legacy_prediction_sha256": "1022d35a4c488887b025822355a4ff62d1db52f4b801c6ed5eca02fe7c098134",
-  "candidate_runtime_id": "ff1045d5aaf6b5b7dc5084d46e938235e66c49ffa5e64cbe34763cc62aa7e0ea",
-  "fixed_tickets_changed_races": 11
+  "candidate_runtime_id": "7660254f018926ad08b302052e324330983337bfc925b21264872447a550d222",
+  "fixed_tickets_changed_races": 11,
+  "tested_source_commit": "9cd152ffd808c9faacfa3c19c776d8f647ef7621",
+  "runtime_code_and_adapter_sha_verified": true
 }

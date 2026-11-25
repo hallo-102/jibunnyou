@@ -25,7 +25,9 @@ python -m pytest tests/test_nas_integration.py tests/test_unique_ranking.py -q
 git diff --check  # 空白エラーがないことを確認する。
 ```
 
-最終件数はPR本文にも記載する。既存の全テストには実データ成果物や旧モデル期待値に依存するものがあり、今回は変更範囲に対応する上記の最小セットに限定した。Linux x86基本テスト用のGitHub Actionsを追加した。Actionsが成功してもARM64/NAS実証を代替しない。
+結果は **23 passed**。DockerfileのCOPY対象だけを別ディレクトリに再現したimport検査でも、モデル読込と前向きBLOCKEDの再現を確認した。実データ通し実行の検証対象commitは `9cd152ffd808c9faacfa3c19c776d8f647ef7621`。実行時core/adapter SHAと現在ファイルの一致、入力・旧静的ソースの不変、候補READYと予想SHAの一致を確認した。
+
+既存の全テストには実データ成果物や旧モデル期待値に依存するものがあり、今回は変更範囲に対応する上記の最小セットに限定した。Linux x86基本テスト用のGitHub Actionsを追加したが、GitHubへの書込制約により未実行。Actionsが成功してもARM64/NAS実証を代替しない。
 
 ## 未検証・停止条件
 
