@@ -11,7 +11,8 @@ import subprocess
 import sys
 import time
 
-from .files import atomic_json, beneath
+from .audit import audit_args, audit_result, verify_fixture
+from .files import atomic_json, beneath, isolated
 from .schema import REPOSITORY, Rejected
 
 AGENT_CODE = Path(__file__).resolve().parents[1]
@@ -25,7 +26,7 @@ def clean_environment(home):
 
 
 class Commands:
-    def run(self, args, *, cwd, env, control, log=None):
+    def run(self, args, *, cwd, env, control, log=None, check=True):
         stream = subprocess.DEVNULL if log is None else open(log, "ab")
         process = None
         try:
@@ -35,8 +36,9 @@ class Commands:
             while process.poll() is None:
                 control()
                 time.sleep(0.2)
-            if process.returncode:
+            if check and process.returncode:
                 raise Rejected("FIXED_COMMAND_FAILED")
+            return process.returncode
         finally:
             if process is not None and process.poll() is None:
                 if os.name != "nt":
@@ -60,8 +62,9 @@ class Backend:
         self.config, self.read_token = config, read_token
         self.commands = commands or Commands()
 
-    def checkout(self, sha, job_dir, control):
-        source = beneath(self.config["checkout_root"], Path(self.config["checkout_root"]) / sha)
+    def checkout(self, sha, job_dir, control, *, checkout_root=None):
+        root = Path(self.config["checkout_root"]) if checkout_root is None else checkout_root
+        source = beneath(root, root / sha)
         env = clean_environment(job_dir / "home")
         if not source.exists():
             source.mkdir(parents=True)
@@ -111,6 +114,8 @@ class Backend:
             if architecture not in {"aarch64", "arm64", "AMD64", "x86_64"}:
                 architecture = "unknown"
             return {"summary": {"architecture": architecture, "python_version": platform.python_version()}, "artifacts_sha256": {}}
+        if job["job_type"] == "full_feature_audit":
+            return self.run_audit(job, policy, control)
         if job["job_type"] != "issue16_acceptance":
             raise Rejected("UNSUPPORTED_HANDLER")
         job_dir = beneath(self.config["state_dir"], Path(self.config["state_dir"]) / "jobs" / job["job_id"])
@@ -136,3 +141,28 @@ class Backend:
         finally:
             if not finished:
                 self.stop_job_containers(project)
+
+    def run_audit(self, job, policy, control):
+        entry = policy["inputs"][job["input_id"]]
+        fixture = verify_fixture(entry)
+        root = Path(self.config["validation_root"])
+        workspace = beneath(root, root / job["job_id"])
+        # policyは起動後にも更新できるため、実行時の入力と出力を照合する。
+        isolated(workspace, [fixture, policy["production_root"], AGENT_CODE, self.config["checkout_root"]])
+        workspace.mkdir(mode=0o700, exist_ok=False)
+        home = workspace / "home"
+        home.mkdir()
+        output = workspace / "output"
+        output.mkdir()
+        source = self.checkout(job["commit_sha"], workspace, control, checkout_root=workspace / "checkout")
+        env = clean_environment(home)
+        env.update(TMPDIR=str(home), TMP=str(home), TEMP=str(home))
+        started = time.monotonic()
+        control()
+        code = self.commands.run(audit_args(self.config["validation_python"], source, fixture, output, job["raceday"]),
+                                 cwd=source, env=env, control=control, log=workspace / "execution.log", check=False)
+        elapsed = round(time.monotonic() - started, 3)
+        control()
+        self.verify_checkout(source, job["commit_sha"], env)
+        verify_fixture(entry)
+        return audit_result(output, code, elapsed)

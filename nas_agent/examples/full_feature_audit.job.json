@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "job_id": "full_feature_audit_20260809_01",
+  "job_type": "full_feature_audit",
+  "commit_sha": "26128923d8c6243466976c72feaa3bfafc0c92f5",
+  "raceday": "20260809",
+  "input_id": "fixture_20260809",
+  "expires_at": "2026-11-27T23:59:59+09:00",
+  "scope": "offline"
+}

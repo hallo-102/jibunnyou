@@ -9,7 +9,7 @@ import re
 REPOSITORY = "hallo-102/jibunnyou"
 PR17_SHA = "3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92"
 FIELDS = {"schema_version", "job_id", "job_type", "commit_sha", "raceday", "input_id", "expires_at", "scope"}
-TYPES = {"healthcheck", "issue16_acceptance"}
+TYPES = {"healthcheck", "issue16_acceptance", "full_feature_audit"}
 STATES = {"QUEUED", "WAIT_APPROVAL", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"}
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"}
 
@@ -97,7 +97,7 @@ def authorized(policy, job, request_hash, author_id, *, edited=False):
     """ラベルは参照しない。ローカルの固定範囲と、個別承認/初回用grantだけを使う。"""
     if author_id not in policy["requester_ids"] or job["job_type"] not in policy["job_types"] or job["commit_sha"] not in policy["approved_commits"]:
         return False
-    if job["job_type"] == "issue16_acceptance":
+    if job["job_type"] in {"issue16_acceptance", "full_feature_audit"}:
         entry = policy["inputs"].get(job["input_id"])
         if not entry or entry["raceday"] != job["raceday"]:
             return False

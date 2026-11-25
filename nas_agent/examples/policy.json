@@ -3,7 +3,7 @@
   "repository": "hallo-102/jibunnyou",
   "production_root": "/volume1/docker/keiba_yosou_2026_nas",
   "requester_ids": [130852980],
-  "job_types": ["healthcheck", "issue16_acceptance"],
+  "job_types": ["healthcheck", "issue16_acceptance", "full_feature_audit"],
   "approved_commits": ["3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92"],
   "approved_requests": [],
   "grants": [],

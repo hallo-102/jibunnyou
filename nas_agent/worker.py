@@ -129,7 +129,9 @@ class Worker:
                     status = "INTERRUPTED" if isinstance(exc, KeyboardInterrupt) else "FAILED"
                     row = self.state.set(job["job_id"], status, error=code)
                 else:
-                    row = self.state.set(job["job_id"], "SUCCEEDED", result=result)
+                    error = result.get("error_code") if job["job_type"] == "full_feature_audit" else None
+                    status = "FAILED" if error else "SUCCEEDED"
+                    row = self.state.set(job["job_id"], status, error=error, result=result)
                 self.publish(row)
                 if self.state.meta("recovery_required") == "1":
                     return
