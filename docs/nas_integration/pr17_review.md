@@ -6,7 +6,7 @@
 
 | 指摘 | 修正と確認 |
 |---|---|
-| S1 出力境界 | nas.workspaceで新規初期化したルートの4カテゴリに限定。コード/指定本番root/既知NAS/固定入力との包含、symlink/junction、既存比較JSONを拒否。nas.launchでホスト実パスを照合しDockerより先に停止。比較JSONは一意な一時ファイルから排他的linkで公開し、固定名.tmpを使用しない |
+| S1 出力境界 | nas.workspaceで新規初期化したルートの4カテゴリに限定。コード/指定本番root/既知NAS/固定入力との包含、symlink/junction、既存比較JSONを拒否。nas.launchでホスト実パスを照合しDockerより先に停止。比較JSONは全体を直列化してからO_EXCLで新規作成し、固定名.tmpやhardlinkを使用しない |
 | S1 旧NAS再生 | sourceの10予想モジュールと重みだけを検証コピー。子プロセスcwd・KEIBA出力/重みはrun内、入力/マスタ/オッズはsnapshotへ固定。worker直接呼出しにも境界・コピーSHA検査を適用。収集/配信/マスタ更新を起動しない |
 | S2 公開順序 | prediction.xlsxのコピー自体をSHA検証、公開manifestをverify_archiveしてからCOMPLETED→READYの順で公開。verify_completedは両状態とmanifest/Excel SHAを全て要求。失敗時はREADYを除去。終盤STATUS書込故障のfixtureで残留しないことを確認 |
 | S3 分類/順位 | TARGETレース集合と買い目の数値予想済み集合、全入力レースと分類集合を突合。対象外の順位・馬番・購入額・ROI固定券を拒否。日本語出力の同点キーを共通名へ戻しcreate_unique_rank_seriesで保存順位を再計算照合。欠落/逆順/対象外券をfixture検証 |
@@ -25,6 +25,8 @@ git diff --check  # 空白の不正がないことを確認する。
 ```
 
 代表日の生の比較・入力・Excel・ログ・weight_controlの馬別記録は候補専用workspaceに保存し、GitHubへ登録しない。最終通し検証の集計は別のreview_summary.jsonに記録する。
+
+OneDrive上でhardlink作成がWinError 5になったため、比較結果の保存はO_EXCLの新規ファイル作成へ変更した。書込途中のI/O故障は失敗として例外を返す。新規の不完全ファイルが残った場合も上書き再試行せず、別の新規結果名を使用する。比較JSONをREADYと同じ原子的成功マーカーとして扱わない。
 
 ## 残る限界
 

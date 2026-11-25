@@ -5,7 +5,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import tempfile
 import uuid
 
 CODE_ROOT = Path(__file__).resolve().parents[1]
@@ -77,19 +76,17 @@ class Workspace:
         return resolved
 
     def new_json(self, path: Path, payload: dict, *, readonly=()) -> None:
-        """予測可能な.tmpを使わず、完成JSONを排他的に新規公開する。"""
+        """予測可能な.tmpやhardlinkを使わず、JSONを排他的に新規作成する。"""
         path = self.output(path, "comparisons", readonly=readonly, new=True)
+        # 先に全体を直列化し、形式不正で空の成果物を作らない。
+        encoded = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
         path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary = tempfile.mkstemp(prefix=".comparison-", suffix=".tmp", dir=path.parent)
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, ensure_ascii=False, indent=2, allow_nan=False)
-                handle.flush()
-                os.fsync(handle.fileno())
-            # linkは既存targetを置換しない。同時公開でも既存成果物を保持する。
-            os.link(temporary, path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        # xbはOSのO_EXCLを使う。同時作成でも既存targetを置換しない。
+        # I/O故障で新規ファイルが不完全になれば例外とし、成功結果として扱わない。
+        with path.open("xb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
 
 
 if __name__ == "__main__":
