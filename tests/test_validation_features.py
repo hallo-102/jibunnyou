@@ -164,3 +164,18 @@ def test_d05_recent_window_precedes_missing_value_removal(calculate):
     assert validation.iloc[0][recent_columns].tolist() == [2] * 5
     assert legacy.iloc[0]["recent_margin_improvement"] == 0
     assert validation.iloc[0]["recent_margin_improvement"] == pytest.approx(13 / 3 - 2)
+
+
+def test_d09_win_rate_uses_only_known_finishes(calculate):
+    legacy, validation = calculate({
+        "日付": ["2026/11/04", "2026/11/03", "2026/11/02"],
+        "着順": [1, None, 2],
+    })
+    assert legacy.iloc[0]["win_rate"] == pytest.approx(1 / 3)
+    assert validation.iloc[0]["win_rate"] == 0.5
+
+
+def test_d09_win_rate_is_missing_without_a_valid_finish(calculate):
+    legacy, validation = calculate({"日付": ["2026/11/04"], "着順": [None]})
+    assert pd.isna(legacy.iloc[0]["win_rate"])
+    assert pd.isna(validation.iloc[0]["win_rate"])

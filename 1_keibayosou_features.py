@@ -1058,7 +1058,8 @@ def _compute_horse_features_from_race_sheets(
                 )
                 field_size_adjusted_finish = float(normalized_finish.clip(lower=0.0, upper=1.0).mean())
             avg_pop = float(pop_s.mean()) if not pop_s.dropna().empty else np.nan
-            win_rate = float((finish_s == 1).mean()) if not finish_s.dropna().empty else np.nan
+            win_finishes = finish_s.dropna() if validation else finish_s
+            win_rate = float(win_finishes.eq(1).mean()) if win_finishes.notna().any() else np.nan
             avg_last3f = float(last3_s.mean()) if not last3_s.dropna().empty else np.nan
             avg_margin = float(margin_s.mean()) if not margin_s.dropna().empty else np.nan
             avg_time_idx = float(time_idx_s.mean()) if not time_idx_s.dropna().empty else np.nan
