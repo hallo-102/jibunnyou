@@ -2758,6 +2758,9 @@ def main() -> None:
     append_roi_focus_bet_sheet_to_excel(actual_final_out)
     _write_rank1_judgment_to_bet_sheet(actual_final_out)
     _format_race_id_column_to_integer(actual_final_out)
+    # 独立した比較順位を追加。既存の本番rank・買い目は変更しない。
+    from importlib import import_module
+    import_module("1_keibayosou_conditional_rerank").append_conditional_ranking_sheet(actual_final_out)
     pace_race_count = append_pace_prediction_sheet_to_excel(actual_final_out)
     print(f"[INFO] ペース予想シートを作成しました: {pace_race_count}レース")
 

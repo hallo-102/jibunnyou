@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -94,7 +95,9 @@ def load_shadow_runtime() -> ShadowRuntime:
         expected_role="shadow",
     )
     validate_shadow_isolation_policy(spec.raw)
-    output_dir = _resolve_project_relative_dir(spec.raw.get("output_dir"))
+    # 世代専用の保存先を優先し、再生データを旧前向き記録へ混入させない。
+    policy = load_forward_validation_policy()
+    output_dir = _resolve_project_relative_dir(policy.get("output_dir", spec.raw.get("output_dir")))
 
     # baselineの共通読込処理は、本番と同じ補完・符号ガードを適用する。
     baseline = importlib.import_module("tokutyouryou_keisann.baseline")
@@ -221,6 +224,18 @@ def load_forward_validation_policy() -> dict[str, Any]:
                 f"generation={generation} algorithm={hash_algorithm} "
                 f"path={relative_value} expected={expected_sha} actual={actual_sha}"
             )
+    # 再生検証は明示的に選択したプロセスだけに許可する。本番への暗黙転用は拒否。
+    purpose = payload.get("purpose")
+    if purpose == "offline_integration_replay":
+        if os.environ.get("KEIBA_FORWARD_SCOPE") != "offline_replay":
+            raise ModelConfigError("offline世代の本番転用は禁止です。再生検証はKEIBA_FORWARD_SCOPE=offline_replayを明示してください")
+    elif purpose == "production_forward":
+        if payload.get("status") != "active" or payload.get("production_activation_requires_approval") is not False:
+            raise ModelConfigError("本番forward世代の有効化は承認待ちです")
+    if purpose in ("offline_integration_replay", "production_forward"):
+        expected = f"data/output/shadow_comparison/{'offline' if purpose == 'offline_integration_replay' else 'forward'}/{payload['active_generation']}"
+        if payload.get("output_dir") != expected:
+            raise ModelConfigError("世代とscopeに対応した独立保存先が必要です")
     return payload
 
 
@@ -400,6 +415,11 @@ def write_shadow_pre_payload(
     """日付ディレクトリに結果確定前JSONを追記型で保存する。"""
     if payload.get("result_status") != "pre_result":
         raise ModelConfigError("結果確定前のシャドー出力以外はこの関数で保存できません")
+    # 集計時に出自を識別できるよう、世代とscopeを保存する。
+    policy = load_forward_validation_policy()
+    payload = dict(payload)
+    payload["generation"] = policy.get("active_generation")
+    payload["validation_scope"] = policy.get("purpose", "legacy_forward")
     comparison_date = str(payload.get("comparison_date", ""))
     timestamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%z")
     output_path = (

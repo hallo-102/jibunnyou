@@ -3,7 +3,7 @@
   "role": "shadow",
   "model_name": "best_feature_weights_20260817",
   "weight_file": "yosou_py/best_feature_weights_20260817.py",
-  "file_sha256": "83e6126fd01af24ebe553039946dd603c3e6e326b8f6bee0e0a73a7ffd32dcbb",
+  "file_sha256": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
   "effective_sha256": "8325f5c0748aa49076631b02424f2104a7924d0b39a4148d4703f687a937a789",
   "activated_at": "2026-08-17T19:25:00+09:00",
   "activation_reason": "2026-08-22開始の前向き検証専用。正式順位・買い目・購入・メール・最適化へ接続しない",

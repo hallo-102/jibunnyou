@@ -26,12 +26,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_explicit_production_config_wins_even_when_newer_best_exists() -> None:
-    """最新日付ファイルがあっても明示設定した20260730だけを本番にする。"""
+    """9/13昇格済みの明示20260817設定を使い、最新ファイル探索へ戻らない。"""
     production_config = importlib.import_module("1_keibayosou_config")
 
     assert (PROJECT_ROOT / "yosou_py" / "best_feature_weights_20260817.py").is_file()
     assert production_config.ACTIVE_FEATURE_WEIGHTS_FILE == (
-        "yosou_py/best_feature_weights_20260730.py"
+        "yosou_py/best_feature_weights_20260817.py"
     )
 
 
@@ -40,7 +40,7 @@ def test_default_baseline_uses_explicit_production_model() -> None:
     selection = baseline.select_baseline_weight_file()
 
     assert selection.path == (
-        PROJECT_ROOT / "yosou_py" / "best_feature_weights_20260730.py"
+        PROJECT_ROOT / "yosou_py" / "best_feature_weights_20260817.py"
     ).resolve()
     assert selection.method == "production_model_config"
 
@@ -120,16 +120,16 @@ def test_production_path_must_be_project_relative_and_inside_root(
 
 
 def test_configured_production_file_sha_matches_actual_file() -> None:
-    """固定した20260730の既知ファイルSHAと実ファイルが一致する。"""
+    """昇格コミット265e0a4のLFファイルSHAと実効重みを固定検証する。"""
     production_config = importlib.import_module("1_keibayosou_config")
     spec = production_config.PRODUCTION_MODEL_SPEC
 
     assert spec.file_sha256 == (
-        "2fdaf28273c2f2bbcb0052a09227f4be6d32a7e4817121df168613995cc66f32"
+        "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d"
     )
     assert sha256_file(spec.resolved_weight_path) == spec.file_sha256
     assert spec.effective_sha256 == (
-        "6606ea4fa469e03ecc7a0000d031a914ca4ab10de04dfa132f0ba7d33ab70a3e"
+        "8325f5c0748aa49076631b02424f2104a7924d0b39a4148d4703f687a937a789"
     )
 
 
@@ -462,7 +462,10 @@ def test_forward_validation_policy_and_frozen_file_hashes_are_valid() -> None:
     """開始日・判定閾値・予想ロジックの固定SHAがすべて一致する。"""
     policy = load_forward_validation_policy()
 
-    assert policy["start_date"] == "20260822"
+    # 旧モデルの開始日を固定せず、今回の独立した再生検証世代を確認する。
+    assert policy["active_generation"] == "cr_offline_20261013"
+    assert policy["start_date"] == "20261012"
+    assert policy["purpose"] == "offline_integration_replay"
     assert policy["prediction_interim_gate"]["minimum_racing_days"] == 8
     assert policy["prediction_interim_gate"]["minimum_races"] == 300
     assert policy["profit_final_gate"]["minimum_current_trifecta_races"] == 50
