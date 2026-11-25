@@ -1,0 +1,22 @@
+services:
+  loop-observer:
+    image: keiba-yosou-2026:arm64
+    init: true
+    working_dir: /opt/jra-loop
+    environment:
+      TZ: Asia/Tokyo
+      PYTHONPATH: /opt/jra-loop
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - /volume1/docker/keiba_yosou_2026_nas:/workspace:ro
+      - /volume1/docker/jra_continuous_improvement:/opt/jra-loop:ro
+      - /volume1/docker/keiba_yosou_2026_nas/data/output/continuous_improvement/live:/observations
+    entrypoint: [python, -m, desktop_monitor.publisher]
+    restart: unless-stopped
+    cpus: 0.15
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"

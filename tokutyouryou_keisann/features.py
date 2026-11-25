@@ -324,107 +324,17 @@ def _attach_dl_features(merged: pd.DataFrame, feat_df: pd.DataFrame) -> pd.DataF
 
     out = feat_df.copy()
 
-    try:
-        best_runner = importlib.import_module("1_keibayosou_best_import_roi_runner")
-        _predict_dl_rank = best_runner._predict_dl_rank
-
-        model, mean, std = _load_dl_model_cache()
-        dl_df = _predict_dl_rank(model, mean, std, merged.copy())
-    except Exception as e:
-        print(f"[WARN] DL列生成に失敗したため中立値を使用します: {e}")
+    if float(DL_PROB_BLEND) == 0 and float(DL_RANK_BLEND) == 0:
+        # 現行本番はDL混合0。全期間結果による不要な学習を行わず中立値を使う。
         out["dl_prob"] = 0.5
         out["dl_rank"] = np.nan
         out["dl_rank_score"] = 0.5
         out["dl_prob_score"] = 0.5
-        out["dl_score"] = 0.5
+        out["dl_score"] = 0.0
         return out
 
-    merged_key = merged.copy()
-    if "rid_str" in merged_key.columns:
-        merged_key["rid_str"] = _normalize_rid_series(merged_key["rid_str"])
-    elif "レースID" in merged_key.columns:
-        merged_key["rid_str"] = _normalize_rid_series(merged_key["レースID"])
-    else:
-        merged_key["rid_str"] = ""
-
-    merged_key["馬番"] = _normalize_umaban_series(_safe_series(merged_key, "馬番"))
-    merged_key["頭数"] = pd.to_numeric(_safe_series(merged_key, "頭数"), errors="coerce")
-
-    dl_df = dl_df.copy()
-    if "rid_str" in dl_df.columns:
-        dl_df["rid_str"] = _normalize_rid_series(dl_df["rid_str"])
-    elif "レースID" in dl_df.columns:
-        dl_df["rid_str"] = _normalize_rid_series(dl_df["レースID"])
-    else:
-        dl_df["rid_str"] = ""
-
-    dl_df["馬番"] = _normalize_umaban_series(_safe_series(dl_df, "馬番"))
-
-    if "dl_rank" not in dl_df.columns:
-        dl_df["dl_rank"] = np.nan
-    if "dl_prob" not in dl_df.columns:
-        dl_df["dl_prob"] = 0.5
-
-    dl_use = dl_df[["rid_str", "馬番", "dl_rank", "dl_prob"]].copy()
-    dl_use["dl_rank"] = pd.to_numeric(dl_use["dl_rank"], errors="coerce")
-    dl_use["dl_prob"] = pd.to_numeric(dl_use["dl_prob"], errors="coerce")
-
-    dl_join = merged_key[["rid_str", "馬番", "頭数"]].drop_duplicates(subset=["rid_str", "馬番"])
-    dl_join = pd.merge(dl_join, dl_use, on=["rid_str", "馬番"], how="left")
-
-    out["rid_str"] = _normalize_rid_series(out["rid_str"])
-    out["馬番"] = _normalize_umaban_series(out["馬番"])
-
-    # 既存DL列がある場合は一度落としてから付け直す
-    out = out.drop(
-        columns=["dl_prob", "dl_rank", "dl_rank_score", "dl_prob_score", "dl_score", "頭数"],
-        errors="ignore",
-    )
-    out = pd.merge(out, dl_join, on=["rid_str", "馬番"], how="left")
-
-    def _calc_dl_rank_score(row: pd.Series) -> float:
-        rank_val = row.get("dl_rank")
-        field_size = row.get("頭数")
-
-        if pd.isna(rank_val) or pd.isna(field_size):
-            return 0.5
-
-        try:
-            rank_f = float(rank_val)
-            field_f = float(field_size)
-        except Exception:
-            return 0.5
-
-        if field_f <= 1.0 or rank_f < 1.0 or rank_f > field_f:
-            return 0.5
-
-        return float((field_f - rank_f) / (field_f - 1.0))
-
-    out["dl_rank_score"] = out.apply(_calc_dl_rank_score, axis=1)
-    out["dl_prob"] = pd.to_numeric(out["dl_prob"], errors="coerce").fillna(0.5)
-
-    def _normalize_prob_within_race(s: pd.Series) -> pd.Series:
-        x = pd.to_numeric(s, errors="coerce")
-        if x.notna().sum() == 0:
-            return pd.Series([0.5] * len(s), index=s.index, dtype=float)
-
-        min_val = x.min(skipna=True)
-        max_val = x.max(skipna=True)
-
-        if pd.isna(min_val) or pd.isna(max_val) or max_val == min_val:
-            return pd.Series([0.5] * len(s), index=s.index, dtype=float)
-
-        return ((x - min_val) / (max_val - min_val)).fillna(0.5)
-
-    out["dl_prob_score"] = out.groupby("rid_str")["dl_prob"].transform(_normalize_prob_within_race)
-
-    # 本番側の考え方に合わせる
-    out["dl_score"] = (
-        pd.to_numeric(out["dl_prob_score"], errors="coerce").fillna(0.5) * float(DL_PROB_BLEND)
-        + pd.to_numeric(out["dl_rank_score"], errors="coerce").fillna(0.5) * float(DL_RANK_BLEND)
-    )
-
-    return out.drop(columns=["頭数"], errors="ignore")
+    # 旧キャッシュは全期間を一括学習するため、時点別学習の実装まで候補作成を停止する。
+    raise ValueError("DL有効時の最適化は対象日以前だけの学習が未検証です")
 
 
 # ============================================================

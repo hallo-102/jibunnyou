@@ -1,0 +1,32 @@
+services:
+  keiba-review:
+    image: keiba-yosou-2026:arm64
+    init: true
+    shm_size: 1gb
+    cpus: 1.0
+    mem_limit: 2g
+    working_dir: /workspace
+    environment:
+      TZ: Asia/Tokyo
+      PYTHONPATH: /opt/jra-loop
+      PYTHONUNBUFFERED: "1"
+      HOME: /tmp/keiba-home
+      KEIBA_BASE_DIR: /workspace
+      KEIBA_CREDENTIALS_PATH: /workspace/config/credentials.ini
+    volumes:
+      - /volume1/docker/keiba_yosou_2026_nas:/workspace
+      - /volume1/docker/jra_continuous_improvement:/opt/jra-loop:ro
+    entrypoint: [python, -m, continuous_improvement.service, --root, /workspace]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD, python, -c, "import json; from pathlib import Path; from datetime import datetime,timezone,timedelta; p=Path('/workspace/data/output/continuous_improvement/status.json'); s=json.loads(p.read_text()); assert datetime.now(timezone.utc)-datetime.fromisoformat(s['checked_at'])<timedelta(hours=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

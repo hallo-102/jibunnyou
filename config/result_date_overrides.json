@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "overrides": [
+    {
+      "race_id_prefix": "2026050104",
+      "actual_date": "20260210",
+      "reason": "2月8日の東京第1回第4日は2月10日に代替開催",
+      "source": "https://jra.jp/news/202602/020906.html"
+    },
+    {
+      "race_id_prefix": "2026080204",
+      "actual_date": "20260210",
+      "reason": "2月8日・9日の京都第2回第4日は中止、2月10日に代替開催",
+      "source": "https://jra.jp/news/202602/020906.html"
+    },
+    {
+      "race_id_prefix": "2026030302",
+      "actual_date": "20261108",
+      "reason": "JRA番組表で第3回福島第2日を確認",
+      "source": "https://www.jra.go.jp/keiba/calendar2026/2026/11/1108.html"
+    },
+    {
+      "race_id_prefix": "2026050502",
+      "actual_date": "20261108",
+      "reason": "JRA番組表で第5回東京第2日を確認",
+      "source": "https://www.jra.go.jp/keiba/calendar2026/2026/11/1108.html"
+    },
+    {
+      "race_id_prefix": "2026080502",
+      "actual_date": "20261108",
+      "reason": "JRA番組表で第5回京都第2日を確認",
+      "source": "https://www.jra.go.jp/keiba/calendar2026/2026/11/1108.html"
+    }
+  ]
+}
