@@ -1,0 +1,7 @@
+# 共通pipelineとPR #10の市場補完runnerのimportに必要。GUI/COM/ブラウザー収集は含めない。
+numpy==2.2.6
+pandas==2.3.1
+openpyxl==3.1.5
+requests==2.32.4
+torch==2.7.1
+tzdata==2025.2

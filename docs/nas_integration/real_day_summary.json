@@ -1,0 +1,55 @@
+{
+  "day": "20260809",
+  "input_races": 36,
+  "input_horses": 495,
+  "predicted_races": 27,
+  "predicted_horses": 376,
+  "excluded_races": 9,
+  "common_horses": 376,
+  "left_only": 0,
+  "right_only": 0,
+  "changed_horses": 376,
+  "changed_columns": {
+    "bad_track_count": 315,
+    "bad_track_reliability": 315,
+    "track_condition_fit": 347,
+    "cond_match_count": 376,
+    "cond_avg_last3f": 376,
+    "cond_avg_time_idx": 376,
+    "last3f_context_value": 376,
+    "time_idx_context_value": 375,
+    "total": 376,
+    "score_raw": 376,
+    "score": 375,
+    "track_condition_time_idx_diff": 300,
+    "rank": 233,
+    "bad_track_time_idx": 88,
+    "bad_track_top3_rate": 69
+  },
+  "rank1_changed_races": 8,
+  "top5_changed_races": 17,
+  "roi_bet_rows_changed_races": 11,
+  "unavailable_columns": {
+    "left": [
+      "field_size_adjusted_finish"
+    ],
+    "right": []
+  },
+  "static_source_inventory_unchanged": true,
+  "local_source_data_unchanged": {
+    "input.xlsx": true,
+    "odds.csv": true,
+    "masters/race_levels.xlsx": true,
+    "masters/場所_馬場_タイム.xlsx": true,
+    "baseline.xlsx": true
+  },
+  "atol": 1e-09,
+  "rtol": 1e-09,
+  "input_manifest_sha256": "e7a8ecd1879fb6798b6adc755d19ca3196db28e67ec87ab135be52f4ac384338",
+  "candidate_prediction_sha256": "6f36cbb8681c14d2d3efcb5952ae42ffea4ebb68cd54efc8567caea6a4adefda",
+  "legacy_prediction_sha256": "1022d35a4c488887b025822355a4ff62d1db52f4b801c6ed5eca02fe7c098134",
+  "candidate_runtime_id": "7660254f018926ad08b302052e324330983337bfc925b21264872447a550d222",
+  "fixed_tickets_changed_races": 11,
+  "tested_source_commit": "9cd152ffd808c9faacfa3c19c776d8f647ef7621",
+  "runtime_code_and_adapter_sha_verified": true
+}

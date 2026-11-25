@@ -1,0 +1,97 @@
+{
+  "review_comment": "https://github.com/hallo-102/jibunnyou/pull/17#issuecomment-7155072023",
+  "reviewed_head": "d60258e2bc54f50e48f61b21cba6786b11c0a042",
+  "tested_implementation_commit": "988e1fdc534e145e5757d903241c036e70e70904",
+  "tests_passed": 39,
+  "scope": "offline",
+  "day": "20260809",
+  "input_races": 36,
+  "input_horses": 495,
+  "predicted_races": 27,
+  "predicted_horses": 376,
+  "excluded_races": 9,
+  "published_manifest_verified": true,
+  "runtime_and_adapter_sha_match": true,
+  "local_sources_and_data_unchanged": true,
+  "compose_host_path_check_and_config": "PASS",
+  "comparison": {
+    "common_horses": 376,
+    "left_only": 0,
+    "right_only": 0,
+    "data": "SAME",
+    "model": "DIFFERENT",
+    "implementation": "DIFFERENT",
+    "left_identity": {
+      "prediction_sha256": "b1bd7fe0da106c9e8c83f636f4970d7ac4ec7b2af4dac523efc8c1059383edb3",
+      "input_manifest_sha256": "d65516a877cd234859d2612ea9c2041c06dbac86fbf9aa4a38cb0e8325059a0b",
+      "model": {
+        "weight_file": "yosou_py/best_feature_weights_20260730.py",
+        "file_sha256": "2fdaf28273c2f2bbcb0052a09227f4be6d32a7e4817121df168613995cc66f32",
+        "effective_sha256": "6606ea4fa469e03ecc7a0000d031a914ca4ab10de04dfa132f0ba7d33ab70a3e"
+      },
+      "implementation_sha256": "473942a5a337b32d57e0e1395bc55aea1b76631f51d8192d52981f1e05fb7074",
+      "status": "VERIFIED_SAVED_RECORDS",
+      "missing": []
+    },
+    "right_identity": {
+      "prediction_sha256": "e4fc43c5d43b900a0e7482f7e2b6d36e09e8c5631db2ccb7ef09d728be13297e",
+      "input_manifest_sha256": "d65516a877cd234859d2612ea9c2041c06dbac86fbf9aa4a38cb0e8325059a0b",
+      "model": {
+        "model_name": "best_feature_weights_20260817",
+        "file_sha256": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
+        "effective_sha256": "8325f5c0748aa49076631b02424f2104a7924d0b39a4148d4703f687a937a789"
+      },
+      "implementation_sha256": "1dacc912fb15441247c3aa52b6c544336805d43be3e2293bb36d531c95f59baa",
+      "status": "VERIFIED_SAVED_RECORDS",
+      "missing": []
+    },
+    "fixed_tickets_changed_races": 11
+  },
+  "weights_only": {
+    "scope": "offline",
+    "comparison": "same_common_features_and_corrections_weights_only",
+    "input_feature_sha256": "d474f0ea1534427fc7bd4ea2c930fba7cade030c6993eeb9806016ab241603e4",
+    "models": {
+      "20260730": {
+        "file_sha256": "2e070de3ab4a53c39661b74dcc9f6ea1ada339ac1ac586c44afd05f37ab55717",
+        "effective_sha256": "6606ea4fa469e03ecc7a0000d031a914ca4ab10de04dfa132f0ba7d33ab70a3e"
+      },
+      "20260817": {
+        "file_sha256": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
+        "effective_sha256": "8325f5c0748aa49076631b02424f2104a7924d0b39a4148d4703f687a937a789"
+      }
+    },
+    "corrections_equal": true,
+    "correction_columns": [
+      "favorite_risk",
+      "rest_dist_risk",
+      "penalty_popular_underperformer",
+      "penalty_good_loser",
+      "penalty_ta_n",
+      "penalty_close_loss",
+      "penalty_rest_distance",
+      "extra_penalty",
+      "dl_bonus",
+      "risk_score",
+      "data_confidence"
+    ],
+    "normal_candidate_equal": true,
+    "horses": 376,
+    "races": 27,
+    "rank_changed_horses": 225,
+    "score_changed_horses": 376,
+    "rank1_changed_races": 7,
+    "top5_changed_races": 16,
+    "limitations": [
+      "旧NASの特徴量を再現する比較ではない",
+      "買い目再生成・ROI/精度改善の認定は行わない"
+    ]
+  },
+  "unverified": [
+    "live NAS state and protected runtime files",
+    "Linux ARM64 build/run",
+    "Windows/Linux numerical equivalence",
+    "prospective service/review/history/real upload/master update",
+    "full feature-by-model interaction and controlled ticket/ROI effects"
+  ]
+}

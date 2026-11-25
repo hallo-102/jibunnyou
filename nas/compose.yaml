@@ -1,0 +1,34 @@
+name: keiba-issue16-candidate
+services:
+  candidate:
+    platform: linux/arm64
+    build:
+      context: ..
+      dockerfile: nas/Dockerfile
+      args:
+        SOURCE_COMMIT: ${CANDIDATE_COMMIT:?reviewed commit required}
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "${CANDIDATE_UID:-10001}:${CANDIDATE_GID:-10001}"
+    environment:
+      TZ: Asia/Tokyo
+    volumes:
+      - type: bind
+        source: ${CANDIDATE_SNAPSHOT:?frozen snapshot required}
+        target: /snapshot
+        read_only: true
+      - type: bind
+        source: ${CANDIDATE_WORKSPACE_MARKER:?use python -m nas.launch}
+        target: /candidate/.nas-candidate-workspace.json
+        read_only: true
+      - type: bind
+        source: ${CANDIDATE_OUTPUT:?separate empty candidate directory required}
+        target: /candidate/runs
+    tmpfs: [/tmp]
+    command: [--workspace, /candidate, --snapshot, /snapshot, --output, /candidate/runs]
+    restart: "no"
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}

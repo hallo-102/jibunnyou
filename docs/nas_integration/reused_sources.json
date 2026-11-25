@@ -1,0 +1,65 @@
+[
+  {
+    "destination": "continuous_improvement/__init__.py",
+    "source": "PR #11 46dd7da1c528214d670099e26a23c5417ee6df94:continuous_improvement/__init__.py",
+    "sha256": "17f58381824de9ff75911361fff56a7382bfbc0cc9d99d51fc6c7ae2280ac853",
+    "source_sha256": "17f58381824de9ff75911361fff56a7382bfbc0cc9d99d51fc6c7ae2280ac853",
+    "adaptation": "LF normalization only"
+  },
+  {
+    "destination": "continuous_improvement/archive.py",
+    "source": "PR #11 46dd7da1c528214d670099e26a23c5417ee6df94:continuous_improvement/archive.py",
+    "sha256": "071e8b6a8021ef513d6fcabe8bcb56d3c464329cbc49cd1ab8e618278570a7d8",
+    "source_sha256": "071e8b6a8021ef513d6fcabe8bcb56d3c464329cbc49cd1ab8e618278570a7d8",
+    "adaptation": "LF normalization only"
+  },
+  {
+    "destination": "continuous_improvement/runtime_metadata.py",
+    "source": "PR #11 46dd7da1c528214d670099e26a23c5417ee6df94:continuous_improvement/runtime_metadata.py",
+    "sha256": "da02d68489a572f935b7a1ca0246e608c2560d392ee562fd13a4cd9d0990996f",
+    "source_sha256": "da02d68489a572f935b7a1ca0246e608c2560d392ee562fd13a4cd9d0990996f",
+    "adaptation": "LF normalization only"
+  },
+  {
+    "destination": "continuous_improvement/shadow.py",
+    "source": "PR #11 46dd7da1c528214d670099e26a23c5417ee6df94:continuous_improvement/shadow.py",
+    "sha256": "7a47012b4a1606a6f4be0071c5f4783b74113f805993683429c094dfe12bb5fa",
+    "source_sha256": "7a47012b4a1606a6f4be0071c5f4783b74113f805993683429c094dfe12bb5fa",
+    "adaptation": "LF normalization only"
+  },
+  {
+    "destination": "continuous_improvement/review.py",
+    "source": "PR #11 46dd7da1c528214d670099e26a23c5417ee6df94:continuous_improvement/review.py",
+    "sha256": "7cefadfa14e1ce367c788204c72abcb5d9532d5b06af9abebc55bca7d6c92167",
+    "source_sha256": "7cefadfa14e1ce367c788204c72abcb5d9532d5b06af9abebc55bca7d6c92167",
+    "adaptation": "LF normalization only"
+  },
+  {
+    "destination": "nas/runtime.py",
+    "source": "local NAS snapshot:app/keiba_runtime.py",
+    "source_sha256": "ccb18dd25079f4354f8a47616bedf7c432fae971fe1a45f74393e83bfc49611f",
+    "sha256": "ccb18dd25079f4354f8a47616bedf7c432fae971fe1a45f74393e83bfc49611f",
+    "adaptation": "LF normalization only"
+  },
+  {
+    "destination": "nas/scripts/jra_raceday.py",
+    "source": "local NAS snapshot:scripts/jra_raceday.py",
+    "source_sha256": "b65f044217f7ed9d729ddc430774915a26a0d9c535dd8d7a49cb2f458c5924f4",
+    "sha256": "b65f044217f7ed9d729ddc430774915a26a0d9c535dd8d7a49cb2f458c5924f4",
+    "adaptation": "LF normalization only"
+  },
+  {
+    "destination": "nas/scripts/finalize_unsupported_races.py",
+    "source": "local NAS snapshot:scripts/finalize_unsupported_races.py",
+    "source_sha256": "130f9e75830761a1eee13c6fc2eb68722509484cb8b1fa1161290b21bac67035",
+    "sha256": "130f9e75830761a1eee13c6fc2eb68722509484cb8b1fa1161290b21bac67035",
+    "adaptation": "LF normalization only"
+  },
+  {
+    "destination": "nas/scripts/validate_excel.py",
+    "source": "local NAS snapshot:scripts/validate_excel.py",
+    "source_sha256": "f1aaecceb511a159cd6984085b9a8a1d1f93720b562abca34d32cca6f3e2f0b6",
+    "sha256": "b0432e1a238a8c5f10b6ca31f1cfdc4a31406aedcaf0ee6e4f52362712af9ffe",
+    "adaptation": "LF normalization; validate_excel import namespace scripts -> nas.scripts only"
+  }
+]

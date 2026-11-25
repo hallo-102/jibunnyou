@@ -1,0 +1,403 @@
+[
+  {
+    "path": "1_keibayosou_best_import_roi_runner.py",
+    "main": {
+      "bytes": "7a3ca48bdd06f9ac29b0fafef0340a32ad2b2d942e06c1381c5795ce9266e023",
+      "lf_normalized": "7a3ca48bdd06f9ac29b0fafef0340a32ad2b2d942e06c1381c5795ce9266e023"
+    },
+    "windows": {
+      "bytes": "7a3ca48bdd06f9ac29b0fafef0340a32ad2b2d942e06c1381c5795ce9266e023",
+      "lf_normalized": "7a3ca48bdd06f9ac29b0fafef0340a32ad2b2d942e06c1381c5795ce9266e023"
+    },
+    "nas_path": "app/1_keibayosou_best_import_roi_runner.py",
+    "nas_static_copy": {
+      "bytes": "4c41ed644a104ff782f4dbb608d8867b512c772d1cd3b8d6b8df5a11210aaa93",
+      "lf_normalized": "4c41ed644a104ff782f4dbb608d8867b512c772d1cd3b8d6b8df5a11210aaa93"
+    },
+    "candidate": {
+      "bytes": "7a3ca48bdd06f9ac29b0fafef0340a32ad2b2d942e06c1381c5795ce9266e023",
+      "lf_normalized": "7a3ca48bdd06f9ac29b0fafef0340a32ad2b2d942e06c1381c5795ce9266e023"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "1_keibayosou_config.py",
+    "main": {
+      "bytes": "4f61440cf4983c35daebda8f1eb35102e3b9171a5663a4542deb662a614071b9",
+      "lf_normalized": "4f61440cf4983c35daebda8f1eb35102e3b9171a5663a4542deb662a614071b9"
+    },
+    "windows": {
+      "bytes": "4f61440cf4983c35daebda8f1eb35102e3b9171a5663a4542deb662a614071b9",
+      "lf_normalized": "4f61440cf4983c35daebda8f1eb35102e3b9171a5663a4542deb662a614071b9"
+    },
+    "nas_path": "app/1_keibayosou_config.py",
+    "nas_static_copy": {
+      "bytes": "c7a3abfe60558afde388b771183b7823163f1096f497daf254af63abaa174c78",
+      "lf_normalized": "daf031e0912420b6844c4a81e5a89f735a18370767b8639711c1214752720d78"
+    },
+    "candidate": {
+      "bytes": "4f61440cf4983c35daebda8f1eb35102e3b9171a5663a4542deb662a614071b9",
+      "lf_normalized": "4f61440cf4983c35daebda8f1eb35102e3b9171a5663a4542deb662a614071b9"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "1_keibayosou_course_style.py",
+    "main": {
+      "bytes": "9be3cd487bfa5a64a38284f86b94746cffb44b45b4c1c8affe2ee2a675a4c07f",
+      "lf_normalized": "9be3cd487bfa5a64a38284f86b94746cffb44b45b4c1c8affe2ee2a675a4c07f"
+    },
+    "windows": {
+      "bytes": "9be3cd487bfa5a64a38284f86b94746cffb44b45b4c1c8affe2ee2a675a4c07f",
+      "lf_normalized": "9be3cd487bfa5a64a38284f86b94746cffb44b45b4c1c8affe2ee2a675a4c07f"
+    },
+    "nas_path": "app/1_keibayosou_course_style.py",
+    "nas_static_copy": {
+      "bytes": "9be3cd487bfa5a64a38284f86b94746cffb44b45b4c1c8affe2ee2a675a4c07f",
+      "lf_normalized": "9be3cd487bfa5a64a38284f86b94746cffb44b45b4c1c8affe2ee2a675a4c07f"
+    },
+    "candidate": {
+      "bytes": "9be3cd487bfa5a64a38284f86b94746cffb44b45b4c1c8affe2ee2a675a4c07f",
+      "lf_normalized": "9be3cd487bfa5a64a38284f86b94746cffb44b45b4c1c8affe2ee2a675a4c07f"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "1_keibayosou_features.py",
+    "main": {
+      "bytes": "d8bee593120655af8228be319c6e82662d000b4aacbff7cec542ba00098d8683",
+      "lf_normalized": "d8bee593120655af8228be319c6e82662d000b4aacbff7cec542ba00098d8683"
+    },
+    "windows": {
+      "bytes": "d8bee593120655af8228be319c6e82662d000b4aacbff7cec542ba00098d8683",
+      "lf_normalized": "d8bee593120655af8228be319c6e82662d000b4aacbff7cec542ba00098d8683"
+    },
+    "nas_path": "app/1_keibayosou_features.py",
+    "nas_static_copy": {
+      "bytes": "3e04076692dfe51c022f6e8a368436e915d3dc0a9f9411c3e6189c53670873d2",
+      "lf_normalized": "fca80099d42215a51c06d2721da34b6382894d887b1e11827b2b5ab8caa4cfc5"
+    },
+    "candidate": {
+      "bytes": "d8bee593120655af8228be319c6e82662d000b4aacbff7cec542ba00098d8683",
+      "lf_normalized": "d8bee593120655af8228be319c6e82662d000b4aacbff7cec542ba00098d8683"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "1_keibayosou_loaders.py",
+    "main": {
+      "bytes": "96ff2bcb832f0be2cda49a8ab6567c8162f8eed8c590d93fe3f77b2f9636c2ce",
+      "lf_normalized": "96ff2bcb832f0be2cda49a8ab6567c8162f8eed8c590d93fe3f77b2f9636c2ce"
+    },
+    "windows": {
+      "bytes": "3a6369cb628461e7f7b3c946be190de06b3420c8b7e0dde13e22081c2f5636b9",
+      "lf_normalized": "96ff2bcb832f0be2cda49a8ab6567c8162f8eed8c590d93fe3f77b2f9636c2ce"
+    },
+    "nas_path": "app/1_keibayosou_loaders.py",
+    "nas_static_copy": {
+      "bytes": "3a6369cb628461e7f7b3c946be190de06b3420c8b7e0dde13e22081c2f5636b9",
+      "lf_normalized": "96ff2bcb832f0be2cda49a8ab6567c8162f8eed8c590d93fe3f77b2f9636c2ce"
+    },
+    "candidate": {
+      "bytes": "96ff2bcb832f0be2cda49a8ab6567c8162f8eed8c590d93fe3f77b2f9636c2ce",
+      "lf_normalized": "96ff2bcb832f0be2cda49a8ab6567c8162f8eed8c590d93fe3f77b2f9636c2ce"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "1_keibayosou_pace.py",
+    "main": {
+      "bytes": "6c24c392fe9ac191165db6fbe69df023cb1f619a98774a60cbb456ac10035569",
+      "lf_normalized": "6c24c392fe9ac191165db6fbe69df023cb1f619a98774a60cbb456ac10035569"
+    },
+    "windows": {
+      "bytes": "6c24c392fe9ac191165db6fbe69df023cb1f619a98774a60cbb456ac10035569",
+      "lf_normalized": "6c24c392fe9ac191165db6fbe69df023cb1f619a98774a60cbb456ac10035569"
+    },
+    "nas_path": "app/1_keibayosou_pace.py",
+    "nas_static_copy": {
+      "bytes": "6c24c392fe9ac191165db6fbe69df023cb1f619a98774a60cbb456ac10035569",
+      "lf_normalized": "6c24c392fe9ac191165db6fbe69df023cb1f619a98774a60cbb456ac10035569"
+    },
+    "candidate": {
+      "bytes": "6c24c392fe9ac191165db6fbe69df023cb1f619a98774a60cbb456ac10035569",
+      "lf_normalized": "6c24c392fe9ac191165db6fbe69df023cb1f619a98774a60cbb456ac10035569"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "1_keibayosou_penalties.py",
+    "main": {
+      "bytes": "9b7492932ef080216c039b0cc325f06a62e25edd241fdfc3b183f5ef6075d6a6",
+      "lf_normalized": "9b7492932ef080216c039b0cc325f06a62e25edd241fdfc3b183f5ef6075d6a6"
+    },
+    "windows": {
+      "bytes": "9b7492932ef080216c039b0cc325f06a62e25edd241fdfc3b183f5ef6075d6a6",
+      "lf_normalized": "9b7492932ef080216c039b0cc325f06a62e25edd241fdfc3b183f5ef6075d6a6"
+    },
+    "nas_path": "app/1_keibayosou_penalties.py",
+    "nas_static_copy": {
+      "bytes": "846c5b70c9dc8a565d4635a7758203fec4c9545c3f5daa3ed80c15d1d8af1448",
+      "lf_normalized": "9b7492932ef080216c039b0cc325f06a62e25edd241fdfc3b183f5ef6075d6a6"
+    },
+    "candidate": {
+      "bytes": "9b7492932ef080216c039b0cc325f06a62e25edd241fdfc3b183f5ef6075d6a6",
+      "lf_normalized": "9b7492932ef080216c039b0cc325f06a62e25edd241fdfc3b183f5ef6075d6a6"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "1_keibayosou_pipeline.py",
+    "main": {
+      "bytes": "34afa42fc1b370bb0bcca88fb00138528f9fa429a6367a9efb21db0e5bfec0d6",
+      "lf_normalized": "34afa42fc1b370bb0bcca88fb00138528f9fa429a6367a9efb21db0e5bfec0d6"
+    },
+    "windows": {
+      "bytes": "34afa42fc1b370bb0bcca88fb00138528f9fa429a6367a9efb21db0e5bfec0d6",
+      "lf_normalized": "34afa42fc1b370bb0bcca88fb00138528f9fa429a6367a9efb21db0e5bfec0d6"
+    },
+    "nas_path": "app/1_keibayosou_pipeline.py",
+    "nas_static_copy": {
+      "bytes": "d9769d89a6d352dfaf13ed1d81b823ddc4add8c6e3b76f69f2bd425c080c4994",
+      "lf_normalized": "d9769d89a6d352dfaf13ed1d81b823ddc4add8c6e3b76f69f2bd425c080c4994"
+    },
+    "candidate": {
+      "bytes": "34afa42fc1b370bb0bcca88fb00138528f9fa429a6367a9efb21db0e5bfec0d6",
+      "lf_normalized": "34afa42fc1b370bb0bcca88fb00138528f9fa429a6367a9efb21db0e5bfec0d6"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "1_keibayosou_ranking.py",
+    "main": {
+      "bytes": "a5b0c9804d00690704f9179ef1a1924edeb1331ac23308609676d14737c5ff5d",
+      "lf_normalized": "a5b0c9804d00690704f9179ef1a1924edeb1331ac23308609676d14737c5ff5d"
+    },
+    "windows": {
+      "bytes": "a5b0c9804d00690704f9179ef1a1924edeb1331ac23308609676d14737c5ff5d",
+      "lf_normalized": "a5b0c9804d00690704f9179ef1a1924edeb1331ac23308609676d14737c5ff5d"
+    },
+    "nas_path": "app/1_keibayosou_ranking.py",
+    "nas_static_copy": null,
+    "candidate": {
+      "bytes": "a5b0c9804d00690704f9179ef1a1924edeb1331ac23308609676d14737c5ff5d",
+      "lf_normalized": "a5b0c9804d00690704f9179ef1a1924edeb1331ac23308609676d14737c5ff5d"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "1_keibayosou_utils.py",
+    "main": {
+      "bytes": "9561860c23c49f60da1b770ad98a48f6dc326c4650a9c594034b58dc7bfa2fb3",
+      "lf_normalized": "9561860c23c49f60da1b770ad98a48f6dc326c4650a9c594034b58dc7bfa2fb3"
+    },
+    "windows": {
+      "bytes": "3512930aafe2a99bd7011351db422308ea5d06aab303e1828bb1b07cdec3806f",
+      "lf_normalized": "9561860c23c49f60da1b770ad98a48f6dc326c4650a9c594034b58dc7bfa2fb3"
+    },
+    "nas_path": "app/1_keibayosou_utils.py",
+    "nas_static_copy": {
+      "bytes": "3512930aafe2a99bd7011351db422308ea5d06aab303e1828bb1b07cdec3806f",
+      "lf_normalized": "9561860c23c49f60da1b770ad98a48f6dc326c4650a9c594034b58dc7bfa2fb3"
+    },
+    "candidate": {
+      "bytes": "9561860c23c49f60da1b770ad98a48f6dc326c4650a9c594034b58dc7bfa2fb3",
+      "lf_normalized": "9561860c23c49f60da1b770ad98a48f6dc326c4650a9c594034b58dc7bfa2fb3"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "model_registry.py",
+    "main": {
+      "bytes": "146fdf01a9fae1b0e9c08dde7080195b825f8a95dc2e41a67dfb4057435f6fc8",
+      "lf_normalized": "146fdf01a9fae1b0e9c08dde7080195b825f8a95dc2e41a67dfb4057435f6fc8"
+    },
+    "windows": {
+      "bytes": "146fdf01a9fae1b0e9c08dde7080195b825f8a95dc2e41a67dfb4057435f6fc8",
+      "lf_normalized": "146fdf01a9fae1b0e9c08dde7080195b825f8a95dc2e41a67dfb4057435f6fc8"
+    },
+    "nas_path": "app/model_registry.py",
+    "nas_static_copy": null,
+    "candidate": {
+      "bytes": "146fdf01a9fae1b0e9c08dde7080195b825f8a95dc2e41a67dfb4057435f6fc8",
+      "lf_normalized": "146fdf01a9fae1b0e9c08dde7080195b825f8a95dc2e41a67dfb4057435f6fc8"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "config/production_model.json",
+    "main": {
+      "bytes": "f1ef2923558ba40827e816fafa91584b5947b2e7447eed72172fb74e0419e54c",
+      "lf_normalized": "f1ef2923558ba40827e816fafa91584b5947b2e7447eed72172fb74e0419e54c"
+    },
+    "windows": {
+      "bytes": "f1ef2923558ba40827e816fafa91584b5947b2e7447eed72172fb74e0419e54c",
+      "lf_normalized": "f1ef2923558ba40827e816fafa91584b5947b2e7447eed72172fb74e0419e54c"
+    },
+    "nas_path": "config/production_model.json",
+    "nas_static_copy": null,
+    "candidate": {
+      "bytes": "f1ef2923558ba40827e816fafa91584b5947b2e7447eed72172fb74e0419e54c",
+      "lf_normalized": "f1ef2923558ba40827e816fafa91584b5947b2e7447eed72172fb74e0419e54c"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "config/forward_validation.json",
+    "main": {
+      "bytes": "0a1cb477a569f6d8f7347be381276cf010bb49f134aab11724a637cfeb0fcbc8",
+      "lf_normalized": "0a1cb477a569f6d8f7347be381276cf010bb49f134aab11724a637cfeb0fcbc8"
+    },
+    "windows": {
+      "bytes": "0a1cb477a569f6d8f7347be381276cf010bb49f134aab11724a637cfeb0fcbc8",
+      "lf_normalized": "0a1cb477a569f6d8f7347be381276cf010bb49f134aab11724a637cfeb0fcbc8"
+    },
+    "nas_path": "config/forward_validation.json",
+    "nas_static_copy": null,
+    "candidate": {
+      "bytes": "0a1cb477a569f6d8f7347be381276cf010bb49f134aab11724a637cfeb0fcbc8",
+      "lf_normalized": "0a1cb477a569f6d8f7347be381276cf010bb49f134aab11724a637cfeb0fcbc8"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "path": "yosou_py/best_feature_weights_20260817.py",
+    "main": {
+      "bytes": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
+      "lf_normalized": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d"
+    },
+    "windows": {
+      "bytes": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
+      "lf_normalized": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d"
+    },
+    "nas_path": "yosou_py/best_feature_weights_20260817.py",
+    "nas_static_copy": null,
+    "candidate": {
+      "bytes": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
+      "lf_normalized": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d"
+    },
+    "adopted": "GitHub main",
+    "reason": "共通予想ロジックを二重保守しない"
+  },
+  {
+    "nas_path": "app/keiba_runtime.py",
+    "nas_static_copy": {
+      "bytes": "ccb18dd25079f4354f8a47616bedf7c432fae971fe1a45f74393e83bfc49611f",
+      "lf_normalized": "ccb18dd25079f4354f8a47616bedf7c432fae971fe1a45f74393e83bfc49611f"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "scripts/run_daily_pipeline.py",
+    "nas_static_copy": {
+      "bytes": "33c069d34824665ff87830a4709d30eeef5acdeca8603f50a7cf6a6faede193c",
+      "lf_normalized": "33c069d34824665ff87830a4709d30eeef5acdeca8603f50a7cf6a6faede193c"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "scripts/run_scheduler.py",
+    "nas_static_copy": {
+      "bytes": "30ca454cff33eca20634fc58109c229cecddac331ff23e71f86277bbb5f109b5",
+      "lf_normalized": "30ca454cff33eca20634fc58109c229cecddac331ff23e71f86277bbb5f109b5"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "scripts/jra_raceday.py",
+    "nas_static_copy": {
+      "bytes": "b65f044217f7ed9d729ddc430774915a26a0d9c535dd8d7a49cb2f458c5924f4",
+      "lf_normalized": "b65f044217f7ed9d729ddc430774915a26a0d9c535dd8d7a49cb2f458c5924f4"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "scripts/validate_excel.py",
+    "nas_static_copy": {
+      "bytes": "f1aaecceb511a159cd6984085b9a8a1d1f93720b562abca34d32cca6f3e2f0b6",
+      "lf_normalized": "f1aaecceb511a159cd6984085b9a8a1d1f93720b562abca34d32cca6f3e2f0b6"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "scripts/finalize_unsupported_races.py",
+    "nas_static_copy": {
+      "bytes": "130f9e75830761a1eee13c6fc2eb68722509484cb8b1fa1161290b21bac67035",
+      "lf_normalized": "130f9e75830761a1eee13c6fc2eb68722509484cb8b1fa1161290b21bac67035"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "scripts/upload_rclone.py",
+    "nas_static_copy": {
+      "bytes": "025ebf63349857ab873ee09413e12b637369bd0ab303c0363f1b260d60fe9f1e",
+      "lf_normalized": "025ebf63349857ab873ee09413e12b637369bd0ab303c0363f1b260d60fe9f1e"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "scripts/update_masters.py",
+    "nas_static_copy": {
+      "bytes": "82f171c001cd04a0f0d5d58ce4c8da1e6778ffad26fc72cfb1d145b29b3667c7",
+      "lf_normalized": "82f171c001cd04a0f0d5d58ce4c8da1e6778ffad26fc72cfb1d145b29b3667c7"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "compose.yaml",
+    "nas_static_copy": {
+      "bytes": "9f128ac93ba3d09c45f7e8f3ae415c40f5f12171d1ab3e02f6de241405d587c0",
+      "lf_normalized": "9f128ac93ba3d09c45f7e8f3ae415c40f5f12171d1ab3e02f6de241405d587c0"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "Dockerfile",
+    "nas_static_copy": {
+      "bytes": "13f06bfe2ad76d99a9938f75e02f855097f54b714a13ce79b43a58b83e11e24e",
+      "lf_normalized": "13f06bfe2ad76d99a9938f75e02f855097f54b714a13ce79b43a58b83e11e24e"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "requirements.txt",
+    "nas_static_copy": {
+      "bytes": "3045628379657510953f4e3fa14414ede3d59866f95e9a328d18d24b4df164e5",
+      "lf_normalized": "3045628379657510953f4e3fa14414ede3d59866f95e9a328d18d24b4df164e5"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  },
+  {
+    "nas_path": "yosou_py/best_feature_weights_20260730.py",
+    "nas_static_copy": {
+      "bytes": "2fdaf28273c2f2bbcb0052a09227f4be6d32a7e4817121df168613995cc66f32",
+      "lf_normalized": "2e070de3ab4a53c39661b74dcc9f6ea1ada339ac1ac586c44afd05f37ab55717"
+    },
+    "adopted": "NAS helper subset; existing production orchestration unchanged",
+    "reason": "隔離実行に必要な純粋な運用契約のみ再利用。収集/配信/更新/定期実行は起動しない"
+  }
+]
