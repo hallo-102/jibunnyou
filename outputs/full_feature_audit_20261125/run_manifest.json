@@ -1,0 +1,82 @@
+{
+  "status": "no_real_data",
+  "python": "3.12.14",
+  "dependencies": {
+    "pandas": "3.1.1",
+    "numpy": "2.5.4",
+    "openpyxl": "3.1.5",
+    "xlrd": null,
+    "requests": "2.34.2",
+    "torch": "2.12.0+cpu",
+    "scikit-learn": null
+  },
+  "data_dir": "/workspace/jibunnyou/data",
+  "output_dir": "/workspace/jibunnyou/outputs/full_feature_audit_20261125",
+  "period": {
+    "input": [
+      "2025-06-14",
+      "2026-11-01"
+    ],
+    "output": [
+      "2025-06-14",
+      "2026-10-25"
+    ]
+  },
+  "model": {
+    "name": "best_feature_weights_20260817",
+    "score": "legacy",
+    "weight_file": "yosou_py/best_feature_weights_20260817.py",
+    "configured_file_sha256": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
+    "actual_file_sha256": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
+    "configured_effective_sha256": "8325f5c0748aa49076631b02424f2104a7924d0b39a4148d4703f687a937a789",
+    "actual_effective_sha256": "8325f5c0748aa49076631b02424f2104a7924d0b39a4148d4703f687a937a789"
+  },
+  "observations": {
+    "matched_input_horse_rows": 0,
+    "recomputed_horse_rows": 0,
+    "export_horse_rows": 0,
+    "legacy_scoring_horse_rows": 0,
+    "historical_20261012": "issue_reference_only"
+  },
+  "files": [
+    {
+      "path": "/workspace/jibunnyou/config/production_model.json",
+      "role": "production_model_config",
+      "sha256": "f1ef2923558ba40827e816fafa91584b5947b2e7447eed72172fb74e0419e54c",
+      "events": [
+        {
+          "status": "used",
+          "reason": ""
+        }
+      ],
+      "status": "used",
+      "reason": ""
+    },
+    {
+      "path": "/workspace/jibunnyou/config/shadow_model.json",
+      "role": "shadow_model_config",
+      "sha256": "2967e29368652ae693f9de3e621eb361810690f713ddd6e0e2dd12fdf697636f",
+      "events": [
+        {
+          "status": "inspected",
+          "reason": ""
+        }
+      ],
+      "status": "inspected",
+      "reason": ""
+    },
+    {
+      "path": "/workspace/jibunnyou/yosou_py/best_feature_weights_20260817.py",
+      "role": "production_weights",
+      "sha256": "bb086384eb58c5abae6ef7104de94e83005c318b3be3900ef5c4df15fca1020d",
+      "events": [
+        {
+          "status": "used",
+          "reason": ""
+        }
+      ],
+      "status": "used",
+      "reason": ""
+    }
+  ]
+}
