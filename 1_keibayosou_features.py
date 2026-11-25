@@ -27,9 +27,11 @@ from __future__ import annotations
 
 import importlib
 import sys
+from datetime import date
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import re
+import unicodedata
 import numpy as np
 import pandas as pd
 
@@ -187,6 +189,29 @@ def _parse_yyyymmdd(x: Any) -> Optional[pd.Timestamp]:
     return None
 
 
+def _parse_validation_date(value: Any) -> Optional[pd.Timestamp]:
+    """区切り付き日付と8桁の年月日を、桁の境界を保ったまま読む。"""
+    if pd.isna(value):
+        return None
+    if isinstance(value, date):
+        return pd.Timestamp(pd.Timestamp(value).date())
+
+    text = str(value).strip()
+    match = re.fullmatch(r"([0-9]{4})([/.-])([0-9]{1,2})\2([0-9]{1,2})", text)
+    if match:
+        year, month, day = match.group(1, 3, 4)
+    else:
+        match = re.fullmatch(r"([0-9]{4})([0-9]{2})([0-9]{2})(?:\.0+)?", text)
+        if not match:
+            return None
+        year, month, day = match.groups()
+
+    try:
+        return pd.Timestamp(date(int(year), int(month), int(day)))
+    except ValueError:
+        return None
+
+
 def _parse_laps_to_min_1f(lap_text: Any) -> Optional[float]:
     """
     '12.6 - 10.9 - 11.9 ...' のようなラップ文字列から
@@ -262,19 +287,25 @@ def _bucket_distance(dist: Optional[int]) -> str:
     return "long"
 
 
-def _parse_class_name_from_text(text_val: Any) -> str:
+def _parse_class_name_from_text(text_val: Any, *, validation: bool = False) -> str:
     if text_val is None or (isinstance(text_val, float) and np.isnan(text_val)):
         return ""
     s = _to_str(text_val)
-    s = s.replace("　", "").replace(" ", "")
-    s = s.upper()
+    if validation:
+        normalized = unicodedata.normalize("NFKC", s).upper()
+        grade = re.search(r"(?<![A-Z0-9])(?:G|JPN)\s*(III|II|I|[123])(?![A-Z0-9])", normalized)
+        if grade:
+            number = {"I": "1", "II": "2", "III": "3"}.get(grade[1], grade[1])
+            return "G" + number
 
-    if "G1" in s or "GI" in s or "ＧⅠ" in s or "Ｇ1" in s or "JPN1" in s:
-        return "G1"
-    if "G2" in s or "GII" in s or "ＧⅡ" in s or "Ｇ2" in s or "JPN2" in s:
-        return "G2"
-    if "G3" in s or "GIII" in s or "ＧⅢ" in s or "Ｇ3" in s or "JPN3" in s:
-        return "G3"
+    s = s.replace("　", "").replace(" ", "").upper()
+    if not validation:
+        if "G1" in s or "GI" in s or "ＧⅠ" in s or "Ｇ1" in s or "JPN1" in s:
+            return "G1"
+        if "G2" in s or "GII" in s or "ＧⅡ" in s or "Ｇ2" in s or "JPN2" in s:
+            return "G2"
+        if "G3" in s or "GIII" in s or "ＧⅢ" in s or "Ｇ3" in s or "JPN3" in s:
+            return "G3"
     if "リステッド" in s:
         return "L"
     if re.search(r"(^|[^A-Z])L([^A-Z]|$)", s):
@@ -296,13 +327,8 @@ def _parse_class_name_from_text(text_val: Any) -> str:
     return ""
 
 
-def _parse_pace_from_laps(lap_text: Any) -> str:
-    """
-    前半3F と 後半3F の差で pace を簡易判定
-    - diff <= -0.6 : slow
-    - diff >=  0.6 : fast
-    - それ以外     : mid
-    """
+def _parse_pace_from_laps(lap_text: Any, *, validation: bool = False) -> str:
+    """前後半3Fの差で判定する。検証では前半が速い場合を fast とする。"""
     if lap_text is None or (isinstance(lap_text, float) and np.isnan(lap_text)):
         return ""
     nums = re.findall(r"\d+\.\d+", str(lap_text))
@@ -315,6 +341,8 @@ def _parse_pace_from_laps(lap_text: Any) -> str:
     first3 = sum(laps[:3])
     last3 = sum(laps[-3:])
     diff = first3 - last3
+    if validation:
+        diff = round(-diff, 10)
     if diff <= -0.6:
         return "slow"
     if diff >= 0.6:
@@ -375,8 +403,10 @@ def _safe_series_mean(s: pd.Series) -> float:
     return float(s_num.mean()) if not s_num.dropna().empty else np.nan
 
 
-def _safe_recent_mean(s: pd.Series, n: int = 3) -> float:
-    """日付降順に並んだ Series から、直近 n 件の平均を返す。"""
+def _safe_recent_mean(s: pd.Series, n: int = 3, *, validation: bool = False) -> float:
+    """日付降順の Series から近走平均を返す。検証では直近 n 走内の有効値を使う。"""
+    if validation:
+        return _safe_series_mean(s.head(n))
     s_num = pd.to_numeric(s, errors="coerce").dropna()
     return float(s_num.head(n).mean()) if not s_num.empty else np.nan
 
@@ -776,6 +806,8 @@ def _compute_horse_features_from_race_sheets(
     now_df: pd.DataFrame,
     levels_df: Optional[pd.DataFrame],
     raceday: str = "",
+    *,
+    validation: bool = False,
 ) -> pd.DataFrame:
     """
     馬の競走成績ブック内の「レースIDシート」から、horse-level の特徴量を計算する。
@@ -821,7 +853,11 @@ def _compute_horse_features_from_race_sheets(
     field_size_map = now.groupby("rid_str")["頭数"].first().map(_to_field_size).to_dict() if "頭数" in now.columns else {}
 
     now_date = None
-    if raceday and re.fullmatch(r"\d{8}", raceday):
+    if validation:
+        now_date = _parse_validation_date(raceday)
+        if now_date is None:
+            raise ValueError("特徴量検証には有効な開催日が必要です")
+    elif raceday and re.fullmatch(r"\d{8}", raceday):
         now_date = pd.to_datetime(raceday, format="%Y%m%d")
 
     rows: list[dict[str, Any]] = []
@@ -868,6 +904,20 @@ def _compute_horse_features_from_race_sheets(
             continue
 
         df["__horse_name__"] = df[c_name].astype(str).str.strip()
+        if validation and c_date:
+            df["__date__"] = pd.to_datetime(df[c_date].map(_parse_validation_date), errors="coerce")
+            df = df.loc[df["__date__"].lt(now_date)]
+
+        if validation:
+            status_col = _pick_col(df, ["競走状態", "出走状態", "状態", "異常区分"])
+            did_not_start = pd.Series(False, index=df.index)
+            did_not_finish = pd.Series(False, index=df.index)
+            for status_source in dict.fromkeys(filter(None, [c_finish, status_col])):
+                status = df[status_source].astype(str).str.replace(r"\s+", "", regex=True)
+                did_not_start |= status.isin({"除", "除外", "競走除外", "取", "取消", "取り消し", "出走取消"})
+                did_not_finish |= status.isin({"中", "中止", "競走中止"})
+            # 除外・取消は出走数に含めない。中止は出走扱いとし、数値着順は欠損とする。
+            df = df.assign(__did_not_finish__=did_not_finish).loc[~did_not_start]
 
         def _select_past_rows_for_horse(horse_name_val: Any) -> pd.DataFrame:
             """今走馬名に対応し、かつRACEDAYより前の過去走行だけを抽出する。"""
@@ -879,6 +929,10 @@ def _compute_horse_features_from_race_sheets(
             if selected.empty:
                 key = re.sub(r"\s+", "", name_text)
                 selected = df[df["__horse_name__"].map(lambda x: re.sub(r"\s+", "", str(x))) == key].copy()
+            if validation:
+                if c_date is None:
+                    return selected.iloc[0:0]
+                return selected
             if now_date is not None:
                 if c_date is None:
                     # 日付を証明できない行は過去データへ自動混入させない。
@@ -966,8 +1020,11 @@ def _compute_horse_features_from_race_sheets(
             one["__place__"] = one[c_place].map(_normalize_place_text) if c_place else ""
             one["__surface__"] = one[c_surface].map(_parse_surface) if c_surface else ""
             one["__dist__"] = one[c_dist].map(_parse_distance_m) if c_dist else np.nan
-            one["__class__"] = one[c_race_name].map(_parse_class_name_from_text) if c_race_name else ""
-            one["__pace__"] = one[c_lap].map(_parse_pace_from_laps) if c_lap else ""
+            one["__class__"] = (
+                one[c_race_name].map(lambda name: _parse_class_name_from_text(name, validation=validation))
+                if c_race_name else ""
+            )
+            one["__pace__"] = one[c_lap].map(lambda lap: _parse_pace_from_laps(lap, validation=validation)) if c_lap else ""
             one["__last3f__"] = last3_s
             one["__time_idx__"] = time_idx_s
             one["__field_size__"] = pd.to_numeric(one[c_field_size], errors="coerce") if c_field_size else np.nan
@@ -975,7 +1032,8 @@ def _compute_horse_features_from_race_sheets(
             one["__remark__"] = one[c_remark].fillna("").astype(str) if c_remark else ""
 
             if c_date and not one.empty:
-                one["__date__"] = one[c_date].map(_parse_yyyymmdd)
+                if not validation:
+                    one["__date__"] = one[c_date].map(_parse_yyyymmdd)
                 one = one.sort_values("__date__", ascending=False, kind="mergesort")
 
             finish_s = _to_float_series(one[c_finish]) if c_finish else pd.Series(dtype=float)
@@ -984,6 +1042,9 @@ def _compute_horse_features_from_race_sheets(
             last3_s = _to_float_series(one[c_last3f]) if c_last3f else pd.Series(dtype=float)
             margin_s = _to_float_series(one[c_margin]) if c_margin else pd.Series(dtype=float)
             time_idx_s = _to_float_series(one[c_time_idx]) if c_time_idx else pd.Series(dtype=float)
+
+            if validation:
+                finish_s = finish_s.reindex(one.index).mask(one["__did_not_finish__"])
 
             ta_n = float(len(one)) if not one.empty else 0.0
             avg_finish = float(finish_s.mean()) if not finish_s.dropna().empty else np.nan
@@ -997,14 +1058,15 @@ def _compute_horse_features_from_race_sheets(
                 )
                 field_size_adjusted_finish = float(normalized_finish.clip(lower=0.0, upper=1.0).mean())
             avg_pop = float(pop_s.mean()) if not pop_s.dropna().empty else np.nan
-            win_rate = float((finish_s == 1).mean()) if not finish_s.dropna().empty else np.nan
+            win_finishes = finish_s.dropna() if validation else finish_s
+            win_rate = float(win_finishes.eq(1).mean()) if win_finishes.notna().any() else np.nan
             avg_last3f = float(last3_s.mean()) if not last3_s.dropna().empty else np.nan
             avg_margin = float(margin_s.mean()) if not margin_s.dropna().empty else np.nan
             avg_time_idx = float(time_idx_s.mean()) if not time_idx_s.dropna().empty else np.nan
-            recent3_finish = _safe_recent_mean(finish_s, n=3)
-            recent3_pop = _safe_recent_mean(pop_s, n=3)
-            recent3_last3f = _safe_recent_mean(last3_s, n=3)
-            recent3_time_idx = _safe_recent_mean(time_idx_s, n=3)
+            recent3_finish = _safe_recent_mean(finish_s, validation=validation)
+            recent3_pop = _safe_recent_mean(pop_s, validation=validation)
+            recent3_last3f = _safe_recent_mean(last3_s, validation=validation)
+            recent3_time_idx = _safe_recent_mean(time_idx_s, validation=validation)
             recent_finish_trend = (
                 avg_finish - recent3_finish
                 if not np.isnan(avg_finish) and not np.isnan(recent3_finish)
@@ -1030,14 +1092,16 @@ def _compute_horse_features_from_race_sheets(
 
             days_off = np.nan
             if now_date is not None and c_date and not one.empty:
-                d = one[c_date].map(_parse_yyyymmdd).dropna()
+                d = one["__date__"].dropna()
                 if not d.empty:
                     last_date = d.max()
                     days_off = float((now_date - last_date).days)
 
             now_place = _normalize_place_text(r_now.get("場所"))
             now_surface = _parse_surface(r_now.get("コース")) if "コース" in now.columns else _parse_surface(r_now.get("芝・ダ"))
-            now_class = _parse_class_name_from_text(r_now.get("クラス", r_now.get("レース名", "")))
+            now_class = _parse_class_name_from_text(
+                r_now.get("クラス", r_now.get("レース名", "")), validation=validation,
+            )
             now_pace = inferred_race_pace
 
             context_feats = _calc_contextual_last3f_features(
@@ -1152,9 +1216,9 @@ def _compute_horse_features_from_race_sheets(
             range_count = int(range_distance_mask.sum())
             distance_exact_top3_rate = float(top3_mask[exact_distance_mask].mean()) if exact_count else np.nan
             distance_range_top3_rate = float(top3_mask[range_distance_mask].mean()) if range_count else np.nan
-            distance_time_values = time_idx_s[range_distance_mask].dropna()
-            distance_time_idx = float(distance_time_values.mean()) if not distance_time_values.empty else np.nan
-            recent_distance_time_idx = float(distance_time_values.head(3).mean()) if not distance_time_values.empty else np.nan
+            distance_time_values = time_idx_s[range_distance_mask]
+            distance_time_idx = _safe_series_mean(distance_time_values)
+            recent_distance_time_idx = _safe_recent_mean(distance_time_values, validation=validation)
             condition_match_reliability = float(exact_count / (exact_count + 3.0))
             distance_range_reliability = float(range_count / (range_count + 3.0))
 
@@ -1204,7 +1268,7 @@ def _compute_horse_features_from_race_sheets(
                 if not np.isnan(recent3_time_idx) and not np.isnan(avg_time_idx)
                 else np.nan
             )
-            recent_margin = _safe_recent_mean(margin_s, n=3)
+            recent_margin = _safe_recent_mean(margin_s, validation=validation)
             recent_margin_improvement = (
                 avg_margin - recent_margin
                 if not np.isnan(avg_margin) and not np.isnan(recent_margin)
@@ -1669,8 +1733,12 @@ def build_features_from_excel(
     base_time_df: Optional[pd.DataFrame] = None,
     odds_df: Optional[pd.DataFrame] = None,
     raceday: str = "",
+    *,
+    validation: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
+    validation=True は開催日を必須とする検証用の特徴量再計算。
+
     返り値：
       merged_df : 今走レース情報（NOW_SHEET）に horses を必要に応じて結合したもの
       feat_df   : rid_str/馬番/馬名 + FEAT_COLS を含む特徴量テーブル
@@ -1690,10 +1758,14 @@ def build_features_from_excel(
 
     horses_df = book.get(HORSES_SHEET)
 
-    if raceday:
+    if raceday or validation:
         date_cols = ["日付", "開催日", "日付(月日)", "年月日", "raceday"]
         date_col = next((c for c in date_cols if c in now_df.columns), None)
-        if date_col:
+        if date_col and validation:
+            now_df = now_df.loc[now_df[date_col].map(_parse_validation_date).eq(
+                _parse_validation_date(raceday)
+            )].copy()
+        elif date_col:
             s = now_df[date_col].astype(str).str.replace("/", "", regex=False).str.replace("-", "", regex=False)
             now_df = now_df.loc[s.str.contains(str(raceday), na=False)].copy()
 
@@ -1716,9 +1788,12 @@ def build_features_from_excel(
     if "馬番" in merged.columns:
         merged["馬番"] = _normalize_umaban_series(merged["馬番"])
 
-    computed_feat = _compute_horse_features_from_race_sheets(book, merged, levels_df, raceday=raceday)
+    computed_feat = _compute_horse_features_from_race_sheets(
+        book, merged, levels_df, raceday=raceday, validation=validation,
+    )
 
-    if horses_df is not None and isinstance(horses_df, pd.DataFrame) and not horses_df.empty:
+    # horses の既計算値は、過去走の日付検証を経ていない。
+    if not validation and isinstance(horses_df, pd.DataFrame) and not horses_df.empty:
         h = horses_df.copy()
         h = _ensure_rid_str(h, label="HORSES")
         if "馬番" not in h.columns:
