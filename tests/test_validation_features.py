@@ -124,3 +124,22 @@ def test_d03_class_specific_finish_section(calculate):
     )
     assert legacy.iloc[0]["last3f_class_diff"] == 0
     assert validation.iloc[0]["last3f_class_diff"] == 1
+
+
+def test_d04_non_starters_and_unfinished_runs(calculate):
+    legacy, validation = calculate({
+        "日付": ["2026/11/04", "2026/11/03", "2026/11/02", "2026/11/01"],
+        "着順": [1, "競走中止", "競走除外", "出走取消"],
+    })
+    assert legacy.iloc[0][["ta_n", "avg_finish"]].tolist() == [4, 1]
+    assert validation.iloc[0][["ta_n", "avg_finish"]].tolist() == [2, 1]
+
+
+def test_d04_unfinished_run_with_numeric_placeholder(calculate):
+    legacy, validation = calculate({
+        "日付": ["2026/11/03", "2026/11/02"],
+        "着順": [1, 99],
+        "競走状態": ["完走", "中止"],
+    })
+    assert legacy.iloc[0][["ta_n", "avg_finish"]].tolist() == [2, 50]
+    assert validation.iloc[0][["ta_n", "avg_finish"]].tolist() == [2, 1]

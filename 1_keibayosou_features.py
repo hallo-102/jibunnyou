@@ -906,6 +906,17 @@ def _compute_horse_features_from_race_sheets(
             df["__date__"] = pd.to_datetime(df[c_date].map(_parse_validation_date), errors="coerce")
             df = df.loc[df["__date__"].lt(now_date)]
 
+        if validation:
+            status_col = _pick_col(df, ["競走状態", "出走状態", "状態", "異常区分"])
+            did_not_start = pd.Series(False, index=df.index)
+            did_not_finish = pd.Series(False, index=df.index)
+            for status_source in dict.fromkeys(filter(None, [c_finish, status_col])):
+                status = df[status_source].astype(str).str.replace(r"\s+", "", regex=True)
+                did_not_start |= status.isin({"除", "除外", "競走除外", "取", "取消", "取り消し", "出走取消"})
+                did_not_finish |= status.isin({"中", "中止", "競走中止"})
+            # 除外・取消は出走数に含めない。中止は出走扱いとし、数値着順は欠損とする。
+            df = df.assign(__did_not_finish__=did_not_finish).loc[~did_not_start]
+
         def _select_past_rows_for_horse(horse_name_val: Any) -> pd.DataFrame:
             """今走馬名に対応し、かつRACEDAYより前の過去走行だけを抽出する。"""
             name_text = str(horse_name_val or "").strip()
@@ -1029,6 +1040,9 @@ def _compute_horse_features_from_race_sheets(
             last3_s = _to_float_series(one[c_last3f]) if c_last3f else pd.Series(dtype=float)
             margin_s = _to_float_series(one[c_margin]) if c_margin else pd.Series(dtype=float)
             time_idx_s = _to_float_series(one[c_time_idx]) if c_time_idx else pd.Series(dtype=float)
+
+            if validation:
+                finish_s = finish_s.reindex(one.index).mask(one["__did_not_finish__"])
 
             ta_n = float(len(one)) if not one.empty else 0.0
             avg_finish = float(finish_s.mean()) if not finish_s.dropna().empty else np.nan
