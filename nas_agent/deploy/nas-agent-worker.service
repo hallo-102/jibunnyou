@@ -1,0 +1,23 @@
+[Unit]
+Description=Keiba administrator-approved fixed job launcher
+After=network-online.target
+
+[Service]
+User=nas-agent-worker
+Group=nas-agent-bridge
+SupplementaryGroups=docker
+WorkingDirectory=/volume1/docker/keiba_nas_agent/code
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3.11 -m nas_agent worker --config /volume1/docker/keiba_nas_agent/config/worker.json --serve
+Restart=on-failure
+RestartSec=60
+KillMode=control-group
+TimeoutStopSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+CPUQuota=100%
+MemoryMax=3G
+ReadWritePaths=/volume1/docker/keiba_nas_agent/worker-state /volume1/docker/keiba_nas_agent/spool/outbox /volume1/docker/keiba_nas_agent/checkouts /volume1/docker/keiba_nas_agent_validation
+
+[Install]
+WantedBy=multi-user.target

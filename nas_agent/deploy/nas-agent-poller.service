@@ -1,0 +1,22 @@
+[Unit]
+Description=Keiba GitHub request intake (no Docker privileges)
+After=network-online.target
+
+[Service]
+User=nas-agent-poller
+Group=nas-agent-bridge
+WorkingDirectory=/volume1/docker/keiba_nas_agent/code
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3.11 -m nas_agent poll --config /volume1/docker/keiba_nas_agent/config/poller.json --serve
+Restart=on-failure
+RestartSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/volume1/docker/keiba_nas_agent/poller-state /volume1/docker/keiba_nas_agent/spool/inbox
+InaccessiblePaths=/run/docker.sock /var/run/docker.sock /volume1/docker/keiba_nas_agent/worker-state /volume1/docker/keiba_nas_agent/checkouts /volume1/docker/keiba_nas_agent_validation
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

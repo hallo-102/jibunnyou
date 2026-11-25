@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "job_id": "issue16_20260809_01",
+  "job_type": "issue16_acceptance",
+  "commit_sha": "3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92",
+  "raceday": "20260809",
+  "input_id": "fixture_20260809",
+  "expires_at": "2026-11-26T00:00:00+09:00",
+  "scope": "offline"
+}

@@ -1,0 +1,9 @@
+{
+  "source_commit": "3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92",
+  "checkout": "PASS",
+  "pr17_path_checks": "PASS",
+  "compose_config_and_limits": "PASS",
+  "nas_build_run": "NOT_PERFORMED",
+  "input": "synthetic fixture only",
+  "platform": "Windows / compose config only"
+}

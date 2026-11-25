@@ -46,6 +46,8 @@ ENV/
 .env
 .env.*
 !.env.example
+*.token
+nas_agent/local/
 
 *.pem
 *.key

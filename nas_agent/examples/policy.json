@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "repository": "hallo-102/jibunnyou",
+  "production_root": "/volume1/docker/keiba_yosou_2026_nas",
+  "requester_ids": [130852980],
+  "job_types": ["healthcheck", "issue16_acceptance"],
+  "approved_commits": ["3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92"],
+  "approved_requests": [],
+  "grants": [],
+  "allow_build": false,
+  "execution_window_jst": null,
+  "limits": {"timeout_seconds": 7200, "cpus": 1.0, "memory_mb": 2048, "pids": 256},
+  "inputs": {
+    "fixture_20260809": {
+      "root": "/volume1/docker/keiba_nas_agent_inputs/20260809",
+      "raceday": "20260809",
+      "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "reference_root": null,
+      "reference_manifest_sha256": null
+    }
+  }
+}
