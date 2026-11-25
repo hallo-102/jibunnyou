@@ -1,0 +1,6 @@
+#!/bin/sh
+# 管理者が新規専用領域へ展開したDebian ARM64 Gitだけを使う。Docker権限は不要。
+GIT_EXEC_PATH=/volume1/keiba_nas_agent/tools/git/usr/lib/git-core
+GIT_TEMPLATE_DIR=/volume1/keiba_nas_agent/tools/git/usr/share/git-core/templates
+export GIT_EXEC_PATH GIT_TEMPLATE_DIR
+exec /volume1/keiba_nas_agent/tools/git/usr/bin/git "$@"

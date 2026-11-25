@@ -12,13 +12,16 @@ NAS管理者(root)が承認専用CLIで以下を実行する。常駐workerのco
 
 ```sh
 # NAS管理者(root)でレビュー済みagent codeから実行する。token値は引数に含めない。
+export PATH="/volume1/keiba_nas_agent/tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"  # 専用Gitを使う。
 export PYTHONDONTWRITEBYTECODE=1  # 読取専用のcodeを維持する。
-python3.11 -m nas_agent inspect --policy-file /volume1/docker/keiba_nas_agent/admin/policy.json --agent-commit <レビュー済みagent完全SHA> --token-file /volume1/docker/keiba_nas_agent/admin-secrets/github-read.token --issue <ジョブIssue番号>
+python3.11 -m nas_agent inspect --policy-file /volume1/keiba_nas_agent/admin/policy.json --agent-commit <レビュー済みagent完全SHA> --token-file /volume1/keiba_nas_agent/admin-secrets/github-read.token --issue <ジョブIssue番号>
 # inspectで確認した完全hashを明示する。本文が変われば拒否する。
-python3.11 -m nas_agent approve --policy-file /volume1/docker/keiba_nas_agent/admin/policy.json --agent-commit <レビュー済みagent完全SHA> --token-file /volume1/docker/keiba_nas_agent/admin-secrets/github-read.token --issue <ジョブIssue番号> --expected-hash <64桁hash>
+python3.11 -m nas_agent approve --policy-file /volume1/keiba_nas_agent/admin/policy.json --agent-commit <レビュー済みagent完全SHA> --token-file /volume1/keiba_nas_agent/admin-secrets/github-read.token --issue <ジョブIssue番号> --expected-hash <64桁hash>
 ```
 
 同一の許可SHA/type/input/date範囲を繰り返す場合、管理者は期限付きgrantsをpolicyへ追加できる。例は以下の形。初回は個別承認のみ、grantsは空のまま始める。新しいSHA、Dockerfile/依存、host helperの変更は範囲へ自動追加しない。
+
+最初の公開repo healthcheckでは管理者read tokenを省略できる。専用Gitの準備と初回の最小コマンドは [install.md](install.md) を使う。実予想受入の候補は [preflight.md](preflight.md) の非開催日12〜17時だが、日次の起動後実行/最適化継続/UGOSタスクの確認を省略しない。
 
 ```json
 {
@@ -45,8 +48,8 @@ QUEUEDは実行可能時間等を待つ状態、WAIT_APPROVALはローカル承�
 
 ```sh
 # GitHub接続やtokenが失効していても、ローカル台帳を照会できる。
-python3.11 -m nas_agent status --config /volume1/docker/keiba_nas_agent/config/worker.json
-python3.11 -m nas_agent status --config /volume1/docker/keiba_nas_agent/config/poller.json
+python3.11 -m nas_agent status --config /volume1/keiba_nas_agent/config/worker.json
+python3.11 -m nas_agent status --config /volume1/keiba_nas_agent/config/poller.json
 ```
 
 GitHubでheartbeatが古い/依頼に応答がない場合、NAS OFF・poller/worker停止・API認証/通信障害などがある。失敗や実行済みと推測せず、ローカル状態と照合する。NAS停止中もIssueはGitHubに残り、起動後に拾う。起動までに期限切れならCANCELLEDになる。
@@ -61,7 +64,7 @@ issue16_acceptanceの失敗/キャンセル/中断後はrecovery_requiredで後�
 
 ```sh
 # NAS管理者がagent固有containerとbuild idleを確認した後だけ解除する。
-python3.11 -m nas_agent ack-interrupted --config /volume1/docker/keiba_nas_agent/config/worker.json --confirm-build-idle
+python3.11 -m nas_agent ack-interrupted --config /volume1/keiba_nas_agent/config/worker.json --confirm-build-idle
 ```
 
 この操作は中断jobを再試行しない。必要なら新job_idの依頼を再承認する。Docker clientの停止だけでdaemon buildの停止を断定しない。

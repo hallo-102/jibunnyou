@@ -3,8 +3,8 @@
   "role": "poller",
   "instance_id": "0123456789abcdef",
   "agent_commit": "0000000000000000000000000000000000000000",
-  "state_dir": "/volume1/docker/keiba_nas_agent/poller-state",
-  "spool_dir": "/volume1/docker/keiba_nas_agent/spool",
-  "token_file": "/volume1/docker/keiba_nas_agent/secrets/github-issues.token",
+  "state_dir": "/volume1/keiba_nas_agent/poller-state",
+  "spool_dir": "/volume1/keiba_nas_agent/spool",
+  "token_file": "/volume1/keiba_nas_agent/secrets/github-issues.token",
   "poll_seconds": 60
 }

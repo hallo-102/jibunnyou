@@ -9,3 +9,5 @@ GitHub Issueを受付として、NAS自身がHTTPS outboundで取得・結果報
 **開発成果物のみ。NASへの導入・認証・新サービス起動は管理者の別承認が必要。** 設定例は初期状態で個別承認なし、build不可、重いジョブの時間帯未設定であり、そのままでは受入ジョブを実行しない。
 
 [設計・信頼境界](../docs/nas_agent/design.md) / [初回導入](../docs/nas_agent/install.md) / [依頼・承認・復旧](../docs/nas_agent/operations.md) / [検証・未確認事項](../docs/nas_agent/validation.md)
+
+実機向けBASEは `/volume1/keiba_nas_agent`。UGOS本体のGit/pip導入に依存せず、[専用領域の依存方式](../docs/nas_agent/dependencies.md)と[実機事前確認](../docs/nas_agent/preflight.md)を使う。初回healthcheckは標準Pythonと専用Gitだけで行い、venv・候補Docker build・サービス登録は後の別承認へ分ける。

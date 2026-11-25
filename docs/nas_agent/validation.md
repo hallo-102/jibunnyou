@@ -29,13 +29,19 @@ GitHub ActionsにはUbuntu/Python 3.11で同じ模擬テストを実行する専
 
 ## 実NASで未検証の事項
 
-- 最新のUGREEN ARM64/UGOS状態、Python/Compose互換性、ユーザー分離・権限・systemdテンプレート、NAS発HTTPS通信。
+2026-11-25の読み取り調査でOS/CPU/標準Python/Docker/Compose/systemd、現ユーザーのDocker参照、パスmode、公開GitHub HTTPS、既存imageの一部依存、日次の起動条件を確認した。[実機事前確認](preflight.md)と[再利用調査](dependencies.md)に記録した。以下の導入・実行上の未確認は残る。
+
+- 新規専用userの分離・権限、private Gitの選定/展開/ABI・HTTPS clone、systemdテンプレートの実起動/UGOS再起動後の保持、private venv/wheelhouseの互換性。新BASEは未作成。
 - 対象repoは開発確認時にpublic。実NASのPATの可視性/期限/権限とIssuesへの書込は未確認。`verify-github`と最初のhealthcheck報告で確認する。
 - ARM64イメージbuild/run、実入力/マスタ/オッズ、READY/STATUS/公開ファイルSHA、保護対象の実行前後一致、実NASの空容量/性能。
 - Docker daemonのbuild資源上限とclient停止後のbuild状態。container上限やworker unitの上限をdaemon build上限とみなさない。不明なら `allow_build=false` を維持する。
 - 同一snapshot/modelのWindows比較。参照を登録しない実行はPARTIALであり、Windows一致を表さない。
 - Windows電源OFFでの一連動作、NAS停止中の依頼、電源断後の復旧、長時間運用時のrate limit。
 - Driveはdry-run固定。検証専用先への転送機能は今回有効化していない。既存rclone設定を使用/変更していない。
+
+配置変更ではexamples、両service、手動CLIを `/volume1/keiba_nas_agent` と専用Git PATHへ整合させた。初回healthcheckへ不要なpip/venv/buildの準備を外し、非開催日12〜17時を条件付き候補にした。初期policyのbuild=false/時間帯null/grants空は変更しない。NASへ実際の配置・依存展開・user作成・build・unit登録は一切行っていない。
+
+この変更後も既存53件が成功。設定/両unitのBASE・Git PATH・保護対象本番root・安全な初期値を静的確認し、deploy/gitと手順書内の計8シェルブロックをbash -nで構文確認した。開発PCのPython -S（site-packagesを読まない起動）で実際のhealthcheckハンドラーも動作した。これは初回手順のNAS実行やprivate Git/venvの適合確認を代替しない。
 
 ## PR #19 一次レビューへの対応
 

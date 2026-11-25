@@ -2,6 +2,8 @@
 
 対象はIssue #18。基準main `178855fd117301131c8e3ebf70ce8c5e9e327728` から独立ブランチを作成し、PR #17をマージしない。今回は開発のみで、実NASへの導入は別承認とする。
 
+実機配置は `/volume1/keiba_nas_agent` と独立した候補/入力rootへ変更した。UGOSの既存777親や本番フォルダの権限は変更しない。agentの標準Python、tools配下のprivate Git、後工程のvalidation-venvを分け、pollerへDocker権限を与えない。[依存方式](dependencies.md)と[初回手順](install.md)を参照。
+
 ```mermaid
 flowchart LR
   C[ChatGPT] -->|構造化Issue| G[GitHub]
