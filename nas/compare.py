@@ -11,6 +11,8 @@ import pandas as pd
 from continuous_improvement.archive import sha256, verify_archive, write_json
 from continuous_improvement.review import key
 from shadow_validation import _bet_record
+from nas.workspace import Workspace
+from nas.provenance import attribution
 
 ATOL = 1e-9
 RTOL = 1e-9
@@ -61,10 +63,15 @@ def fixed_tickets(roi: pd.DataFrame, rid: str) -> dict:
     return output
 
 
-def compare(left: Path, right: Path, output: Path, metadata: dict, *, provenance: dict, left_raw: Path | None = None) -> dict:
+def compare(left: Path, right: Path, output: Path, metadata: dict, *, workspace: Path, provenance: dict | None = None, left_raw: Path | None = None) -> dict:
     """モデル差/実装差/データ差の可能性を、固定情報とともに別々に記録する。"""
     if output.resolve() in {left.resolve(), right.resolve()}:
         raise ValueError("比較結果で入力を上書きできません")
+    boundary = Workspace(workspace)
+    # 入力run全体を保護するため、runtime/manifest/traceへの出力も拒否する。
+    readonly = [left.parent, right.parent, *([left_raw.parent] if left_raw else [])]
+    output = boundary.output(output, "comparisons", readonly=readonly, new=True)
+    verified_attribution = attribution(left, right)
     features = metadata["features"]
     a, ab, ar = load(left, features, metadata["feature_names"])
     b, bb, br = load(right, features, metadata["feature_names"])
@@ -114,16 +121,13 @@ def compare(left: Path, right: Path, output: Path, metadata: dict, *, provenance
         record["fixed_tickets_changed"] = record["left"]["fixed_tickets"] != record["right"]["fixed_tickets"]
         races.append(record)
     report = {"scope": "offline", "legacy_forward_generation": None, "atol": ATOL, "rtol": RTOL,
-              "source_sha256": {"left": sha256(left), "right": sha256(right), "left_raw": trace_sha}, "provenance": provenance,
-              "attribution": {"model": provenance.get("model", "unverified"),
-                              "implementation": provenance.get("implementation", "unverified"),
-                              "data": provenance.get("data", "unverified"),
-                              "rule": "複数条件が異なる比較は因果を断定せず、同一入力/同一モデル再実行で切り分ける"},
+              "source_sha256": {"left": sha256(left), "right": sha256(right), "left_raw": trace_sha},
+              "user_notes_unverified": provenance or {}, "attribution": verified_attribution,
               "common_horses": len(common), "left_only": [list(x) for x in a.index.difference(b.index)],
               "right_only": [list(x) for x in b.index.difference(a.index)],
               "unavailable_columns": {"left": [c for c in requested if c not in a], "right": [c for c in requested if c not in b]},
               "horse_differences": differences, "races": races}
-    write_json(output, report)
+    boundary.new_json(output, report, readonly=readonly)
     return report
 
 
@@ -133,10 +137,11 @@ if __name__ == "__main__":
     parser.add_argument("--right-run", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--left-raw", type=Path, help="legacy_replayが固定保存した丸め前スコア診断")
-    parser.add_argument("--provenance", type=Path, required=True, help="model/implementation/dataの検証状態JSON")
+    parser.add_argument("--provenance", type=Path, help="利用者メモ。検証済み判定の根拠には使用しない")
+    parser.add_argument("--workspace", type=Path, required=True)
     args = parser.parse_args()
     verify_archive(args.right_run)
     runtime = json.loads((args.right_run / "runtime.json").read_text(encoding="utf-8"))
     result = compare(args.left, args.right_run / "prediction.xlsx", args.output, runtime,
-                     provenance=json.loads(args.provenance.read_text(encoding="utf-8")), left_raw=args.left_raw)
+                     workspace=args.workspace, provenance=json.loads(args.provenance.read_text(encoding="utf-8")) if args.provenance else None, left_raw=args.left_raw)
     print(json.dumps({"common_horses": result["common_horses"], "changed_horses": len(result["horse_differences"])}))

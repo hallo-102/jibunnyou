@@ -1,81 +1,84 @@
-# 隔離環境での実行・受入手順
+# 隔離環境での実行・受入手順（PR #17修正後）
 
-この手順は候補環境だけを作る。本番compose、.env、scheduler、データ、READY/STATUS、Drive宛先、Gmailを変更しない。本Issue内では実NASで実行していない。コマンド中のcommitはレビュー済みPR headの**40桁SHA**へ置換する。`main` や可変ブランチ名を実行バージョンに使わない。
+main・本番・既存モデル/データ・定期処理・配信を変更しない。Python 3.11の候補専用venvにnas/requirements.txtを導入する。ソースcheckoutと作業workspaceは別ディレクトリにする。既存の本番data/outputにマーカーを後付けして許可する手順はない。
 
-## ソースと固定入力
-
-以下はNAS上の本番とは別ディレクトリで行う。`/volume1/docker/keiba_issue16` は新規の候補専用配置例。既存ファイルのある場所を使わない。認証/本番設定はコピーしない。
+## 初期化・固定入力
 
 ```sh
-# レビュー済みcommitを独立checkoutする。ここでは本番rootをcheckout先にしない。
+# 新規の独立checkoutでレビュー済み40桁commitを固定する。
 git clone https://github.com/hallo-102/jibunnyou.git /volume1/docker/keiba_issue16
 cd /volume1/docker/keiba_issue16
 git checkout --detach <レビュー済み40桁commit>
-git status --porcelain  # 出力がないことを確認する。
-git rev-parse HEAD  # レビューSHAと照合する。
+git status --porcelain  # cleanであることを確認する。
 
-# コピー専用の作業領域を新規作成する。既存なら別名にする。
-mkdir -p /volume1/docker/keiba_issue16_artifacts
-python3.11 -m nas.snapshot \
+# workspaceはまだ存在しない専用パスを指定する。本番rootの指定は必須。
+python3.11 -m nas.workspace --root /volume1/docker/keiba_issue16_artifacts \
+  --production-root /volume1/docker/keiba_yosou_2026_nas
+export TASK_WORKSPACE=/volume1/docker/keiba_issue16_artifacts  # 候補だけの書込ルート。
+
+# 指定日の入力・オッズ・2マスタ・旧保存予想だけを新規snapshotへコピーする。
+python3.11 -m nas.snapshot --workspace "$TASK_WORKSPACE" \
   --root /volume1/docker/keiba_yosou_2026_nas \
-  --destination /volume1/docker/keiba_issue16_artifacts/snapshot_20260809 \
-  --day 20260809
+  --destination "$TASK_WORKSPACE/snapshots/20260809" --day 20260809
 ```
 
-snapshotツールには `nas/requirements.txt` のPython環境が必要。NASホストに導入せず、別venvまたはイメージ内で実行してよい。元データは読取専用でマウントし、出力先だけを書込可能にする。snapshotは入力・当日オッズ・必要な2マスタ・存在すれば旧保存予想だけをコピーし、コピー前後SHAを照合する。保存予想は同一マスタ/時点の証明にはならない。必要なら独立の開催カレンダーを `--calendar <calendar.txt>` で固定する。
+必要ならsnapshot作成時に `--calendar <独立した開催カレンダー>` を追加する。calendar.txtがsnapshotにあればcandidateは自動使用し、非開催日はNO_RACEのみで予想しない。カレンダー未同梱時は既存固定入力を根拠にしたoffline再生と記録する。未固定カレンダーを黙って使用しない。
 
-NAS稼働中の確認は読み取りに限る。`docker compose ps` と稼働image/mount、当日ログ・状態、対象コードSHAを記録する。ローカルコピーと一致しない場合は本番から必要ファイルだけを新しい読取専用ソースコピーへ取得し、差分表を更新してから実験する。コード取得時に.env/credentials/認証や生データをGitHubへ登録しない。
+nas.workspaceはコード/既知NAS/指定したproduction-rootと重なるルートや既存ディレクトリを拒否する。追加保護パスは `--protect <path>` を指定できる。runs/legacy/comparisons/snapshots以外への出力、固定入力への書込、symlink/junctionを通した出力を拒否する。
 
-## ARM64候補コンテナ
+## ARM64 composeのホスト側検査と一回実行
 
 ```sh
-# source/outputの双方が本番とは別の実パスであることを確認する。
-export CANDIDATE_COMMIT="$(git rev-parse HEAD)"
-export CANDIDATE_SNAPSHOT=/volume1/docker/keiba_issue16_artifacts/snapshot_20260809
-export CANDIDATE_OUTPUT=/volume1/docker/keiba_issue16_artifacts/candidate_output
-mkdir "$CANDIDATE_OUTPUT"  # 新規の空ディレクトリを確保する。
+# 本番と独立したworkspace・snapshot・runs実パスを、Docker起動前に検査する。
+export TASK_COMMIT="$(git rev-parse HEAD)"
+python3.11 -m nas.launch --workspace "$TASK_WORKSPACE" \
+  --snapshot "$TASK_WORKSPACE/snapshots/20260809" --output "$TASK_WORKSPACE/runs" \
+  --production-root /volume1/docker/keiba_yosou_2026_nas --commit "$TASK_COMMIT" --dry-run
+
+# 候補専用出力への書込権限がある非root UID/GIDを指定する。本番の権限は変更しない。
 export CANDIDATE_UID="$(id -u)"
 export CANDIDATE_GID="$(id -g)"
-docker compose -p keiba-issue16-candidate -f nas/compose.yaml config --quiet  # 構文/必須変数を検査する。
-docker compose -p keiba-issue16-candidate -f nas/compose.yaml build  # 候補イメージだけを作る。
-docker compose -p keiba-issue16-candidate -f nas/compose.yaml run --rm candidate  # 一回だけ実行する。
+python3.11 -m nas.launch --workspace "$TASK_WORKSPACE" \
+  --snapshot "$TASK_WORKSPACE/snapshots/20260809" --output "$TASK_WORKSPACE/runs" \
+  --production-root /volume1/docker/keiba_yosou_2026_nas --commit "$TASK_COMMIT"
 ```
 
-ネットワークを禁止しているため、開催判定は既存固定入力を根拠にする。明示カレンダーを使う場合、commandに `--calendar /snapshot/calendar.txt` を追加する。カレンダーもmanifestのSHAに含まれていないと停止する。非開催時はNO_RACEのみでREADYを作らない。実行失敗時はFAILED、READYなし。再実行は新しいrunになるため過去結果を上書きしない。
+composeを直接実行して任意のホストパスをrwマウントしない。必ずnas.launchを使用する。ラッパーはproduction-root/ホストworkspace実パスを初期化時の記録と突合し、dirty checkout・commit不一致・危険な出力先を拒否する。コンテナへはsnapshotとマーカーだけro、検査済みrunsだけrwで渡す。別project、networkなし、restart=noを維持する。Docker engineやARM64実機での実行は今回未確認。
 
-本番schedulerの06:45実行は変更しない。候補を日次確認する場合も、固定コピーの準備後に上記一回実行を手動で行う。候補の定期起動、収集接続、コピーしたマスタの更新、実Drive検証先への転送は別レビューで設計する。本Issueではschedulerやrcloneの実行経路を接続しない。
-
-## 同一入力の旧NAS再生・比較
-
-旧NASコードは必要なapp/*.pyと正式20260730重みを取得した**静的コピー**を指定する。コードはさらに新規作業ディレクトリへコピーされ、子プロセスで実行される。本番run_daily_pipelineは起動しない。
+## ホストでの候補/旧NAS再生・統制比較
 
 ```sh
-# 同じsnapshotを参照し、旧コードのdense順位はそのまま保存する。
-python3.11 -m nas.legacy_replay --source <NASソース静的コピー> \
-  --snapshot "$CANDIDATE_SNAPSHOT" --output <候補専用legacy出力>
+# 共通特徴量・補正を固定し、重みだけ変える診断を通常候補と同時に行う。
+python3.11 -m nas.candidate --workspace "$TASK_WORKSPACE" \
+  --snapshot "$TASK_WORKSPACE/snapshots/20260809" --output "$TASK_WORKSPACE/runs" --weight-control
 
-# model/implementation/dataの検証状態を日本語で記したprovenance.jsonを用意する。
-python3.11 -m nas.compare --left <legacy-run>/prediction.xlsx \
+# 旧NAS静的ソースをさらにコピーして別プロセスで実行する。本番dailyは呼ばない。
+python3.11 -m nas.legacy_replay --workspace "$TASK_WORKSPACE" --source <NASソース静的コピー> \
+  --snapshot "$TASK_WORKSPACE/snapshots/20260809" --output "$TASK_WORKSPACE/legacy"
+
+# 入力/model/実装の判定は保存済みSHAから自動生成する。出力は新規JSONだけ。
+python3.11 -m nas.compare --workspace "$TASK_WORKSPACE" --left <legacy-run>/prediction.xlsx \
   --left-raw <legacy-run>/raw_scores.json --right-run <candidate-run> \
-  --provenance <provenance.json> --output <候補専用comparison.json>
+  --output "$TASK_WORKSPACE/comparisons/comparison_20260809.json"
 
-# Linux基本テスト。ARM64実機であるかは別途uname -mで記録する。
-python3.11 -m pytest tests/test_nas_integration.py tests/test_unique_ranking.py -q
+# 変更範囲のfixtureと共通順位テストを実行する。
+python3.11 -m pytest tests/test_nas_review.py tests/test_nas_integration.py tests/test_unique_ranking.py -q
 ```
 
-provenance.jsonには `model`（例:20260730 vs 20260817）、`implementation`（旧NASソースSHA vsレビューcommit）、`data`（両runのinput_manifest SHA一致）を記す。比較結果は生データ由来なのでGitHubへ登録しない。
+旧NAS再生は予想に必要なappの10モジュールと20260730重みだけを新規legacy runへコピーし、source_manifestでSHAを検証する。子プロセスのcwd/KEIBA_BASE_DIR/OUTPUT/WEIGHTSはコピー内、入力/MASTER/ODDSはsnapshotへ限定する。SUCCESS_REPORT・予想・丸め前診断・市場補完・メタデータの書込先は同じrun内。収集、upload、maintenance、schedulerはコピー/起動しない。これは取得済み旧コードの書込経路監査であり、任意の第三者PythonをOSレベルでサンドボックス化する機能ではない。
 
-Windows側でも同じレビューcommitを独立checkoutし、同じsnapshotのSHAを照合して `python -m nas.candidate --snapshot <snapshot> --output <Windows候補専用出力>` を実行する。そのpredictionをleft、Linux runをrightとして比較する。同じモデルの実体・実効SHAを確認した上で、features/scoreはatol=rtol=1e-9以内、順位/TOP5/買い目は完全一致を要求する。差が出た場合はPython/pandas/numpy/torch版と各レース差分を保存し、OS差を未説明のまま採用しない。
+provenance JSONを `--provenance` で渡しても未検証メモにしか使用しない。両側のinput_manifest SHA、実体/実効モデルSHA、ソースSHAを照合し、欠損は未確認と表示する。weight_control.jsonは通常予想と同じスコア入力を採取して2重みだけを変更する。補正値の完全一致と明示20260817/通常候補の一致を確認する。旧NAS対候補の複合差全体や買い目/ROIへの寄与を完全分解したとは扱わない。
 
-## 回顧・受入
+## PR #10/#11との接続契約と後続受入
 
-候補runはPR #11の `continuous_improvement.review.review(pre, results)` が読めるmanifest/runtime/prediction/inputを保存する。結果マスタのコピーと、**候補出力配下のrunだけ**をpreへ渡す。旧NAS preを渡すと既存reviewがpre.parentへ結果を書くため、本番preを直接指定しない。結果の全馬/払戻が揃わなければ停止する。候補はretrospectiveとなりhistoryや旧前向き世代へ自動算入しない。結果取得・正式マスタ更新・Drive同期はこの呼出しに接続しない。
+| 段階 | 読み取り/受渡し契約 | 後続の受入条件 |
+|---|---|---|
+| #10 発走前pre | manifestのday/mode/files、input.xlsx、odds.csv、mastersを別snapshotとしてro参照可能 | preのSHA/締切/マスタ時点を#10側で確認。candidateはprospective入力でもoffline/retrospective出力に限定 |
+| 正式READY | 本番data/output/status/READYは監視/更新しない | 候補READYを本番READYへコピーしない。#10の本番watcherへ候補runを登録しない |
+| 候補完成 | STATUS=COMPLETED、READY=READY、公開manifestとprediction.xlsxのSHA一致を全て要求 | nas.candidate.verify_completed(run)で照合。失敗/NO_RACE/途中状態を成功と扱わない |
+| #11 回顧 | manifest/runtime/prediction/inputはreview APIと互換。原順位と回顧順位を分離 | 候補のコピーだけで全馬/払戻が揃う結果コピーと照合する。正式preをAPIに直接渡さない。書込post先も候補workspace内で新規確保する別アダプターをレビューするまで接続しない |
+| history/前向き | legacy_forward_generation=null、retrospectiveを維持 | #10 historyや旧世代へ算入しない。新しい承認/コード固定後の開催日から別世代を設計する |
+| Drive/Gmail | sync_planはdestination=null、executed=false | 実転送は別途明示された検証先のみ。既存配信先やGmailは接続しない |
+| マスタ更新/定期処理 | snapshotはro。既存scheduler/daily/update_mastersを温存 | コピーの更新と候補ジョブだけを別レビューし、正式マスタ・06:45本番ジョブを変更しない |
 
-受入では次を確認する。
-
-- manifest固定SHAと、モデル実体/実効SHA、実行commitを照合する。
-- STATUS=COMPLETED、READYのSHAとprediction.xlsx、完成検査の全レース/対象外理由、1位/TOP5/馬集合を確認する。
-- 比較JSONで特徴量、丸め前score、順位、TOP5、買い目、対象外理由、片側のみの馬を確認する。モデル差と実装差が残る比較は原因を断定しない。
-- 非開催、同点、欠損/取消、失敗時READYなしのfixtureテストを実行する。
-- 稼働中NASのコード/重み/設定/対象原本/本番READY/STATUS/定期処理を実行前後に照合する。アクセスできなかった項目は未確認と記す。
-- sync_planのdestination=null / executed=falseを確認する。既存Drive/Gmailへ送信しない。
+Windows/ARM64 Linuxは同じレビューcommit・snapshotで再生し、モデル実体/実効SHAを確認する。特徴量/scoreはatol=rtol=1e-9、順位/TOP5/固定券は完全一致で比較する。差は依存版/各レースまで説明する。実NASのimage/mount/ログ/コード/モデル/READY/STATUS/定期処理の実行前後検査は未実施のまま。ローカル静的コピーの不変確認で代替しない。切替はtransition.mdの別承認とする。

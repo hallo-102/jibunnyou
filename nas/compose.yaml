@@ -20,10 +20,14 @@ services:
         target: /snapshot
         read_only: true
       - type: bind
+        source: ${CANDIDATE_WORKSPACE_MARKER:?use python -m nas.launch}
+        target: /candidate/.nas-candidate-workspace.json
+        read_only: true
+      - type: bind
         source: ${CANDIDATE_OUTPUT:?separate empty candidate directory required}
-        target: /candidate
+        target: /candidate/runs
     tmpfs: [/tmp]
-    command: [--snapshot, /snapshot, --output, /candidate]
+    command: [--workspace, /candidate, --snapshot, /snapshot, --output, /candidate/runs]
     restart: "no"
     logging:
       driver: json-file

@@ -16,10 +16,14 @@ from nas.compare import compare, fixed_tickets
 def workbook(path: Path, rows: list[dict], *, source: bool = False) -> None:
     """実データを使わず必要なシート契約だけを作る。"""
     frame = pd.DataFrame(rows)
+    if not source:
+        for column, default in (("risk_score", 0), ("extra_penalty", 0), ("data_confidence", 100)):
+            if column not in frame:
+                frame[column] = default
     with pd.ExcelWriter(path) as writer:
         frame.to_excel(writer, sheet_name="今走レース情報" if source else "TARGET", index=False)
         if not source:
-            pd.DataFrame({"レースID": ["R1"], "1位馬番": [1]}).to_excel(writer, sheet_name="買い目_レース別1行", index=False)
+            pd.DataFrame({"レースID": ["R1"], "1位馬番": [1], "予想状態": ["PREDICTED"], "予想可否": ["数値予想済み"]}).to_excel(writer, sheet_name="買い目_レース別1行", index=False)
 
 
 @pytest.mark.parametrize("relative", [".", "child", "../"])
@@ -67,7 +71,7 @@ def test_population_missing_scores_and_scratches(tmp_path: Path) -> None:
         validate_population(source, pred)
 
 
-def test_non_raceday_never_publishes_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_non_raceday_never_publishes_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workspace) -> None:
     snapshot = tmp_path / "snapshot"
     snapshot.mkdir()
     names = ["input.xlsx", "odds.csv", "masters/race_levels.xlsx", "masters/場所_馬場_タイム.xlsx", "calendar.txt"]
@@ -79,19 +83,21 @@ def test_non_raceday_never_publishes_ready(tmp_path: Path, monkeypatch: pytest.M
     # 呼ばれたら失敗する偽pipelineで、非開催時の予想非実行を確認する。
     pipeline = importlib.import_module("1_keibayosou_pipeline")
     monkeypatch.setattr(pipeline, "run_pipeline", lambda **_: pytest.fail("非開催日に予想した"))
-    result = run(snapshot, tmp_path / "output", calendar=snapshot / "calendar.txt")
+    result = run(snapshot, workspace / "runs", workspace=workspace, calendar=snapshot / "calendar.txt")
     assert json.loads((result / "STATUS.json").read_text())["status"] == "NO_RACE"
     assert not (result / "READY.json").exists()
 
 
-def test_compare_keeps_original_dense_rank_and_exact_top5(tmp_path: Path) -> None:
+def test_compare_keeps_original_dense_rank_and_exact_top5(tmp_path: Path, workspace) -> None:
+    tmp_path = tmp_path / "inputs"
+    tmp_path.mkdir()
     left, right = tmp_path / "old.xlsx", tmp_path / "new.xlsx"
     old = [{"rid_str": "R1", "馬番": i, "rank": min(i, 5), "score": 60.0, "feature": 1.0} for i in range(1, 7)]
     new = [{**r, "rank": i, "feature": 1.0 + 1e-12} for i, r in enumerate(old, 1)]
     workbook(left, old)
     workbook(right, new)
     before = sha256(left)
-    report = compare(left, right, tmp_path / "comparison.json", {"features": ["feature"], "feature_names": {}}, provenance={})
+    report = compare(left, right, workspace / "comparisons/comparison.json", {"features": ["feature"], "feature_names": {}}, workspace=workspace, provenance={})
     assert sha256(left) == before
     assert len(report["races"][0]["left"]["top5"]) == 6
     assert len(report["races"][0]["right"]["top5"]) == 5
@@ -99,7 +105,7 @@ def test_compare_keeps_original_dense_rank_and_exact_top5(tmp_path: Path) -> Non
     assert "score_raw" in report["unavailable_columns"]["left"]
 
 
-def test_pipeline_failure_leaves_failed_status_without_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pipeline_failure_leaves_failed_status_without_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workspace) -> None:
     snapshot = tmp_path / "snapshot"
     snapshot.mkdir()
     names = ["input.xlsx", "odds.csv", "masters/race_levels.xlsx", "masters/場所_馬場_タイム.xlsx"]
@@ -115,8 +121,8 @@ def test_pipeline_failure_leaves_failed_status_without_ready(tmp_path: Path, mon
 
     monkeypatch.setattr(pipeline, "run_pipeline", fail)
     with pytest.raises(RuntimeError, match="fixture failure"):
-        run(snapshot, tmp_path / "output")
-    result = next((tmp_path / "output").iterdir())
+        run(snapshot, workspace / "runs", workspace=workspace)
+    result = next((workspace / "runs").iterdir())
     assert json.loads((result / "STATUS.json").read_text())["status"] == "FAILED"
     assert not (result / "READY.json").exists()
 

@@ -9,12 +9,14 @@ import shutil
 from continuous_improvement.archive import sha256, verify_archive, write_json
 from nas.candidate import separate_paths
 from nas.runtime import validate_raceday
+from nas.workspace import Workspace
 
 
-def prepare(root: Path, destination: Path, day: str, *, calendar: Path | None = None) -> Path:
+def prepare(root: Path, destination: Path, day: str, *, workspace: Path, calendar: Path | None = None) -> Path:
     """コピー元とコピー先のSHAを照合し、既存snapshotは上書きしない。"""
     day = validate_raceday(day)
     root, destination = separate_paths(root, destination)
+    destination = Workspace(workspace).output(destination, "snapshots", readonly=[root], new=True)
     files = {"input.xlsx": root / "data/input" / f"馬の競走成績_{day}.xlsx",
              "odds.csv": root / "data/ozzu_csv" / f"OZZU_{day}.csv"}
     for name in ("race_levels.xlsx", "場所_馬場_タイム.xlsx"):
@@ -46,5 +48,6 @@ if __name__ == "__main__":
     parser.add_argument("--destination", type=Path, required=True)
     parser.add_argument("--day", required=True)
     parser.add_argument("--calendar", type=Path)
+    parser.add_argument("--workspace", type=Path, required=True)
     args = parser.parse_args()
-    print(prepare(args.root, args.destination, args.day, calendar=args.calendar))
+    print(prepare(args.root, args.destination, args.day, workspace=args.workspace, calendar=args.calendar))
