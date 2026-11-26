@@ -1,0 +1,11 @@
+{
+  "schema_version": 2,
+  "mode": "single_day_ab",
+  "methods": ["A", "B"],
+  "snapshots": "snapshots.json",
+  "results": "results.json",
+  "periods": {
+    "validation": ["2026-08-09", "2026-08-09"]
+  },
+  "evaluation_mode": "formal"
+}

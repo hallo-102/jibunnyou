@@ -7,7 +7,7 @@ import sys
 import openpyxl
 import pytest
 
-from nas_agent.backend import AGENT_CODE, Backend, Commands
+from nas_agent.backend import AGENT_CODE, Backend, Commands, clean_environment
 from nas_agent.comparison import AB_MODE, sha256, stage_fixture
 from nas_agent.files import atomic_json
 from nas_agent.poller import Poller
@@ -279,15 +279,16 @@ def test_stage_accepts_legacy_and_new_manifests(comparison_job, tmp_path, manife
 @pytest.mark.skipif(os.getenv("JIBUNNYOU_AB_INTEGRATION") != "1", reason="requires a local copy of PR #40 and its dependencies")
 @pytest.mark.parametrize("layout,mode,snapshot_grade,result_grade,loaded", [
     ("nas", "formal", None, "A", True),
-    (2, "formal", "A", "B", True),
+    ("pr40", "formal", "A", "B", True),
     (2, "formal", "A", "D", True),
     (2, "reference", "B", "C", True),
     (2, "formal", "B", "C", False),
     (2, "reference", None, "C", False),
 ])
-def test_fixed_comparator_with_synthetic_workbooks(comparison_job, layout, mode, snapshot_grade, result_grade, loaded):
-    job, _, config, _, _ = comparison_job
-    configure_fixture(comparison_job, layout, mode, snapshot_grade, result_grade)
+def test_fixed_comparator_with_synthetic_workbooks(comparison_job, layout, mode, snapshot_grade, result_grade, loaded,
+                                                   tmp_path):
+    job, _, config, policy, fixture = comparison_job
+    configure_fixture(comparison_job, "nas" if layout == "pr40" else layout, mode, snapshot_grade, result_grade)
 
     class LocalFetch(Commands):
         def run(self, args, **kwargs):
@@ -295,7 +296,26 @@ def test_fixed_comparator_with_synthetic_workbooks(comparison_job, layout, mode,
                 args = [*args[:-2], str(AGENT_CODE), args[-1]]
             return super().run(args, **kwargs)
 
-    report = execute(comparison_job, Backend(config, commands=LocalFetch()))
+    commands = LocalFetch()
+    backend = Backend(config, commands=commands)
+    if layout == "pr40":
+        prepare_config = fixture / "ab_comparison.prepare.json"
+        prepare_config.write_bytes((EXAMPLES / prepare_config.name).read_bytes())
+        prepared = tmp_path / "pr40-fixture"
+        home = tmp_path / "home"
+        home.mkdir()
+        source = backend.checkout(COMPARISON_SHA, tmp_path, lambda: None,
+                                  checkout_root=tmp_path / "prepare-checkout", full_history=True)
+        env = clean_environment(home)
+        env["PYTHONPATH"] = str(source / "race_purchase_filter")
+        prepare_log = tmp_path / "prepare.log"
+        code = commands.run([sys.executable, "-m", "tools.prepare_ab_comparison",
+                             "--config", str(prepare_config), "--output", str(prepared)],
+                            cwd=source, env=env, control=lambda: None, log=prepare_log, check=False)
+        assert code == 0, prepare_log.read_text()
+        policy["inputs"][job["input_id"]].update(root=str(prepared), manifest_sha256=sha256(prepared / "manifest.json"))
+
+    report = execute(comparison_job, backend)
     workspace = Path(config["validation_root"]) / job["job_id"]
     log = workspace / "execution.log"
     assert report["status"] == ("SUCCEEDED" if loaded else "FAILED"), (report, log.read_text() if log.exists() else "")

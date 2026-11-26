@@ -1,13 +1,14 @@
 """Issue lifecycle tests using simulated time and the real worker ledger."""
 from datetime import datetime, timedelta, timezone
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from nas_agent.files import atomic_json
 from nas_agent.github import Unavailable
-from nas_agent.schema import PR17_SHA, request, utcnow
+from nas_agent.schema import AUDIT_SHA, PR17_SHA, request, utcnow
 from nas_agent.worker import Worker
 from test_full_feature_audit import EXAMPLES, JobIssue
 
@@ -166,3 +167,54 @@ def test_expiry_during_backoff_needs_no_network_check(setup):
     row, calls, _ = execute(setup, action, issue_hook)
     assert (row["status"], row["error_code"]) == ("CANCELLED", "EXPIRED")
     assert calls == [0, 0, 120]
+
+
+@pytest.mark.parametrize("stage", ["preflight", "final"])
+@pytest.mark.parametrize("kind", ["withdrawn", "grant_expired", "input_changed"])
+def test_rechecks_local_approval_and_input_pin(setup, stage, kind, monkeypatch):
+    config, api, clock, wall_start = setup
+    policy_path = Path(config["policy_file"])
+    policy = json.loads(policy_path.read_text())
+    job = json.loads(api.document["body"])
+    if kind == "input_changed":
+        job.update(job_type="full_feature_audit", commit_sha=AUDIT_SHA, input_id="audit")
+        policy["inputs"]["audit"] = {
+            "root": str(policy_path.parent / "fixture"), "raceday": job["raceday"], "manifest_sha256": "a" * 64,
+        }
+        api.document["body"] = json.dumps(job)
+        policy["approved_requests"] = [request(api.document)[1]]
+    if kind == "grant_expired":
+        policy["approved_requests"] = []
+        policy["grants"] = [{
+            "job_type": job["job_type"], "commit_sha": job["commit_sha"], "input_id": job["input_id"],
+            "from_date": job["raceday"], "through_date": job["raceday"],
+            "expires_at": datetime.fromtimestamp(wall_start + 10, timezone.utc).isoformat(),
+        }]
+        monkeypatch.setattr("nas_agent.schema.utcnow", lambda: datetime.fromtimestamp(wall_start + clock.elapsed, timezone.utc))
+    atomic_json(policy_path, policy)
+
+    def issue_hook(call, _):
+        if call != (2 if stage == "preflight" else 3):
+            return
+        if kind == "grant_expired":
+            clock.elapsed = 10
+            return
+        if kind == "input_changed":
+            policy["inputs"]["audit"]["manifest_sha256"] = "b" * 64
+        else:
+            policy["approved_requests"] = []
+        atomic_json(policy_path, policy)
+
+    def action(control):
+        assert stage == "final"
+        return {"summary": {"races": 1}}
+
+    row, _, _ = execute(setup, action, issue_hook)
+    assert (row["started_at"] is not None) == (stage == "final")
+    assert json.loads(row["result"]) == {}
+    if kind == "input_changed":
+        assert (row["status"], row["error_code"]) == ("INTERRUPTED", "APPROVED_INPUT_CHANGED")
+    elif stage == "preflight":
+        assert (row["status"], row["error_code"]) == ("WAIT_APPROVAL", "LOCAL_APPROVAL_REQUIRED")
+    else:
+        assert (row["status"], row["error_code"]) == ("INTERRUPTED", "LOCAL_APPROVAL_REVOKED")

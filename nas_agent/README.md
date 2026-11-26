@@ -28,7 +28,21 @@ workerの `validation_python` に監査スクリプトの依存パッケージ�
 [準備ツール](../tools/prepare_ab_comparison.md)でフィクスチャを生成し、管理者が worker 読み取り専用で配置します。[ジョブ例](examples/ab_comparison.job.json)を使い、ポリシーの `job_types` に `ab_comparison`、`approved_commits` に PR #40 の固定 SHA `31a43fa9aa1d018f78de679d3bc17886f22339dd`、`inputs` に入力ID・開催日・ルート・マニフェスト SHA を登録します。既存の `inspect` / `approve` で依頼を承認できます。承認済みの初回用 grant も使えます。
 
 実行には監査と同じ `validation_python` と PR #40 の依存（pandas、NumPy、openpyxl、Git、GNU patch）が必要です。比較は既存の環境で実行でき、`allow_build: false` でも実行します。固定コミットの比較処理は PR #31 の履歴を参照するため、このジョブのチェックアウトは履歴付きです。エージェントの単日ランナーは固定コミットの比較関数を使い、固定基準重みで A・B を評価します。`run.json` には `mode: "single_day_ab"`、`methods: ["A", "B"]`、対象日だけの検証期間を指定します。
-従来のNASマニフェストの分割ハッシュ一覧と、PR #40の準備ツールが出力する `files_sha256` 形式に対応します。後者を登録する管理者は、発走前入力の取得証跡とグレードを照合してからマニフェストのSHA-256を承認します。従来の `run.json` v1 は発走前入力のグレード省略時にA、v2はCとして扱います。
+従来のNASマニフェストの分割ハッシュ一覧と、PR #40の準備ツールが出力する `files_sha256` 形式に対応します。従来の `run.json` v1 は発走前入力のグレード省略時にA、v2はCとして扱います。
+
+### PR #40の準備ツールを使う場合
+
+1. [NAS単日A・B比較用の設定例](examples/ab_comparison.prepare.json)を `snapshots.json` と `results.json` があるディレクトリにコピーし、`periods.validation` の両方を対象開催日（JST）に合わせます。各入力ファイルはこのディレクトリからの相対パスで指定してください。
+2. PR #40 の固定 SHA `31a43fa9aa1d018f78de679d3bc17886f22339dd` のチェックアウトで、設定例を入力に準備します。出力ディレクトリには未作成のパスを指定します。確定結果が Excel の場合は設定の `results` をそのファイル名にして、`--result-evidence` に証跡 JSON を指定します。
+
+   ```powershell
+   $env:PYTHONPATH = (Join-Path (Get-Location) 'race_purchase_filter')
+   python -m tools.prepare_ab_comparison --config C:/path/to/ab_comparison.prepare.json --output C:/path/to/new-ab-fixture
+   ```
+
+3. 管理者は発走前入力の取得証跡とグレードを照合し、出来上がったフィクスチャを変更せずに worker 読み取り専用で配置します。配置後の `manifest.json` の SHA-256 をポリシーに登録します。
+
+NAS 用の設定は `mode: "single_day_ab"`、`methods: ["A", "B"]`、単日分の `periods.validation` を使います。PR #40 の汎用比較設定にある `evaluation_date` や `baselines` が残っていると、NAS は受付後のフィクスチャ検査で停止します。
 正式検証（既定の `formal`）は発走前入力Aを使用します。`evaluation_mode: "reference"` は発走前入力Bも含め、成果物を `output/reference/` に分離します。両モードとも結果証跡B・Cを事後評価に使用でき、Dは集計の対象外です。単日比較では採用候補の選定を行いません。
 
 worker はマニフェストと各入力の SHA-256 を照合したコピーを実行に用います。比較表、除外理由、実行マニフェストなどは `<validation_root>/<job_id>/output/` に保存します。返却対象は固定ファイル名、最大11件、1ファイル64 MiB、総計128 MiBです。GitHub の状態報告には検証済み成果物のファイル名と SHA-256 が含まれます。終了コード2でマニフェストまで生成された場合は照合失敗として報告し、検証済み成果物を参照できます。
