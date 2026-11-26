@@ -8,7 +8,7 @@ import re
 
 REPOSITORY = "hallo-102/jibunnyou"
 PR17_SHA = "3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92"
-COMPARISON_SHA = "ee79e825cd1669aa3428ada70a28cbafb43d9f9f"
+COMPARISON_SHA = "a40fd7f899385913274d0e64235aba2a46e1054b"
 FIELDS = {"schema_version", "job_id", "job_type", "commit_sha", "raceday", "input_id", "expires_at", "scope"}
 TYPES = {"healthcheck", "issue16_acceptance", "full_feature_audit", "ab_comparison"}
 STATES = {"QUEUED", "WAIT_APPROVAL", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"}

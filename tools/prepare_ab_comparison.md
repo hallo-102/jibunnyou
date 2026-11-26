@@ -1,6 +1,6 @@
 # NAS A〜D比較のフィクスチャ（Issue #35）
 
-[PR #34 の比較プログラム仕様](https://github.com/hallo-102/jibunnyou/blob/ee79e825cd1669aa3428ada70a28cbafb43d9f9f/tools/compare_ab_models.md)に沿って、2026-08-09（JST）の発走前保存ファイルと確定結果をまとめます。保存日時・発走時刻・確定時刻は保存履歴を使って記入します。ファイルの更新日時や最新のマスターからの推定は避けてください。
+[PR #34 の比較プログラム仕様](https://github.com/hallo-102/jibunnyou/blob/a40fd7f899385913274d0e64235aba2a46e1054b/tools/compare_ab_models.md)に沿って、2026-08-09（JST）の発走前保存ファイルと確定結果をまとめます。保存日時・発走時刻・確定時刻は保存履歴を使って記入します。ファイルの更新日時や最新のマスターからの推定は避けてください。
 
 ## 準備
 

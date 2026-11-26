@@ -31,15 +31,16 @@ def run(config_path, output):
     races, counts, missing, excluded = comparison.load_races(config_path.parent, snapshots, periods, builders)
     results = comparison.read_results(result_rows, races)
     coverage = comparison.coverage_counts(races, results, periods, missing, excluded)
-    # evaluate reads this registry. The override is confined to this subprocess.
-    comparison.METHODS = {method: comparison.METHODS[method] for method in config["methods"]}
-    scored, diagnostic_rows = comparison.evaluate(races, results, baselines, {}, (unit, box_size), diagnostics, assessment)
-    summary, breakdown = comparison.grouped_summary(scored, unit, high)
+    methods = {method: comparison.METHODS[method] for method in config["methods"]}
+    scored, diagnostic_rows = comparison.evaluate(
+        races, results, baselines, {}, methods, (unit, box_size), diagnostics, assessment,
+    )
+    summary, breakdown = comparison.grouped_summary(scored, unit, high, tuple(periods))
     parity = Counter(row["status"] for row in diagnostic_rows if row["comparison"] == "main_parity")
     if any(output.iterdir()):
         raise ValueError("Comparison output directory must be empty")
     for name, rows in (
-        ("comparison", [row for row in summary if row["stage"] == "validation"]),
+        ("comparison", summary),
         ("breakdown", breakdown),
         ("races", [row for method_rows in scored.values() for row in method_rows]),
         ("diagnostics", diagnostic_rows),
@@ -52,7 +53,7 @@ def run(config_path, output):
         "mode": config["mode"],
         "code_sha": comparison.git(source, "rev-parse", "HEAD").decode().strip(),
         "runner_sha256": comparison.sha256_file(Path(__file__)),
-        "methods": {label: {method: model for method in comparison.METHODS}
+        "methods": {label: {method: model for method in methods}
                     for label, (_, model) in baselines.items()},
         "periods": config["periods"],
         "training": "not_run",

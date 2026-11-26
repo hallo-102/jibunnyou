@@ -11,7 +11,7 @@ from nas_agent.backend import AGENT_CODE, Backend, Commands
 from nas_agent.comparison import AB_MODE, sha256
 from nas_agent.files import atomic_json
 from nas_agent.poller import Poller
-from nas_agent.schema import COMPARISON_SHA, Rejected, parse_job, request, utcnow
+from nas_agent.schema import COMPARISON_SHA, Rejected, authorized, parse_job, request, utcnow
 from nas_agent.worker import Worker
 from tools.prepare_ab_comparison import prepare
 
@@ -163,6 +163,20 @@ def test_single_day_run_rejects_cd_even_with_matching_manifest(comparison_job, m
     report = execute(comparison_job, backend)
     assert report["status"] == "FAILED"
     assert report["error_code"] == "INVALID_COMPARISON_SINGLE_DAY_MODE"
+
+
+@pytest.mark.parametrize(("commit", "expected"), [
+    ("a40fd7f899385913274d0e64235aba2a46e1054b", True),
+    ("ee79e825cd1669aa3428ada70a28cbafb43d9f9f", False),
+])
+def test_comparison_approval_requires_current_commit(comparison_job, commit, expected):
+    job, api, _, policy, _ = comparison_job
+    api.document["body"] = json.dumps({**job, "commit_sha": commit})
+    candidate, request_hash = request(api.document)
+    # Both policy checks pass even for the retired commit; the fixed SHA must still reject it.
+    policy["approved_commits"] = [commit]
+    policy["approved_requests"] = [request_hash]
+    assert authorized(policy, candidate, request_hash, api.document["user"]["id"]) is expected
 
 
 def test_unapproved_comparison_input_waits(comparison_job):
