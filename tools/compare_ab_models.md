@@ -4,7 +4,7 @@
 
 ```sh
 python -m tools.compare_ab_models --config /path/to/run.json --output /path/to/empty-directory
-python -m pytest -q tests/test_ab_model_comparison.py
+PYTHONPATH=.:race_purchase_filter python -m pytest -q tests/test_ab_model_comparison.py tools/test_ab_comparison_evidence.py
 ```
 
 ## 実行設定
@@ -13,7 +13,7 @@ python -m pytest -q tests/test_ab_model_comparison.py
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "snapshots": "snapshots.json",
   "results": "results.json",
   "periods": {
@@ -32,7 +32,7 @@ python -m pytest -q tests/test_ab_model_comparison.py
 }
 ```
 
-期間は JST の両端を含み、`forward` の終端を `null` にすると上限を設けません。既存の場所別・場所×馬場別最適化とシードを使います。機能確認時は `optimizer_iterations` の `N_ITER_DEFAULT`、`N_ITER_PLACE`、`N_ITER_PLACE_SURFACE` に小さい値を指定できます。学習期間内に開催・確定した結果だけを既存の TOP5 目的関数へ渡します。候補順位は検証期間内に確定した、共通購入対象の利益額・回収率の順に付けます。標本数の閾値を満たさない場合は候補を選定しません。
+期間は JST の両端を含み、`forward` の終端を `null` にすると上限を設けません。既存の場所別・場所×馬場別最適化とシードを使います。機能確認時は `optimizer_iterations` の `N_ITER_DEFAULT`、`N_ITER_PLACE`、`N_ITER_PLACE_SURFACE` に小さい値を指定できます。学習期間に開催され、学習締切までの利用可能性が証跡で確認できる結果を既存の TOP5 目的関数へ渡します。候補順位は検証締切までに利用可能と確認できた共通購入対象の利益額・回収率の順に付けます。標本数の閾値を満たさない場合は候補を選定しません。
 
 ## 発走前スナップショット
 
@@ -43,6 +43,7 @@ python -m pytest -q tests/test_ab_model_comparison.py
   {
     "race_id": "202605050101",
     "start_at": "2026-07-01T12:00:00+09:00",
+    "input_evidence_grade": "A",
     "observed_at": "2026-07-01T11:55:00+09:00",
     "workbook": "archive/day.xlsx",
     "workbook_sha256": "<64桁のSHA-256>",
@@ -60,6 +61,28 @@ python -m pytest -q tests/test_ab_model_comparison.py
 - DL の保存済み出力を使う場合は `dl` に馬番ごとの `probability` と `rank`、`dl_model_sha256`、`dl_model_training_end_at`、`dl_observed_at` を指定します。両経路で同じ発走前出力と本番ブレンド比を使います。欠落時は中立入力になります。このプログラムは NAS の現在のファイルから DL を再学習しません。
 - SHA はファイル内容を固定します。取得時刻・学習終了時刻の裏付けには NAS 側の保存履歴が必要です。
 
+発走前入力の区分は `input_evidence_grade` に記録します。`schema_version: 2` の比較設定では、省略した区分を C とします。準備コマンドは入力設定のバージョンにかかわらず、未指定を C としてバージョン 2 のフィクスチャを生成します。直接実行する従来の `schema_version: 1` 設定では、互換性のため未指定を A とし、従来の時刻と SHA の検査を適用します。
+
+| 区分 | 発走前入力の証跡 | 取り扱い |
+| --- | --- | --- |
+| A | 発走前の取得を確認済み | 正式検証・参考検証・計算監査 |
+| B | 内部記録あり・独立した証跡不足 | 参考検証・計算監査 |
+| C | 取得時点不明 | 計算監査のみ |
+| D | 発走後の情報が混入 | 原因調査のみ |
+
+既定の `"evaluation_mode": "formal"` は A のみを集計します。`"evaluation_mode": "reference"` は A と B を対象にし、B にも内部記録による発走前の取得時刻と SHA の検査を適用します。参考検証の学習入力は A に限定し、候補選定は無効です。参考検証の成果物は `--output` 配下の `reference/` に保存し、データ行とマニフェストに検証モードを記録します。`races` では各レースの入力区分を確認できます。同じ出力先を使う場合は空の出力先に正式検証を出力してから参考検証を実行してください。計算監査と原因調査に使う区分はフィクスチャのメタデータに記録します。
+
+## フィクスチャ準備
+
+上記形式の比較設定から、入力ファイルを複製し、SHA-256 を付けたフィクスチャを作成します。出力ディレクトリには新規パスを指定してください。
+
+```sh
+python -m tools.prepare_ab_comparison --config /path/to/run.json --output /path/to/new-fixture
+python -m tools.compare_ab_models --config /path/to/new-fixture/run.json --output /path/to/report
+```
+
+設定の `results` に既存形式の確定結果 Excel（`.xlsx`）を指定する場合は、`--result-evidence /path/to/evidence.json` を追加します。この JSON にはレース ID と下記の証跡フィールドを配列で指定します。着順と払戻は Excel から取り込みます。比較モデル設定、固定候補マニフェスト、実購入台帳は元の参照先を使います。
+
 ## 確定結果と集計
 
 `results.json` は別ファイルの配列です。着順は1着から順に、払戻金は各100円あたりの確定金額を指定します。複勝は頭数に対応する全的中馬の金額を収録します。3連複の組番は馬番昇順のハイフン区切りです。
@@ -68,6 +91,7 @@ python -m pytest -q tests/test_ab_model_comparison.py
 [
   {
     "race_id": "202605050101",
+    "evidence_grade": "A",
     "finalized_at": "2026-07-01T12:20:00+09:00",
     "finish_top3": [2, 1, 3],
     "payouts": {
@@ -78,6 +102,17 @@ python -m pytest -q tests/test_ab_model_comparison.py
   }
 ]
 ```
+
+| グレード | 結果の証跡と指定項目 | 利用範囲 |
+| --- | --- | --- |
+| A | 正確な確定時刻を `finalized_at` にタイムゾーン付きで指定 | 事後評価・締切判定 |
+| B | `race_date`、信頼できる保存履歴の参照先 `evidence_source`、利用可能日の上限 `available_by_date`（JST） | 事後評価・締切判定 |
+| C | `race_date`、JRA公式確定結果の参照先 `evidence_source`、公式結果の転記 `jra_official_result` | 事後評価のみ |
+| D | 出典や内容を確認できない | 利用不可 |
+
+B/C の `race_date` と B の `available_by_date` は `YYYY-MM-DD` です。B の上限日は、その日までに対象の着順・払戻が利用できたことを保存履歴で確認して指定します。C の `jra_official_result` には `race_id`、`race_date`、`finish_top3`、`payouts` を入れます。実際の JRA 公式資料との一致確認は入力準備工程で行い、後から確認できる参照先を記録してください。ツールでの C の照合は、提供された公式結果の転記データとの比較です。比較項目はレース ID・開催日・着順と、利用対象の各券種の払戻です。B の保存履歴も入力準備工程で確認します。
+
+従来形式の `finalized_at` 付きデータは A として読み込みます。締切日を含む学習・検証期間では、A の確定時刻を JST に直して締切日までかを判定します。B は利用可能日の上限が締切日より前のときに限って学習と候補選定に使います。フィクスチャと比較結果のマニフェストにはレース別の `grade`、`finalized_at`、`race_date`、`available_by_date`、証跡の参照先を記録し、不明な時刻は `null` で表します。
 
 欠落した券種はキーを省略します。買い目が外れたことを確定できる場合だけ払戻にゼロを計上します。同着・返還など単一の確定上位3頭と対応する払戻で表現できないレースは、着順・払戻集計の対象外とし、結果の欠落として明記します。勝率と回収率の分母、購入予定額と精算対象の投資額を個別に記録します。
 
@@ -99,7 +134,7 @@ D-04 の出走数 `ta_n` は競走中止を出走に数え、除外・取消を�
 
 C・D も計算する場合は、次のいずれかを指定します。
 
-- `"weight_mode": "optimize"` を指定し、評価日より前の学習スナップショットと学習期間内に確定した結果を用意します。
+- `"weight_mode": "optimize"` を指定し、評価日より前の学習スナップショットと学習締切までの利用可能性が確認できる結果を用意します。
 - `"weight_mode": "fixed"` と `"candidate_manifest": "previous/manifest.json"` を指定し、
   以前の実行で出力したマニフェストと C・D の重みファイルを用意します。
   学習終了日が評価開始日より前で、学習レース ID が評価レースと重複せず、

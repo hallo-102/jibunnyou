@@ -1,7 +1,6 @@
 """A〜D比較用の発走前スナップショットと確定結果の読込。"""
 
 from collections import Counter
-from datetime import datetime
 import importlib
 from hashlib import sha256
 from io import BytesIO
@@ -12,7 +11,8 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 
 from model_registry import sha256_file
-from race_purchase_filter.evaluation_utils import JST, integer
+from race_purchase_filter.evaluation_utils import integer
+from tools.ab_comparison_evidence import available_by_cutoff, result_evidence, snapshot_grade, timestamp
 from tokutyouryou_keisann.common import _norm_name
 from tokutyouryou_keisann.config import FEAT_COLS
 from tokutyouryou_keisann.features import _parse_distance_to_int
@@ -36,13 +36,6 @@ BET_TYPES = {"単勝": 1, "複勝": 1, "3連複": 3}
 
 class RosterUnavailable(ValueError):
     """A〜D で照合可能な完全な出走表を作れない。"""
-
-
-def timestamp(value):
-    stamp = datetime.fromisoformat(value)
-    if stamp.utcoffset() is None:
-        raise ValueError("タイムゾーン付きの時刻が必要です")
-    return stamp.astimezone(JST)
 
 
 def checked_path(root, record, key):
@@ -207,20 +200,23 @@ def load_snapshot(root, record, start, counted, builders):
     return prepared
 
 
-def read_results(rows, races):
+def read_results(rows, races, evidence=None, *, starts=None):
     """結果は予想側へ結合せず、集計用の別マップへ格納する。"""
     results = {}
+    if evidence is None:
+        evidence = {}
+    starts = starts if starts is not None else {rid: race["start"] for rid, race in races.items()}
     for row in rows:
         rid = row["race_id"]
-        if rid in results:
+        if rid in evidence:
             raise ValueError(f"{rid}: 結果が重複しています")
-        finalized = timestamp(row["finalized_at"])
+        proof = evidence[rid] = result_evidence(row, starts.get(rid))
+        if proof["grade"] == "D":
+            continue
         top = row.get("finish_top3")
         valid_top = (isinstance(top, list) and len(top) == 3
                      and all(type(n) is int and n > 0 for n in top) and len(set(top)) == 3)
         if rid in races:
-            if finalized <= races[rid]["start"]:
-                raise ValueError(f"{rid}: 発走後の確定時刻が必要です")
             if valid_top and set(top) - set(races[rid]["frames"]["legacy"]["馬番"]):
                 raise ValueError(f"{rid}: 確定着順に出走表にない馬番があります")
         payouts = {}
@@ -245,11 +241,12 @@ def read_results(rows, races):
             elif set(prices) != expected[kind]:
                 raise ValueError(f"{rid}: {kind}払戻の組番が不完全です")
             payouts[kind] = prices
-        results[rid] = {"top": top if valid_top else None, "payouts": payouts, "finalized": finalized}
+        results[rid] = {"top": top if valid_top else None, "payouts": payouts, "evidence": proof}
     return results
 
 
-def load_races(root, rows, periods, builders, evaluation_date=None, include_training=True):
+def load_races(root, rows, periods, builders, evaluation_date=None, include_training=True,
+               *, legacy=False, reference=False):
     builders = {
         "legacy": (features.build_features_from_excel, False, True),
         "corrected": (features.build_features_from_excel, True, False),
@@ -276,6 +273,12 @@ def load_races(root, rows, periods, builders, evaluation_date=None, include_trai
             excluded.append({"race_id": rid, "stage": stage, "reason": "outside_run_scope"})
             continue
         coverage[stage] += 1
+        grade = snapshot_grade(row, legacy=legacy)
+        if grade != "A" and not (reference and stage != "train" and grade == "B"):
+            reason = f"input_evidence_grade_{grade}"
+            missing[stage][reason] += 1
+            excluded.append({"race_id": rid, "stage": stage, "reason": reason})
+            continue
         observed = timestamp(row["observed_at"])
         if observed >= start:
             raise ValueError(f"{rid}: 発走前スナップショットが必要です")
@@ -298,6 +301,7 @@ def load_races(root, rows, periods, builders, evaluation_date=None, include_trai
             excluded.append({"race_id": rid, "stage": stage, "reason": "obstacle_race"})
             continue
         races[rid] = {"start": start, "observed": observed, "stage": stage, "frames": frames,
+                      "input_evidence_grade": grade,
                       "pop_observed": timestamp(row.get("popularity_observed_at", row["observed_at"]))}
     return races, coverage, missing, excluded
 
@@ -315,7 +319,7 @@ def training_set(races, results, train_end, mode):
     for rid, race in races.items():
         result = results.get(rid)
         if (race["stage"] != "train" or not result or not result["top"]
-                or result["finalized"].date() > train_end):
+                or not available_by_cutoff(result["evidence"], train_end)):
             continue
         frame = race["frames"][mode]
         frames.append(frame)
