@@ -1,5 +1,5 @@
 """Issue lifecycle tests using simulated time and the real worker ledger."""
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
 
@@ -143,9 +143,9 @@ def test_running_and_final_checks_fail_closed(setup, case, status, code):
 
 
 def test_expiry_during_backoff_needs_no_network_check(setup):
-    config, api, clock, _ = setup
+    config, api, clock, wall_start = setup
     job = json.loads(api.document["body"])
-    job["expires_at"] = (utcnow() + timedelta(seconds=150)).isoformat()
+    job["expires_at"] = datetime.fromtimestamp(wall_start + 150, timezone.utc).isoformat()
     api.document["body"] = json.dumps(job)
     with open(config["policy_file"]) as handle:
         policy = json.load(handle)
