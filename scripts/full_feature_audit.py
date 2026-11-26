@@ -27,6 +27,7 @@ OUTPUT = ROOT / "outputs/full_feature_audit_20261125"
 START = pd.Timestamp("2025-06-14")
 END = {"input": pd.Timestamp("2026-11-01"), "output": pd.Timestamp("2026-10-25")}
 DIMENSIONS = ["venue", "surface", "distance", "class", "going", "popularity_band", "reliability"]
+EXCLUSION_REASONS = {"debut": "新馬", "maiden": "未勝利", "obstacle": "障害", "other": "その他"}
 CONDITION_COLUMNS = ["dimension", "value", "bet_type", "bets", "stake", "payout", "profit", "roi_pct"]
 
 
@@ -220,7 +221,32 @@ def expected_pace(value):
     return "fast" if gap <= Decimal("-0.6") else "slow" if gap >= Decimal("0.6") else "mid"
 
 
-def history_checks(f, frame, entries, day, levels, emit):
+def race_condition_text(conditions):
+    return " ".join(unicodedata.normalize("NFKC", str(value)) for value in conditions if pd.notna(value))
+
+
+def race_condition_reason(text, reasons):
+    return next((reason for reason in reasons if EXCLUSION_REASONS[reason] in text), None)
+
+
+def prior_start_evidence(row, rating, day):
+    """Only use explicit career counts or dated positive master evidence."""
+    counts = [finite(row.get(column)) for column in ("通算出走数", "通算出走回数", "prior_start_count")]
+    if any(count is not None and count > 0 and count.is_integer() for count in counts):
+        return True, "今走行の通算出走数が1以上"
+    asof = audit_date(rating.get("rating_asof_date"))
+    master_count = finite(rating.get("start_count"))
+    if (str(rating.get("rating_source")) == "ratings_history" and pd.notna(asof) and asof < day
+            and master_count is not None and master_count >= 1):
+        return True, f"開催日前のマスター出走実績（{display_date(asof)}）"
+    if 0 in counts:
+        return False, "今走行の通算出走数が0"
+    if str(row.get("初出走")).strip() in {"True", "初出走"}:
+        return False, "今走行に初出走の明記あり"
+    return None, None
+
+
+def history_checks(f, frame, entries, day, levels, emit, record_history_gap, reason):
     """Compare the production history selection with calendar- and start-based references."""
     column = lambda *names: f._pick_col(frame, list(names))
     name_key = column("馬名")
@@ -240,7 +266,9 @@ def history_checks(f, frame, entries, day, levels, emit):
     sort_dates = dates.map(f._parse_yyyymmdd)
     if name_key is None:
         for entry in entries:
-            emit(entry, "D-01", "history_horse_key", None, None, "過去走シートの馬名列なし")
+            has_started, _ = entry["prior_start_evidence"]
+            gap_reason = reason if frame.empty or (reason == "maiden" and has_started is None) else None
+            record_history_gap(entry, gap_reason, "過去走シートの馬名列なし")
         return
     names = frame[name_key].astype(str).str.strip()
     grouped = names.groupby(names).groups
@@ -252,7 +280,7 @@ def history_checks(f, frame, entries, day, levels, emit):
         indices = grouped.get(horse, fallback.get(re.sub(r"\s+", "", horse), pd.Index([])))
         rows = frame.loc[indices]
         if rows.empty:
-            emit(entry, "D-01", "history_rows", None, None, "今走馬に対応する過去走行なし")
+            record_history_gap(entry, reason, "今走馬に対応する過去走行なし")
             continue
         for index, row in rows.iterrows():
             item = {**entry, "history_row": index + 2, "past_race_id": row.get(past_rid_key),
@@ -289,6 +317,9 @@ def history_checks(f, frame, entries, day, levels, emit):
         chronological = chronological.assign(audit_sort=expected_dates.loc[chronological.index]).sort_values(
             "audit_sort", ascending=False, kind="stable").drop(columns="audit_sort")
         if chronological.empty and legacy.empty:
+            if reason and expected_dates.loc[indices].notna().all():
+                record_history_gap(entry, reason, "開催日前の履歴なし")
+                continue
             for code, metric in (("D-04", "starts"), ("D-05", "recent3_finish"), ("D-06", "running_style"),
                                  ("D-09", "win_rate")):
                 emit(entry, code, metric, None, None, "開催日前の履歴なし")
@@ -514,8 +545,61 @@ class LiveAudit:
         self.export_horses = 0
         self.scoring_horses = 0
         self.partial = False
+        self.recomputed_expected_empty = False
 
-    def emit(self, item, requirement, metric, actual, expected, evidence, *, hypothesis=False, force_difference=False):
+    def record_history_gap(self, item, reason, evidence):
+        classification = "履歴欠落の疑い"
+        if reason == "debut":
+            classification = "正常な履歴なし"
+        elif reason == "maiden":
+            has_started, start_evidence = item["prior_start_evidence"]
+            if has_started is None:
+                classification = "出走経験未確認"
+            elif has_started:
+                classification = "履歴欠落"
+            else:
+                classification = "正常な履歴なし"
+            if start_evidence:
+                evidence += f"。{start_evidence}"
+        expected = None if classification in {"正常な履歴なし", "出走経験未確認"} else True
+        self.emit(item, "D-01", "history_rows", None, expected, evidence,
+                  classification=classification,
+                  reason=reason if classification == "正常な履歴なし" else None)
+
+    def coverage_status(self):
+        history = self.requirements.get(("D-01", "history_rows"), {})
+        if not (self.input_horses or self.recomputed_horses or self.export_horses or history.get("total")):
+            return "no_real_data"
+        if self.partial or not self.export_horses:
+            return "partial"
+        if not (self.recomputed_horses or self.recomputed_expected_empty):
+            return "partial"
+        return "observed_with_limits"
+
+    def classification_report(self):
+        membership = self.requirements.get(("D-12", "wrapper_horse_membership"), Counter())
+        history = self.requirements.get(("D-01", "history_rows"), Counter())
+        reason_counts = "、".join(f"{label} {membership[reason]}" for reason, label in EXCLUSION_REASONS.items())
+        history_counts = f"新馬 {history['debut']}、未勝利 {history['maiden']}"
+        return [
+            "## レース条件別の除外と履歴照合",
+            "",
+            f"- D-12 対象馬差異（馬キー単位） 正常除外 {membership['正常除外']}件"
+            f"（{reason_counts}）、要調査 {membership['要調査']}件。",
+            f"- D-01 履歴照合不能（今走行単位） 正常な履歴なし {history['正常な履歴なし']}件"
+            f"（{history_counts}）、履歴欠落 {history['履歴欠落']}件、"
+            f"履歴欠落の疑い {history['履歴欠落の疑い']}件、出走経験未確認 {history['出走経験未確認']}件。",
+            "- 未勝利戦では今走行の通算出走数（`通算出走数`、`通算出走回数`、`prior_start_count`）"
+            "、`初出走`の明記、または開催日前のマスター出走実績を参照する。マスターの初期値0からは初出走を確定しない。"
+            "未確認は未検証として集計する。",
+            "- 旧形式で馬単位に復元できない場合は元の今走行を集計する。",
+            "- 正常分は差異・欠損件数と partial 判定から除く。"
+            "D-12 の正常除外は本番側だけに馬がいない場合に適用する。"
+            "その他は本番の対象外条件を追加した場合の集計欄。",
+        ]
+
+    def emit(self, item, requirement, metric, actual, expected, evidence, *, hypothesis=False, force_difference=False,
+             classification=None, reason=None):
         status, delta = difference(actual, expected)
         missing = bool(pd.isna(actual) or pd.isna(expected))
         if force_difference:
@@ -524,7 +608,20 @@ class LiveAudit:
             status = "改善仮説" if not pd.isna(expected) else "未検証"
         elif requirement in {"D-01", "D-02", "D-03", "D-12"} and pd.isna(actual) and not pd.isna(expected):
             status = "差異"
+        if classification in {"正常除外", "正常な履歴なし"}:
+            status, missing = classification, False
+        elif classification:
+            self.partial = True
+            if classification == "出走経験未確認":
+                status, missing = "未検証", False
         counts = self.requirements[requirement, metric]
+        if classification and classification != status:
+            counts[classification] += 1
+        if reason:
+            counts[reason] += 1
+            evidence += f"。レース条件による分類: {EXCLUSION_REASONS[reason]}"
+        elif classification:
+            evidence += f"。{classification}"
         counts["total"] += 1
         counts["missing"] += missing
         counts[status] += 1
@@ -534,17 +631,28 @@ class LiveAudit:
         self.details.writerow({key: value if pd.notna(value) else None for key, value in row.items()})
 
     def tabulate(self, output):
+        categories = {
+            "expected_exclusions": "正常除外",
+            "expected_no_history": "正常な履歴なし",
+            "membership_needs_review": "要調査",
+            "suspected_history_gaps": "履歴欠落の疑い",
+            "confirmed_history_gaps": "履歴欠落",
+            "unverified_prior_starts": "出走経験未確認",
+        }
+        reasons = [f"expected_{reason}" for reason in EXCLUSION_REASONS]
         rows = []
         for (req, metric), count in sorted(self.requirements.items()):
             evaluated = count["一致"] + count["差異"]
             rows.append((req, metric, count["total"], evaluated, count["差異"],
                          100 * count["差異"] / evaluated if evaluated else None, count["missing"],
-                         count["未検証"], count["改善仮説"]))
+                         count["未検証"], count["改善仮説"],
+                         *(count[key] for key in categories.values()),
+                         *(count[reason] for reason in EXCLUSION_REASONS)))
         seen = {row[0] for row in rows}
-        rows.extend((req, "未検証", 0, 0, 0, None, 0, 0, 0)
+        rows.extend((req, "未検証", 0, 0, 0, None, 0, 0, 0, *([0] * (len(categories) + len(reasons))))
                     for req in (f"D-{i:02d}" for i in range(1, 13)) if req not in seen)
         pd.DataFrame(sorted(rows), columns=["requirement", "metric", "targets", "evaluated", "issues", "issue_pct",
-                                            "missing", "unverified", "hypothesis"]).to_csv(
+                                            "missing", "unverified", "hypothesis", *categories, *reasons]).to_csv(
             output / "real_audit_summary.csv", index=False)
         feature_rows = []
         total_abs_contribution = sum(item["abs_contribution"] for item in self.features.values())
@@ -642,29 +750,67 @@ class LiveAudit:
 
     def input_book(self, path, day, book, now, levels, base, odds, quality):
         f = self.f
-        now = f._expand_legacy_now_rows_from_race_sheets(book, now.copy())
-        rows = {str(f._normalize_rid_series(pd.Series([name])).iloc[0]): (name, frame)
-                for name, frame in book.items() if re.fullmatch(r"\d{10,13}", str(name))}
-        rid_column = next((key for key in ("rid_str", "レースID", "race_id")
-                           if key in now and now[key].notna().any()), None)
-        if not rid_column or "馬名" not in now:
-            quality.append(f"- 今走のレースIDまたは馬名列なし `{path}`。")
+        original = f._ensure_rid_str(now.copy(), label="audit NOW")
+        if "rid_str" in original:
+            original["rid_str"] = f._normalize_rid_series(original["rid_str"])
+        if "rid_str" not in original or not original["rid_str"].any():
+            quality.append(f"- 今走のレースID列なし、または有効なレースIDなし `{path}`。")
             self.partial = True
             return
-        now["rid_str"] = f._normalize_rid_series(now[rid_column])
-        identified = now[now["rid_str"].isin(rows) & now["馬名"].notna() & now["馬名"].astype(str).str.strip().ne("")]
-        if len(identified) != len(now):
-            self.partial = True
-            quality.append(f"- 今走から履歴シートに照合できない行 {len(now) - len(identified)}件 `{path}`。")
-        self.input_horses += len(identified)
+        condition_cols = [col for col in ("レース名", "クラス", "条件", "race_name", "race_title")
+                          if col in original]
+        race_conditions = {
+            race: race_condition_text(entries[condition_cols].to_numpy().ravel())
+            for race, entries in original.groupby("rid_str") if race
+        }
+        race_reasons = {race: race_condition_reason(text, ("obstacle", "debut", "maiden"))
+                        for race, text in race_conditions.items()}
+        history_reasons = {race: race_condition_reason(text, ("debut", "maiden"))
+                           for race, text in race_conditions.items()}
         ratings = levels.attrs.get("horse_ratings")
+        unique_ratings = {}
+        if isinstance(ratings, pd.DataFrame) and "name_norm" in ratings:
+            unique_ratings = ratings.drop_duplicates("name_norm", keep=False).set_index("name_norm").to_dict("index")
+        base_item = {"file": str(path), "date": display_date(day)}
+
+        def entry_identity(row):
+            name = row.get("馬名")
+            horse = str(name).strip() if pd.notna(name) else ""
+            if horse in {"nan", "<NA>"}:
+                horse = ""
+            race = row["rid_str"]
+            start_evidence = (None, None)
+            if horse and history_reasons.get(race) == "maiden":
+                rating = unique_ratings.get(f._normalize_horse_name(horse), {})
+                start_evidence = prior_start_evidence(row, rating, day)
+            return {**base_item, "race_id": race, "horse_number": row.get("馬番"), "horse": horse or None,
+                    "prior_start_evidence": start_evidence}
+
+        expected_only = original["rid_str"].map(race_reasons).notna().all()
+        now = f._expand_legacy_now_rows_from_race_sheets(book, original)
+        now = now.reindex(columns=now.columns.union(["rid_str", "馬名"], sort=False))
+        rows = {str(f._normalize_rid_series(pd.Series([name])).iat[0]): frame
+                for name, frame in book.items() if re.fullmatch(r"\d{10,13}", str(name))}
+        names = now["馬名"].astype("string").fillna("").str.strip()
+        identified_mask = now["rid_str"].isin(rows) & ~names.isin(["", "nan", "<NA>"])
+        dropped = original[~original["rid_str"].isin(now["rid_str"])]
+        for _, row in pd.concat([dropped, now.loc[~identified_mask]]).iterrows():
+            race = row["rid_str"]
+            item = entry_identity(row)
+            empty_or_absent = race not in rows or rows[race].empty
+            reason = history_reasons.get(race)
+            if not empty_or_absent and reason != "maiden":
+                reason = None
+            self.record_history_gap(item, reason,
+                                    "過去走シートが空またはなし" if empty_or_absent else "今走馬を特定できない")
+        identified = now.loc[identified_mask]
+        self.input_horses += len(identified)
         for race, entries in identified.groupby("rid_str"):
-            _, frame = rows[race]
+            frame = rows[race]
             current_size = entries["頭数"].dropna().iloc[0] if "頭数" in entries and entries["頭数"].notna().any() else None
             items = []
             for _, row in entries.iterrows():
-                item = {"file": str(path), "date": display_date(day), "race_id": race,
-                        "horse_number": row.get("馬番"), "horse": str(row["馬名"]).strip(),
+                item = {**entry_identity(row),
                         "field_size": current_size, "distance": f._parse_distance_m(row.get("コース", row.get("距離"))),
                         "surface": f._parse_surface(row.get("コース", row.get("芝・ダ"))),
                         "venue": f._normalize_place_text(row.get("場所"))}
@@ -686,7 +832,8 @@ class LiveAudit:
                             else 0.15 if rating.get("rating_source") == "initial_rating" else None)
                 self.emit(item, "D-10", "rating_confidence", finite(rating.get("rating_confidence")), expected,
                           "時点付き出走数または初期ratingから信頼度を検証")
-            history_checks(f, frame, items, day, levels, self.emit)
+            history_checks(f, frame, items, day, levels, self.emit,
+                           self.record_history_gap, history_reasons.get(race))
         try:
             merged, shared, optimized, actual = run_feature_paths(
                 path, day, self.pipeline, self.optimizer, levels, base, odds)
@@ -700,19 +847,32 @@ class LiveAudit:
             if "frame" in actual:
                 self.scoring_horses += len(actual["frame"])
                 self.feature_table(path, day, actual["frame"], optimized, merged, "legacy_scoring_input", captured=actual)
-            elif "production_error" not in actual:
+            elif "production_error" not in actual and not expected_only:
                 self.partial = True
                 quality.append(f"- 本番の予測対象条件を通過した馬なし `{path}`。スコア寄与は未検証。")
+            normal_exclusions = 0
             if "production_error" not in actual and "optimizer_error" not in actual:
+                self.recomputed_expected_empty |= (
+                    expected_only and "optimizer_common" in actual and shared.empty and paired.empty
+                )
                 prod_keys = index_horses(actual.get("frame", pd.DataFrame()))
                 opt_keys = index_horses(optimized)
                 for key in prod_keys.index.union(opt_keys.index):
                     horse_row = prod_keys.loc[key] if key in prod_keys.index else opt_keys.loc[key]
                     item = {"file": str(path), "date": display_date(day), "race_id": key[0],
                             "horse_number": key[1], "horse": horse_row.get("馬名")}
-                    self.emit(item, "D-12", "wrapper_horse_membership", key in prod_keys.index, key in opt_keys.index,
-                              "一致条件は同じ馬キーでの出力。差はラッパーの対象馬抽出条件を含む")
-            for race, batch in shared.groupby("rid_str"):
+                    in_production = key in prod_keys.index
+                    in_optimizer = key in opt_keys.index
+                    reason = race_reasons.get(key[0]) if in_optimizer and not in_production else None
+                    classification = None
+                    if in_production != in_optimizer:
+                        classification = "正常除外" if reason else "要調査"
+                        normal_exclusions += bool(reason)
+                    self.emit(item, "D-12", "wrapper_horse_membership", in_production, in_optimizer,
+                              "一致条件は同じ馬キーでの出力。差はラッパーの対象馬抽出条件を含む",
+                              classification=classification, reason=reason)
+            shared_groups = shared.groupby("rid_str") if not shared.empty else ()
+            for race, batch in shared_groups:
                 rating_values = numeric_series(batch["master_rating"])
                 confidences = numeric_series(batch["master_rating_confidence"])
                 adjusted = (rating_values - rating_values.mean()) * confidences.fillna(0)
@@ -747,8 +907,8 @@ class LiveAudit:
                       "同一Excel・マスター・オッズ・開催日で両入口を比較")
             self.emit(base_item, "D-12", "wrapper_rows",
                       len(actual.get("frame", [])) if "production_error" not in actual else None,
-                      len(optimized) if "optimizer_error" not in actual else None,
-                      "本番のスコア入力と最適化の出力。対象馬の違いは抽出条件を含む")
+                      len(optimized) - normal_exclusions if "optimizer_error" not in actual else None,
+                      f"最適化の出力 {len(optimized)}行から本番の正常除外 {normal_exclusions}行を差し引いて比較")
         except Exception as exc:
             self.partial = True
             quality.append(f"- 特徴量の再計算・比較失敗 `{path}` ({type(exc).__name__}: {exc})。")
@@ -796,7 +956,7 @@ class RunManifest:
             history.append(event)
         self.files[key].update(status=status, reason=reason)
 
-    def write(self, output, args, config, audit, status):
+    def write(self, output, args, config, audit, feature_status, revenue_status):
         packages = {}
         for name in ("pandas", "numpy", "openpyxl", "xlrd", "requests", "torch", "scikit-learn"):
             try:
@@ -805,7 +965,10 @@ class RunManifest:
                 packages[name] = None
         spec = config.PRODUCTION_MODEL_SPEC
         payload = {
-            "status": status, "python": sys.version.split()[0], "dependencies": packages,
+            "status": feature_status,
+            "feature_audit_status": feature_status,
+            "revenue_evaluation_status": revenue_status,
+            "python": sys.version.split()[0], "dependencies": packages,
             "data_dir": str(args.data_dir.resolve()), "output_dir": str(output),
             "period": {kind: [display_date(args.start_date), display_date(end)] for kind, end in args.ends.items()},
             "model": {
@@ -1084,6 +1247,22 @@ def condition_stats(path, start=START, end=END["output"]):
     return pd.DataFrame(rows, columns=CONDITION_COLUMNS)
 
 
+def evaluate_revenue(args, manifest):
+    path = args.settled_bets
+    if path is None:
+        return condition_stats(None), "not_provided", None
+    try:
+        stats = condition_stats(path, args.start_date, args.ends["output"])
+    except (OSError, ValueError) as exc:
+        manifest.mark(path, "settled_bets", "read_error", str(exc))
+        return condition_stats(None), "read_error", str(exc)
+    if stats.empty:
+        manifest.mark(path, "settled_bets", "no_in_period_rows")
+        return stats, "no_in_period_rows", None
+    manifest.mark(path, "settled_bets", "used")
+    return stats, "completed", None
+
+
 def integration_checks(f, config, groups, production, add):
     pipeline = importlib.import_module("1_keibayosou_pipeline")
     optimizer = importlib.import_module("tokutyouryou_keisann.features")
@@ -1151,7 +1330,8 @@ def main():
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         (output / "run_manifest.json").write_text(json.dumps(
-            {"status": "startup_error", "error": error, "files": list(manifest.files.values())},
+            {"status": "startup_error", "feature_audit_status": "startup_error",
+             "revenue_evaluation_status": "not_run", "error": error, "files": list(manifest.files.values())},
             ensure_ascii=False, indent=2), encoding="utf-8")
         print(error, file=sys.stderr)
         return 2
@@ -1186,20 +1366,9 @@ def main():
         audit = LiveAudit(details, values, features, f, config)
         quality, schedule, time_tables, jockey_tables = workbook_audit(args, features, add, audit, manifest, loaders)
     audit.tabulate(output)
-    try:
-        stats = condition_stats(args.settled_bets, args.start_date, args.ends["output"])
-    except (OSError, ValueError) as exc:
-        audit.partial = True
-        manifest.mark(args.settled_bets, "settled_bets", "read_error", str(exc))
-        quality.append(f"- 購入明細を利用できない `{args.settled_bets}` ({exc})。")
-        stats = condition_stats(None)
-    else:
-        if args.settled_bets:
-            manifest.mark(args.settled_bets, "settled_bets", "used" if not stats.empty else "no_in_period_rows")
-    status = ("no_real_data" if not (audit.input_horses or audit.recomputed_horses or audit.export_horses)
-              else "partial" if audit.partial or stats.empty or not (audit.recomputed_horses and audit.export_horses)
-              else "observed_with_limits")
-    manifest.write(output, args, config, audit, status)
+    feature_status = audit.coverage_status()
+    stats, revenue_status, revenue_error = evaluate_revenue(args, manifest)
+    manifest.write(output, args, config, audit, feature_status, revenue_status)
     results = pd.DataFrame(records, columns=["requirement", "source", "metric", "observed", "expected", "status", "evidence"])
     results.to_csv(output / "full_feature_audit_results.csv", index=False)
     stats.to_csv(output / "condition_stats.csv", index=False)
@@ -1212,7 +1381,7 @@ def main():
         ]
 
     write_md(output, "data_quality_audit.md", "データ品質監査",
-             quality + ["", *table("D-01", "D-04", "D-05", "D-09")])
+             quality + ["", *audit.classification_report(), "", *table("D-01", "D-04", "D-05", "D-09")])
     write_md(output, "race_schedule_audit.md", "レース開催日程監査", schedule + [
         "", "日付は今走シート、日付列が無い場合はファイル名中のYYYYMMDDから抽出。"
         "対象期間内の開催日リスト原本が無いため、日付単位の欠落照合は未実施。"])
@@ -1227,9 +1396,10 @@ def main():
         "", "本番・検証の設定ファイルと用途は別。両設定の重みパスは共通。"
         "検証の固定SHAが現行ファイルと異なるため、当該設定での検証モデル読み込みは失敗する。"
         "本プログラムは予想パイプラインの実行、購入、配信、重みの更新を行わない。"])
-    summary(output, len(features), len(groups), sum(map(len, groups.values())), stats, table, status, audit)
-    print(f"{status} {output}")
-    return 2 if status == "no_real_data" else 0
+    summary(output, len(features), len(groups), sum(map(len, groups.values())), stats, table, audit,
+            feature_status, revenue_status, revenue_error)
+    print(f"feature_audit_status={feature_status} revenue_evaluation_status={revenue_status} {output}")
+    return 2 if feature_status == "no_real_data" else 0
 
 
 def display(value):
@@ -1240,14 +1410,14 @@ def display(value):
     return str(value)
 
 
-def summary(output, count, groups, elements, stats, table, status, audit):
+def summary(output, count, groups, elements, stats, table, audit, feature_status, revenue_status, revenue_error):
     lines = [
         f"本番重みの実測は **{count}特徴量・{groups}グループ・{elements:,}要素**。"
         "詳細CSVに全特徴量の設定カバレッジ、非ゼロ重み数、重み範囲、合成値の観測件数を記録した。",
         "",
-        f"**実行状態 `{status}`**。履歴照合 {audit.input_horses}馬行、"
+        f"**特徴量監査 `{feature_status}`**。履歴照合 {audit.input_horses}馬行、"
         f"特徴量再計算 {audit.recomputed_horses}馬行、保存済みTARGET {audit.export_horses}馬行。"
-        "0件時は合成・コード監査の成果物を出力し、終了コード2を返す。"
+        "`no_real_data` の場合は合成・コード監査の成果物を出力し、終了コード2を返す。"
         "`partial` は一部未検証、`observed_with_limits` も以下の適用範囲内での観測。",
         "",
         "`python scripts/full_feature_audit.py --data-dir /nas/data --output-dir /nas/audit/run "
@@ -1265,6 +1435,7 @@ def summary(output, count, groups, elements, stats, table, status, audit):
         "- `real_audit_details.csv` は今走レースID・馬番・馬名・過去走のExcel行/レースID、現行値、"
         "比較値、数値差（現行−比較）、欠損フラグを記録。文字列・真偽値の差は判定を参照。",
         "- `real_audit_summary.csv` は指標ごとの対象・評価可能・差異・欠損・未検証件数。"
+        "正常除外・正常な履歴なしと理由別件数、要調査・履歴欠落・出走経験未確認も集計する。"
         "発生率の分母は評価可能件数。異なるExcelに同一過去走が載る場合は今走対象単位で数える。",
         "- `feature_audit_values.csv` と `feature_audit_summary.csv` は共通生成、legacy加重入力、"
         "保存済みTARGETの段階別。計算条件は場・芝ダ・距離・馬場・クラスとコード位置を参照。"
@@ -1303,13 +1474,17 @@ def summary(output, count, groups, elements, stats, table, status, audit):
         "",
         "## 条件別回収率",
         "",
+        f"**収益評価 `{revenue_status}`**。",
+        "",
         "`--settled-bets` に、購入条件を適用済みのUTF-8 CSVを指定する。"
         "必須列は `race_id, horse_number, date, venue, surface, distance, class, going, popularity, reliability, bet_type, stake, payout`。"
         "確定払戻ゼロは負け、取消・返還は実額を指定する。単勝・複勝別に投資額・払戻額・利益額（払戻−投資）・払戻総額÷投資総額を集計する。"
         "データ信頼度の区分は明細側で指定する。購入条件の適用や精算は入力側で行う。",
         "",
     ]
-    if stats.empty:
+    if revenue_error:
+        lines.append(f"確定購入明細を利用できないため回収率は未集計。{revenue_error}")
+    elif stats.empty:
         lines.append("対象期間の確定購入明細が無く、実データの条件別回収率は未集計。CSVはヘッダーのみ。")
     else:
         lines.extend(["各棒の1ブロックは約10ポイント（表示上限300%）。", "",
