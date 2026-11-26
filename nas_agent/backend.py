@@ -190,8 +190,8 @@ class Backend:
         env = clean_environment(home)
         env.update(TMPDIR=str(home), TMP=str(home), TEMP=str(home), KEIBA_SCORING_MODEL_VERSION="legacy")
         control()
-        code = self.commands.run([self.config["validation_python"], "-m", "tools.compare_ab_models",
-                                  "--config", str(fixture / "run.json"), "--output", str(output)],
+        code = self.commands.run([self.config["validation_python"], str(AGENT_CODE / "nas_agent/comparison_ab_only.py"),
+                                  str(fixture / "run.json"), str(output)],
                                  cwd=source, env=env, control=control, log=workspace / "execution.log", check=False)
         control()
         self.verify_checkout(source, job["commit_sha"], env)

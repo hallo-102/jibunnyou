@@ -1,13 +1,15 @@
 """Prepare a hash-pinned one-day fixture for the PR #34 comparison."""
 import argparse
-from datetime import date, timedelta
+from datetime import date, datetime
 import json
 from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
+from zoneinfo import ZoneInfo
 
+from nas_agent.schema import timestamp
 from nas_agent.comparison import (
-    CONTROL_FILES, SNAPSHOT_FILES, archive_path, sha256, stage_fixture, validate_rows,
+    AB_MODE, CONTROL_FILES, SNAPSHOT_FILES, archive_path, sha256, stage_fixture, validate_rows,
 )
 
 
@@ -40,18 +42,36 @@ def result_rows(path, finalized, excluded):
     return rows
 
 
+def verify_workbook_stamp(path, proof):
+    """Check the collector's own last-save stamp when used as capture evidence."""
+    from openpyxl import load_workbook
+
+    book = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = book["README"]
+        if sheet["A1"].value != "最終更新":
+            raise ValueError("README!A1 に収集処理の保存時刻ラベルがありません")
+        stamp = datetime.fromisoformat(str(sheet["B1"].value))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=ZoneInfo(proof["timezone"]))
+        if stamp != timestamp(proof["observed_at"]):
+            raise ValueError("README!B1 と取得証跡の時刻が一致しません")
+    finally:
+        book.close()
+
+
 def smoke_settings(day):
     return {
         "schema_version": 1,
         "snapshots": "snapshots.json",
         "results": "results.json",
-        "periods": {stage: [(day + timedelta(days=offset)).isoformat()] * 2
-                    for offset, stage in enumerate(("train", "validation", "forward"))},
-        "optimizer_iterations": dict.fromkeys(("N_ITER_DEFAULT", "N_ITER_PLACE", "N_ITER_PLACE_SURFACE"), 2),
+        "mode": AB_MODE,
+        "methods": ["A", "B"],
+        "periods": {"validation": [day.isoformat(), day.isoformat()]},
     }
 
 
-def prepare(index, settled, output, day):
+def prepare(index, settled, evidence_path, output, day):
     if output.exists():
         raise FileExistsError(output)
     with TemporaryDirectory(dir=output.parent) as temporary:
@@ -63,8 +83,12 @@ def prepare(index, settled, output, day):
         settled_copy = evidence / f"settled{settled.suffix.lower()}"
         shutil.copyfile(index, index_copy)
         shutil.copyfile(settled, settled_copy)
+        proof = evidence / "capture_evidence.json"
+        shutil.copyfile(evidence_path, proof)
         metadata = read_json(index_copy)
         snapshots = metadata["snapshots"]
+        capture_records = read_json(proof)
+        checked_stamps = set()
         copied = {}
         for row in snapshots:
             for key in SNAPSHOT_FILES:
@@ -82,6 +106,13 @@ def prepare(index, settled, output, day):
                 expected = row.get(f"{key}_sha256")
                 if expected is not None and expected != copied[target]:
                     raise ValueError(f"保存時の SHA256 と一致しません: {name}")
+                if key == "workbook":
+                    record = capture_records.get(row["race_id"], {}).get(key, {})
+                    if record.get("source") == "workbook:README!B1":
+                        stamp_key = (target, record["observed_at"], record.get("timezone"))
+                        if stamp_key not in checked_stamps:
+                            verify_workbook_stamp(fixture / target, record)
+                            checked_stamps.add(stamp_key)
                 row[key] = target
                 row[f"{key}_sha256"] = copied[target]
         if settled_copy.suffix == ".xlsx":
@@ -95,10 +126,12 @@ def prepare(index, settled, output, day):
         for filename, data in (("run.json", settings), ("snapshots.json", snapshots), ("results.json", results)):
             (fixture / filename).write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
                                             encoding="utf-8")
-        files = {**copied, **{name: sha256(fixture / name) for name in sorted(CONTROL_FILES)}}
-        files.update({path.relative_to(fixture).as_posix(): sha256(path) for path in sorted(evidence.iterdir())})
+        generated = {name: sha256(fixture / name) for name in sorted(CONTROL_FILES)}
+        originals = {**copied, **{path.relative_to(fixture).as_posix(): sha256(path) for path in sorted(evidence.iterdir())}}
         manifest = fixture / "manifest.json"
-        manifest.write_text(json.dumps({"schema_version": 1, "raceday": day.isoformat(), "files_sha256": files},
+        manifest.write_text(json.dumps({"schema_version": 2, "raceday": day.isoformat(),
+                                       "capture_evidence": proof.relative_to(fixture).as_posix(),
+                                       "original_files_sha256": originals, "generated_files_sha256": generated},
                                        ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         digest = sha256(manifest)
         stage_fixture({"root": fixture, "manifest_sha256": digest}, day.strftime("%Y%m%d"),
@@ -111,10 +144,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--index", required=True, type=Path)
     parser.add_argument("--settled", required=True, type=Path)
+    parser.add_argument("--evidence", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--raceday", type=date.fromisoformat, default=date(2026, 8, 9))
     args = parser.parse_args()
-    print(prepare(args.index, args.settled, args.output, args.raceday))
+    print(prepare(args.index, args.settled, args.evidence, args.output, args.raceday))
 
 
 if __name__ == "__main__":

@@ -27,6 +27,6 @@ workerの `validation_python` に監査スクリプトの依存パッケージ�
 
 [準備ツール](../tools/prepare_ab_comparison.md)でフィクスチャを生成し、管理者が worker 読み取り専用で配置します。[ジョブ例](examples/ab_comparison.job.json)を使い、ポリシーの `job_types` に `ab_comparison`、`approved_commits` に PR #34 の完全 SHA、`inputs` に入力ID・開催日・ルート・マニフェスト SHA を登録します。既存の `inspect` / `approve` で依頼を承認できます。承認済みの初回用 grant も使えます。
 
-実行には監査と同じ `validation_python` と PR #34 の依存（pandas、NumPy、openpyxl、Git、GNU patch）が必要です。比較は既存の環境で実行でき、`allow_build: false` でも実行します。固定コミットの比較処理は PR #31 の履歴を参照するため、このジョブのチェックアウトは履歴付きです。基準モデルには固定コミットに収録された GitHub 側の設定を使用します。
+実行には監査と同じ `validation_python` と PR #34 の依存（pandas、NumPy、openpyxl、Git、GNU patch）が必要です。比較は既存の環境で実行でき、`allow_build: false` でも実行します。固定コミットの比較処理は PR #31 の履歴を参照するため、このジョブのチェックアウトは履歴付きです。エージェントの単日ランナーは固定コミットの比較関数を使い、固定基準重みで A・B を評価します。run 設定は `single_day_ab` を指定します。
 
-worker はマニフェストと各入力の SHA-256 を照合したコピーを実行に用います。比較表、除外理由、実行マニフェストなどは `<validation_root>/<job_id>/output/` に保存します。返却対象は固定ファイル名、最大17件、1ファイル64 MiB、総計128 MiBです。GitHub の状態報告には検証済み成果物のファイル名と SHA-256 が含まれます。終了コード2でマニフェストまで生成された場合は照合失敗として報告し、検証済み成果物を参照できます。
+worker はマニフェストと各入力の SHA-256 を照合したコピーを実行に用います。比較表、除外理由、実行マニフェストなどは `<validation_root>/<job_id>/output/` に保存します。返却対象は固定ファイル名、最大11件、1ファイル64 MiB、総計128 MiBです。GitHub の状態報告には検証済み成果物のファイル名と SHA-256 が含まれます。終了コード2でマニフェストまで生成された場合は照合失敗として報告し、検証済み成果物を参照できます。
