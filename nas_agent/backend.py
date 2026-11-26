@@ -12,8 +12,9 @@ import sys
 import time
 
 from .audit import audit_args, audit_result, verify_fixture
+from .comparison import comparison_result, stage_fixture
 from .files import atomic_json, beneath, isolated
-from .schema import REPOSITORY, Rejected
+from .schema import COMPARISON_SHA, REPOSITORY, Rejected
 
 AGENT_CODE = Path(__file__).resolve().parents[1]
 
@@ -62,7 +63,7 @@ class Backend:
         self.config, self.read_token = config, read_token
         self.commands = commands or Commands()
 
-    def checkout(self, sha, job_dir, control, *, checkout_root=None):
+    def checkout(self, sha, job_dir, control, *, checkout_root=None, full_history=False):
         root = Path(self.config["checkout_root"]) if checkout_root is None else checkout_root
         source = beneath(root, root / sha)
         env = clean_environment(job_dir / "home")
@@ -79,7 +80,8 @@ class Backend:
                 fetch_env.update(GIT_CONFIG_COUNT="3", GIT_CONFIG_KEY_0="credential.helper", GIT_CONFIG_VALUE_0="",
                                  GIT_CONFIG_KEY_1="http.https://github.com/.extraheader", GIT_CONFIG_VALUE_1="Authorization: Basic " + header,
                                  GIT_CONFIG_KEY_2="http.followRedirects", GIT_CONFIG_VALUE_2="false")
-            self.commands.run(["git", "-C", str(source), "-c", "credential.helper=", "-c", "http.followRedirects=false", "fetch", "--depth=1", "origin", sha], cwd=job_dir, env=fetch_env, control=control)
+            depth = [] if full_history else ["--depth=1"]
+            self.commands.run(["git", "-C", str(source), "-c", "credential.helper=", "-c", "http.followRedirects=false", "fetch", *depth, "origin", sha], cwd=job_dir, env=fetch_env, control=control)
             self.commands.run(["git", "-C", str(source), "checkout", "--detach", "FETCH_HEAD"], cwd=job_dir, env=env, control=control)
         self.verify_checkout(source, sha, env)
         return source
@@ -116,6 +118,8 @@ class Backend:
             return {"summary": {"architecture": architecture, "python_version": platform.python_version()}, "artifacts_sha256": {}}
         if job["job_type"] == "full_feature_audit":
             return self.run_audit(job, policy, control)
+        if job["job_type"] == "ab_comparison":
+            return self.run_comparison(job, policy, control)
         if job["job_type"] != "issue16_acceptance":
             raise Rejected("UNSUPPORTED_HANDLER")
         job_dir = beneath(self.config["state_dir"], Path(self.config["state_dir"]) / "jobs" / job["job_id"])
@@ -166,3 +170,29 @@ class Backend:
         self.verify_checkout(source, job["commit_sha"], env)
         verify_fixture(entry)
         return audit_result(output, code, elapsed)
+
+    def run_comparison(self, job, policy, control):
+        if job["commit_sha"] != COMPARISON_SHA:
+            raise Rejected("INVALID_COMPARISON_COMMIT")
+        entry = policy["inputs"][job["input_id"]]
+        root = Path(self.config["validation_root"])
+        workspace = beneath(root, root / job["job_id"])
+        isolated(workspace, [entry["root"], policy["production_root"], AGENT_CODE, self.config["checkout_root"]])
+        workspace.mkdir(mode=0o700, exist_ok=False)
+        home = workspace / "home"
+        home.mkdir()
+        fixture = workspace / "input"
+        hashes = stage_fixture(entry, job["raceday"], fixture, control)
+        source = self.checkout(job["commit_sha"], workspace, control, checkout_root=workspace / "checkout",
+                               full_history=True)
+        output = workspace / "output"
+        output.mkdir()
+        env = clean_environment(home)
+        env.update(TMPDIR=str(home), TMP=str(home), TEMP=str(home), KEIBA_SCORING_MODEL_VERSION="legacy")
+        control()
+        code = self.commands.run([self.config["validation_python"], "-m", "tools.compare_ab_models",
+                                  "--config", str(fixture / "run.json"), "--output", str(output)],
+                                 cwd=source, env=env, control=control, log=workspace / "execution.log", check=False)
+        control()
+        self.verify_checkout(source, job["commit_sha"], env)
+        return comparison_result(output, job["commit_sha"], hashes, code)

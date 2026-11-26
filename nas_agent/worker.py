@@ -126,10 +126,12 @@ class Worker:
                     row = self.state.set(job["job_id"], exc.state, error=exc.code)
                 except (Exception, KeyboardInterrupt) as exc:
                     code = "GITHUB_UNAVAILABLE" if isinstance(exc, Unavailable) else "HANDLER_FAILED"
+                    if job["job_type"] == "ab_comparison" and isinstance(exc, Rejected):
+                        code = str(exc)
                     status = "INTERRUPTED" if isinstance(exc, KeyboardInterrupt) else "FAILED"
                     row = self.state.set(job["job_id"], status, error=code)
                 else:
-                    error = result.get("error_code") if job["job_type"] == "full_feature_audit" else None
+                    error = result.get("error_code") if job["job_type"] in {"full_feature_audit", "ab_comparison"} else None
                     status = "FAILED" if error else "SUCCEEDED"
                     row = self.state.set(job["job_id"], status, error=error, result=result)
                 self.publish(row)
