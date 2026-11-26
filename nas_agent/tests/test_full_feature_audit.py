@@ -9,7 +9,7 @@ import pytest
 from nas_agent.backend import Backend
 from nas_agent.files import atomic_json
 from nas_agent.poller import Poller
-from nas_agent.schema import parse_job, request, utcnow
+from nas_agent.schema import AUDIT_SHA, COMPARISON_SHA, authorized, parse_job, request, utcnow
 from nas_agent.worker import Worker
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -31,7 +31,7 @@ class JobIssue:
     def issues(self):
         return [self.document]
 
-    def issue(self, number):
+    def issue(self, number, *, timeout=None):
         assert number == self.document["number"]
         return self.document
 
@@ -57,7 +57,6 @@ def setup(tmp_path, monkeypatch):
     policy = json.loads((EXAMPLES / "policy.json").read_text())
     policy["production_root"] = str(tmp_path / "production")
     policy["requester_ids"] = [42]
-    policy["approved_commits"].append(job["commit_sha"])
     policy["approved_requests"].append(request(api.document)[1])
     policy["inputs"][job["input_id"]].update(
         root=str(fixture), manifest_sha256=hashlib.sha256(b"{}").hexdigest())
@@ -117,7 +116,9 @@ def test_audit_runs_fixed_command_and_reports_summary(setup, monkeypatch, status
             assert cwd == source
             assert log == workspace / "execution.log"
             assert check is False
-            (output / "run_manifest.json").write_text(json.dumps({"status": status, "data_dir": str(fixture)}))
+            (output / "run_manifest.json").write_text(json.dumps({
+                "status": status, "revenue_evaluation_status": "completed", "data_dir": str(fixture),
+            }))
             (output / "real_audit_details.csv").write_text(
                 "date,race_id,horse_number,horse,file,history_row,metric\n"
                 "2026-08-09,123,1,private-horse,book.xlsx,2,date_parsing\n"
@@ -146,6 +147,7 @@ def test_audit_runs_fixed_command_and_reports_summary(setup, monkeypatch, status
     assert report["error_code"] == error
     summary = report["summary"]
     assert summary["audit_status"] == status
+    assert summary["revenue_evaluation_status"] == "completed"
     assert summary["exit_code"] == code
     assert summary["elapsed_seconds"] >= 0
     if error != "AUDIT_EXIT_STATUS_MISMATCH":
@@ -155,3 +157,31 @@ def test_audit_runs_fixed_command_and_reports_summary(setup, monkeypatch, status
         assert summary["requirements"]["D-12"]["issue_pct"] is None
     assert str(fixture) not in json.dumps(report)
     assert "private-horse" not in json.dumps(report)
+
+
+@pytest.mark.parametrize("commit,allowed", [
+    ("83052a799cde0313eed0a17c0f2fc2dd056bc44a", True),
+    ("26128923d8c6243466976c72feaa3bfafc0c92f5", False),
+])
+def test_audit_approval_requires_current_commit(setup, commit, allowed):
+    job, api, _, policy, _, _ = setup
+    api.document["body"] = json.dumps({**job, "commit_sha": commit})
+    candidate, request_hash = request(api.document)
+    policy["approved_commits"] = [commit]
+    policy["approved_requests"] = [request_hash]
+    assert authorized(policy, candidate, request_hash, api.document["user"]["id"]) is allowed
+
+
+def test_fixed_shas_match_examples_and_documentation():
+    pins = {"full_feature_audit": "83052a799cde0313eed0a17c0f2fc2dd056bc44a",
+            "ab_comparison": "31a43fa9aa1d018f78de679d3bc17886f22339dd"}
+    assert {"full_feature_audit": AUDIT_SHA, "ab_comparison": COMPARISON_SHA} == pins
+    policy = json.loads((EXAMPLES / "policy.json").read_text())
+    documentation = (EXAMPLES.parent / "README.md").read_text()
+    for name, commit in pins.items():
+        job = parse_job((EXAMPLES / f"{name}.job.json").read_text())
+        assert job["commit_sha"] == commit
+        assert commit in policy["approved_commits"]
+        assert name in policy["job_types"]
+        assert policy["inputs"][job["input_id"]]["raceday"] == job["raceday"]
+        assert commit in documentation

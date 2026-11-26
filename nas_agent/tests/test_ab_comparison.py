@@ -8,7 +8,7 @@ import openpyxl
 import pytest
 
 from nas_agent.backend import AGENT_CODE, Backend, Commands
-from nas_agent.comparison import AB_MODE, sha256
+from nas_agent.comparison import AB_MODE, sha256, stage_fixture
 from nas_agent.files import atomic_json
 from nas_agent.poller import Poller
 from nas_agent.schema import COMPARISON_SHA, Rejected, authorized, parse_job, request, utcnow
@@ -108,8 +108,6 @@ def comparison_job(tmp_path, monkeypatch):
     policy = json.loads((EXAMPLES / "policy.json").read_text())
     # この試験の実ディレクトリだけを使い、NAS用のサンプルパスを持ち込まない。
     policy.update(production_root=str(tmp_path / "production"), requester_ids=[42], allow_build=False, inputs={})
-    policy["job_types"].append("ab_comparison")
-    policy["approved_commits"].append(COMPARISON_SHA)
     policy["approved_requests"].append(request(api.document)[1])
     policy["inputs"][job["input_id"]] = {
         "raceday": job["raceday"], "root": str(fixture), "manifest_sha256": digest,
@@ -167,7 +165,8 @@ def test_single_day_run_rejects_cd_even_with_matching_manifest(comparison_job, m
 
 
 @pytest.mark.parametrize(("commit", "expected"), [
-    ("a40fd7f899385913274d0e64235aba2a46e1054b", True),
+    ("31a43fa9aa1d018f78de679d3bc17886f22339dd", True),
+    ("a40fd7f899385913274d0e64235aba2a46e1054b", False),
     ("ee79e825cd1669aa3428ada70a28cbafb43d9f9f", False),
 ])
 def test_comparison_approval_requires_current_commit(comparison_job, commit, expected):
@@ -209,7 +208,7 @@ def test_comparison_artifacts(comparison_job, monkeypatch, case):
                 "fixture_manifest_sha256": "manifest.json",
             }.items()}
             hashes = {path.name: sha256(path) for path in output.iterdir()}
-            atomic_json(output / "manifest.json", {"mode": AB_MODE, "code_sha": COMPARISON_SHA, "inputs": inputs, "output_sha256": hashes})
+            atomic_json(output / "manifest.json", {"mode": AB_MODE, "evaluation_mode": "formal", "code_sha": COMPARISON_SHA, "inputs": inputs, "output_sha256": hashes})
             if case == "oversize":
                 monkeypatch.setattr("nas_agent.comparison.MAX_ARTIFACT_BYTES", 1)
             if case == "output_sha":
@@ -235,9 +234,61 @@ def test_comparison_artifacts(comparison_job, monkeypatch, case):
     )
 
 
-@pytest.mark.skipif(os.getenv("JIBUNNYOU_AB_INTEGRATION") != "1", reason="requires a local copy of PR #34 and its dependencies")
-def test_fixed_comparator_with_synthetic_workbooks(comparison_job):
+def configure_fixture(data, manifest_format, mode, snapshot_grade, result_grade):
+    job, _, _, policy, fixture = data
+    run_path, snapshots_path, results_path = (fixture / name for name in ("run.json", "snapshots.json", "results.json"))
+    run = json.loads(run_path.read_text())
+    run["schema_version"] = 1 if manifest_format == "nas" else manifest_format
+    run["evaluation_mode"] = mode
+    atomic_json(run_path, run)
+    snapshots = json.loads(snapshots_path.read_text())
+    if snapshot_grade is not None:
+        snapshots[0]["input_evidence_grade"] = snapshot_grade
+    atomic_json(snapshots_path, snapshots)
+    results = json.loads(results_path.read_text())
+    if result_grade != "A":
+        result = results[0]
+        del result["finalized_at"]
+        result.update(evidence_grade=result_grade, race_date="2026-08-09", evidence_source="synthetic")
+        if result_grade == "B":
+            result["available_by_date"] = "2026-08-10"
+        if result_grade == "C":
+            result["jra_official_result"] = {key: result[key] for key in ("race_id", "race_date", "finish_top3", "payouts")}
+    atomic_json(results_path, results)
+    manifest_path = fixture / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["generated_files_sha256"] = {path.name: sha256(path) for path in (run_path, snapshots_path, results_path)}
+    if manifest_format != "nas":
+        manifest = {"schema_version": manifest_format,
+                    "files_sha256": {**manifest["original_files_sha256"], **manifest["generated_files_sha256"]}}
+    atomic_json(manifest_path, manifest)
+    policy["inputs"][job["input_id"]]["manifest_sha256"] = sha256(manifest_path)
+
+
+@pytest.mark.parametrize("manifest_format", ["nas", 1, 2])
+def test_stage_accepts_legacy_and_new_manifests(comparison_job, tmp_path, manifest_format):
+    job, _, _, policy, fixture = comparison_job
+    configure_fixture(comparison_job, manifest_format, "formal", "A", "B")
+    staged = tmp_path / "staged"
+    entry = policy["inputs"][job["input_id"]]
+    hashes = stage_fixture(entry, job["raceday"], staged, lambda: None)
+    assert hashes == {name: sha256(fixture / name) for name in ("manifest.json", "run.json", "snapshots.json", "results.json")}
+    assert (staged / "results.json").read_bytes() == (fixture / "results.json").read_bytes()
+
+
+@pytest.mark.skipif(os.getenv("JIBUNNYOU_AB_INTEGRATION") != "1", reason="requires a local copy of PR #40 and its dependencies")
+@pytest.mark.parametrize("layout,mode,snapshot_grade,result_grade,loaded", [
+    ("nas", "formal", None, "A", True),
+    (2, "formal", "A", "B", True),
+    (2, "formal", "A", "D", True),
+    (2, "reference", "B", "C", True),
+    (2, "formal", "B", "C", False),
+    (2, "reference", None, "C", False),
+])
+def test_fixed_comparator_with_synthetic_workbooks(comparison_job, layout, mode, snapshot_grade, result_grade, loaded):
     job, _, config, _, _ = comparison_job
+    configure_fixture(comparison_job, layout, mode, snapshot_grade, result_grade)
+
     class LocalFetch(Commands):
         def run(self, args, **kwargs):
             if args[0] == "git" and args[-3:] == ["fetch", "origin", COMPARISON_SHA]:
@@ -247,13 +298,28 @@ def test_fixed_comparator_with_synthetic_workbooks(comparison_job):
     report = execute(comparison_job, Backend(config, commands=LocalFetch()))
     workspace = Path(config["validation_root"]) / job["job_id"]
     log = workspace / "execution.log"
-    assert report["status"] == "SUCCEEDED", (report, log.read_text() if log.exists() else "")
+    assert report["status"] == ("SUCCEEDED" if loaded else "FAILED"), (report, log.read_text() if log.exists() else "")
+    assert report["summary"]["evaluation_mode"] == mode
     assert len(report["artifacts_sha256"]) == 11
     assert not any(name.startswith(("optimizer", "weights")) for name in report["artifacts_sha256"])
     output = workspace / "output"
-    comparison = json.loads((output / "comparison.json").read_text())
-    assert {row["method"] for row in comparison} == {"A", "B"}
-    assert all(row["races"] == 1 for row in comparison)
+    if mode == "reference":
+        assert {path.name for path in output.iterdir()} == {"reference"}
+        output /= "reference"
     manifest = json.loads((output / "manifest.json").read_text())
-    assert manifest["coverage"]["validation"]["loaded_races"] == 1
+    assert manifest["coverage"]["validation"]["loaded_races"] == int(loaded)
     assert manifest["training"] == "not_run"
+    assert manifest["validation_selection"]["status"] == ("disabled_single_day" if mode == "formal" else "disabled_reference")
+    races = json.loads((output / "races.json").read_text())
+    if loaded:
+        assert {row["method"] for row in races} == {"A", "B"}
+        assert {row["evaluation_mode"] for row in races} == {mode}
+        assert {row["result_evidence_grade"] for row in races} == {None if result_grade == "D" else result_grade}
+        if result_grade == "D":
+            assert manifest["coverage"]["validation"]["missing"]["result_evidence_grade_D"] == 1
+        else:
+            assert "missing_result" not in manifest["coverage"]["validation"]["missing"]
+    else:
+        assert races == []
+        grade = snapshot_grade or "C"
+        assert manifest["coverage"]["validation"]["missing"][f"input_evidence_grade_{grade}"] == 1

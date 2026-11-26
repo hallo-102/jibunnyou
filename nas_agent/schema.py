@@ -8,7 +8,9 @@ import re
 
 REPOSITORY = "hallo-102/jibunnyou"
 PR17_SHA = "3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92"
-COMPARISON_SHA = "a40fd7f899385913274d0e64235aba2a46e1054b"
+AUDIT_SHA = "83052a799cde0313eed0a17c0f2fc2dd056bc44a"
+COMPARISON_SHA = "31a43fa9aa1d018f78de679d3bc17886f22339dd"
+FIXED_JOB_COMMITS = {"full_feature_audit": AUDIT_SHA, "ab_comparison": COMPARISON_SHA}
 FIELDS = {"schema_version", "job_id", "job_type", "commit_sha", "raceday", "input_id", "expires_at", "scope"}
 TYPES = {"healthcheck", "issue16_acceptance", "full_feature_audit", "ab_comparison", "checkpoint_smoke"}
 RESUME_FIELDS = {"resume_from", "checkpoint_sha256"}
@@ -112,7 +114,8 @@ def authorized(policy, job, request_hash, author_id, *, edited=False):
     """ラベルは参照しない。ローカルの固定範囲と、個別承認/初回用grantだけを使う。"""
     if author_id not in policy["requester_ids"] or job["job_type"] not in policy["job_types"] or job["commit_sha"] not in policy["approved_commits"]:
         return False
-    if job["job_type"] == "ab_comparison" and job["commit_sha"] != COMPARISON_SHA:
+    fixed = FIXED_JOB_COMMITS.get(job["job_type"])
+    if fixed and job["commit_sha"] != fixed:
         return False
     if job["job_type"] in {"issue16_acceptance", "full_feature_audit", "ab_comparison"}:
         entry = policy["inputs"].get(job["input_id"])

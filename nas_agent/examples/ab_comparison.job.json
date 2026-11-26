@@ -2,7 +2,7 @@
   "schema_version": 1,
   "job_id": "ab_comparison_20260809_01",
   "job_type": "ab_comparison",
-  "commit_sha": "a40fd7f899385913274d0e64235aba2a46e1054b",
+  "commit_sha": "31a43fa9aa1d018f78de679d3bc17886f22339dd",
   "raceday": "20260809",
   "input_id": "ab_fixture_20260809",
   "expires_at": "2026-11-28T23:59:59+09:00",
