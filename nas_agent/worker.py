@@ -112,7 +112,36 @@ class Worker:
                 live = self.github.issue(number)
                 if live["state"] == "closed" or request(live)[1] != request_hash:
                     continue
+
+                def check_current_approval(*, running):
+                    status = "INTERRUPTED" if running else "WAIT_APPROVAL"
+                    try:
+                        current_policy = load_policy(self.config["policy_file"])
+                    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                        raise Abort(status, "LOCAL_APPROVAL_UNVERIFIABLE") from exc
+                    if job["job_type"] in {"issue16_acceptance", "full_feature_audit", "ab_comparison"}:
+                        input_id = job["input_id"]
+                        if current_policy["inputs"].get(input_id) != policy["inputs"][input_id]:
+                            raise Abort("INTERRUPTED", "APPROVED_INPUT_CHANGED")
+                    if not authorized(current_policy, job, request_hash, live["user"]["id"], edited=bool(row["edited"])):
+                        code = "LOCAL_APPROVAL_REVOKED" if running else "LOCAL_APPROVAL_REQUIRED"
+                        raise Abort(status, code)
+                    if job["job_type"] == "issue16_acceptance":
+                        if not current_policy.get("allow_build", False):
+                            raise Abort(status, "BUILD_REVIEW_REQUIRED")
+                        window = current_policy.get("execution_window_jst")
+                        now = utcnow().astimezone(timezone(timedelta(hours=9))).strftime("%H:%M")
+                        if not window or not window["start"] <= now < window["end"]:
+                            raise Abort(status, "APPROVED_WINDOW_ENDED")
+
                 last_good = time.monotonic()
+                try:
+                    check_current_approval(running=False)
+                    if timestamp(job["expires_at"]) <= utcnow():
+                        raise Abort("CANCELLED", "EXPIRED")
+                except Abort as exc:
+                    self.publish(self.state.set(job["job_id"], exc.state, error=exc.code))
+                    continue
                 row = self.state.set(job["job_id"], "RUNNING")
                 self.publish(row)
                 deadline = last_good + policy["limits"]["timeout_seconds"]
@@ -198,6 +227,8 @@ class Worker:
                     else:
                         result = self.backend.run(job, policy, control)
                     recheck(final=True)
+                    check_current_approval(running=True)
+                    check_local()
                 except Abort as exc:
                     row = self.state.set(job["job_id"], exc.state, error=exc.code)
                 except SmokeInterrupted:
