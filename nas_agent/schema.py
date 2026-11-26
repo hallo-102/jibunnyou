@@ -10,7 +10,9 @@ REPOSITORY = "hallo-102/jibunnyou"
 PR17_SHA = "3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92"
 COMPARISON_SHA = "a40fd7f899385913274d0e64235aba2a46e1054b"
 FIELDS = {"schema_version", "job_id", "job_type", "commit_sha", "raceday", "input_id", "expires_at", "scope"}
-TYPES = {"healthcheck", "issue16_acceptance", "full_feature_audit", "ab_comparison"}
+TYPES = {"healthcheck", "issue16_acceptance", "full_feature_audit", "ab_comparison", "checkpoint_smoke"}
+RESUME_FIELDS = {"resume_from", "checkpoint_sha256"}
+SMOKE_INTERRUPT_FIELDS = {"interrupt_after_checkpoint"}
 STATES = {"QUEUED", "WAIT_APPROVAL", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"}
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"}
 
@@ -64,7 +66,8 @@ def parse_job(body):
         job = json.loads(body, object_pairs_hook=_unique_pairs, parse_constant=lambda _: (_ for _ in ()).throw(Rejected("INVALID_JSON")))
     except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
         raise Rejected("INVALID_JSON") from exc
-    if not isinstance(job, dict) or set(job) != FIELDS or type(job["schema_version"]) is not int or job["schema_version"] != 1:
+    if (not isinstance(job, dict) or set(job) not in (FIELDS, FIELDS | RESUME_FIELDS, FIELDS | SMOKE_INTERRUPT_FIELDS)
+            or type(job["schema_version"]) is not int or job["schema_version"] != 1):
         raise Rejected("INVALID_SCHEMA")
     for field in ("job_id", "input_id"):
         if not isinstance(job[field], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", job[field]):
@@ -73,6 +76,17 @@ def parse_job(body):
         raise Rejected("INVALID_JOB_TYPE_OR_SCOPE")
     if not isinstance(job["commit_sha"], str) or not re.fullmatch(r"[0-9a-f]{40}", job["commit_sha"]):
         raise Rejected("INVALID_COMMIT")
+    if job["job_type"] == "checkpoint_smoke" and job["input_id"] != "synthetic-v1":
+        raise Rejected("INVALID_SYNTHETIC_INPUT")
+    if "interrupt_after_checkpoint" in job and (job["job_type"] != "checkpoint_smoke"
+                                                 or job["interrupt_after_checkpoint"] is not True):
+        raise Rejected("INVALID_SMOKE_INTERRUPTION")
+    if "resume_from" in job:
+        previous, checksum = job["resume_from"], job["checkpoint_sha256"]
+        if (job["job_type"] != "checkpoint_smoke" or not isinstance(previous, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", previous) or previous == job["job_id"]
+                or not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum)):
+            raise Rejected("INVALID_RESUME_REQUEST")
     if not isinstance(job["raceday"], str) or not re.fullmatch(r"\d{8}", job["raceday"]):
         raise Rejected("INVALID_DATE")
     try:
@@ -106,7 +120,7 @@ def authorized(policy, job, request_hash, author_id, *, edited=False):
             return False
     if request_hash in policy["approved_requests"]:
         return True
-    if edited:
+    if edited or job["job_type"] == "checkpoint_smoke":
         return False  # 同一Issueの編集を広いgrantで再承認しない。
     return any(g["job_type"] == job["job_type"] and g["commit_sha"] == job["commit_sha"]
                and g["input_id"] == job["input_id"] and g["from_date"] <= job["raceday"] <= g["through_date"]

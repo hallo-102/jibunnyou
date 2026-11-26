@@ -106,7 +106,8 @@ def comparison_job(tmp_path, monkeypatch):
                     "state": "open", "user": {"id": 42, "login": "test-user"}})
     fixture, digest = make_fixture(tmp_path)
     policy = json.loads((EXAMPLES / "policy.json").read_text())
-    policy.update(production_root=str(tmp_path / "production"), requester_ids=[42], allow_build=False)
+    # この試験の実ディレクトリだけを使い、NAS用のサンプルパスを持ち込まない。
+    policy.update(production_root=str(tmp_path / "production"), requester_ids=[42], allow_build=False, inputs={})
     policy["job_types"].append("ab_comparison")
     policy["approved_commits"].append(COMPARISON_SHA)
     policy["approved_requests"].append(request(api.document)[1])

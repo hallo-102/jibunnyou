@@ -1,6 +1,7 @@
 """模擬GitHub→承認→固定handler→永続状態/報告の最小受入。NASへは接続しない。"""
 from copy import deepcopy
 from datetime import timedelta
+import hashlib
 import io
 import json
 import os
@@ -275,6 +276,7 @@ def test_api_uses_json_and_never_exposes_http_error_body(tmp_path):
     with pytest.raises(Unavailable) as result:
         api.api(f"/repos/{REPOSITORY}/issues/31/comments", method="POST", payload={"body": "status"})
     assert "fixture-secret" not in str(result.value)
+    assert result.value.diagnostic("report_comment")["http_status"] == 401
 
 
 def test_power_loss_is_interrupted_not_reexecuted(setup):
@@ -307,10 +309,145 @@ def test_lost_report_response_retries_without_reexecution_or_duplicate_comment(s
     api.lose_post_response = True
     with pytest.raises(Unavailable):
         poller.cycle()
+    assert json.loads(poller.state.meta("last_report_failure"))["phase"] == "report_comment"
     Worker(config, api, backend).cycle()
     poller.cycle()
     assert len(backend.calls) == 1 and len(api.comments) == 1
     assert worker.state.get(job["job_id"])["status"] == "SUCCEEDED"
+
+
+def test_checkpoint_job_interrupt_resume_and_export(setup, tmp_path):
+    from nas_agent.checkpoint import export_smoke
+
+    config, poll_config, api, job, policy_path = setup
+    job.update(job_id="codex-smoke-interrupt", job_type="checkpoint_smoke",
+               commit_sha=config["agent_commit"], input_id="synthetic-v1", interrupt_after_checkpoint=True)
+    policy = private_json(policy_path)
+    policy["job_types"].append("checkpoint_smoke")
+    policy["approved_commits"] = sorted(set(policy["approved_commits"]) | {config["agent_commit"]})
+    policy["grants"] = [{"job_type": "checkpoint_smoke", "commit_sha": job["commit_sha"], "input_id": job["input_id"],
+                         "from_date": job["raceday"], "through_date": job["raceday"], "expires_at": job["expires_at"]}]
+    atomic_json(policy_path, policy, mode=0o600)
+    api.add(job)
+    poller, worker = Poller(poll_config, api), Worker(config, api, Backend(config))
+    poller.cycle()
+    worker.cycle()
+    assert worker.state.get(job["job_id"])["status"] == "WAIT_APPROVAL"
+    approve(config, api)
+    worker.cycle()
+    assert worker.state.get(job["job_id"])["status"] == "INTERRUPTED"
+    workspace = Path(config["state_dir"]) / "jobs"
+    checkpoint = (workspace / job["job_id"] / "checkpoint.json").read_bytes()
+    partial = json.loads(checkpoint)
+    assert partial["completed_count"] == 384 and partial["issue_number"] == 31 and partial["started_at"]
+
+    resumed = {key: value for key, value in job.items() if key != "interrupt_after_checkpoint"}
+    resumed.update(job_id="codex-smoke-resume", resume_from=job["job_id"],
+                   checkpoint_sha256=hashlib.sha256(checkpoint).hexdigest())
+    invalid = dict(resumed, job_id="codex-smoke-rejected", checkpoint_sha256="0" * 64)
+    changed = dict(resumed, job_id="codex-smoke-changed", raceday="20260810")
+    baseline = {key: value for key, value in resumed.items() if key not in {"resume_from", "checkpoint_sha256"}}
+    baseline["job_id"] = "codex-smoke-baseline"
+    api.add(resumed, number=32)
+    api.add(invalid, number=33)
+    api.add(baseline, number=34)
+    api.add(changed, number=35)
+    poller.cycle()
+    worker.cycle()
+    assert worker.state.get(resumed["job_id"])["status"] == "WAIT_APPROVAL"
+    for number in (32, 33, 34, 35):
+        approve(config, api, number)
+    worker.cycle()
+    assert worker.state.get(resumed["job_id"])["status"] == "SUCCEEDED"
+    assert worker.state.get(invalid["job_id"])["error_code"] == "RESUME_CHECKPOINT_HASH_MISMATCH"
+    assert worker.state.get(changed["job_id"])["error_code"] == "RESUME_CONDITIONS_CHANGED"
+    result = (workspace / resumed["job_id"] / "result.json").read_bytes()
+    assert result == (workspace / baseline["job_id"] / "result.json").read_bytes()
+    assert json.loads(result) == {"count": 1024, "sum_squares": sum(i * i for i in range(1, 1025))}
+    assert (workspace / resumed["job_id"] / "execution.log").read_text().splitlines()[0] == "start completed=384 total=1024"
+
+    exported = export_smoke(config, worker.state, resumed["job_id"], tmp_path)
+    for line in (exported / "SHA256SUMS").read_text().splitlines():
+        checksum, name = line.split("  ")
+        assert hashlib.sha256((exported / name).read_bytes()).hexdigest() == checksum
+    assert {path.name for path in exported.iterdir()} == {
+        "SHA256SUMS", "result.json", "checkpoint.json", "execution.log", "nas-agent-status.json"}
+
+
+def test_outbox_io_failure_retains_result_and_republishes(setup, monkeypatch):
+    config, poll_config, api, job, _ = setup
+    approve(config, api)
+    poller = Poller(poll_config, api)
+    poller.cycle()
+    backend = CountingBackend(config)
+    worker = Worker(config, api, backend)
+
+    def unavailable(*args, **kwargs):
+        raise OSError("simulated outbox failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("nas_agent.worker.atomic_json", unavailable)
+        worker.cycle()
+    assert worker.state.get(job["job_id"])["status"] == "SUCCEEDED"
+    assert worker.state.meta("outbox_pending:31") == "1"
+    worker.cycle()
+    poller.cycle()
+    assert len(backend.calls) == 1 and len(api.comments) == 1
+    assert worker.state.meta("outbox_pending:31") == "0"
+
+
+def test_control_api_failure_still_stops_running_subprocess(setup, tmp_path, monkeypatch):
+    config, poll_config, api, job, _ = setup
+    approve(config, api)
+    Poller(poll_config, api).cycle()
+    marker = tmp_path / "child-completed"
+    original_issue = api.issue
+    failing = False
+
+    def issue(number):
+        if failing:
+            raise Unavailable("GITHUB_RATE_LIMIT", http_status=429, rate_limited=True)
+        return original_issue(number)
+
+    def action(job, policy, control):
+        nonlocal failing
+        failing = True
+        return Commands().run([sys.executable, "-c", "import sys,time;time.sleep(2);open(sys.argv[1],'w').close()", str(marker)],
+                              cwd=tmp_path, env=clean_environment(tmp_path), control=control)
+
+    monkeypatch.setattr(api, "issue", issue)
+    worker = Worker(config, api, CountingBackend(config, action))
+    worker.cycle()
+    assert worker.state.get(job["job_id"])["error_code"] == "GITHUB_UNAVAILABLE"
+    details = json.loads(worker.state.meta("github_failure:" + job["job_id"]))
+    assert details["phase"] == "running_issue_recheck" and details["http_status"] == 429 and details["rate_limited"]
+    assert not marker.exists()
+
+
+def test_comment_failure_during_calculation_keeps_running_and_retries(setup, monkeypatch):
+    config, poll_config, api, job, _ = setup
+    approve(config, api)
+    poller = Poller(poll_config, api)
+    poller.cycle()
+
+    def action(job, policy, control):
+        with monkeypatch.context() as patch:
+            def report_unavailable(*args):
+                raise Unavailable(transport="timeout")
+
+            patch.setattr(api, "report", report_unavailable)
+            with pytest.raises(Unavailable):
+                poller.cycle()
+            assert json.loads(poller.state.meta("last_report_failure"))["transport"] == "timeout"
+        return Backend(config).run(job, policy, control)
+
+    backend = CountingBackend(config, action)
+    worker = Worker(config, api, backend)
+    worker.cycle()
+    poller.cycle()
+    assert worker.state.get(job["job_id"])["status"] == "SUCCEEDED"
+    assert len(backend.calls) == 1 and len(api.comments) == 1
+    assert '"status": "SUCCEEDED"' in api.comments[0]["body"]
 
 
 def test_command_timeout_stops_subprocess(tmp_path):

@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 
 from .files import atomic_json, beneath, single_worker, spool_json, spool_page
+from .github import Unavailable
 from .report import comment
 from .schema import Rejected, digest, request, utcnow
 from .state import State
@@ -49,5 +50,10 @@ class Poller:
                     continue
                 if payload["status"] == "RUNNING" and previous.get("status") == "RUNNING" and time.time() - previous.get("sent_at", 0) < 300:
                     continue
-                comment_id = self.github.report(payload["issue_number"], marker, body, previous.get("comment_id"))
+                try:
+                    comment_id = self.github.report(payload["issue_number"], marker, body, previous.get("comment_id"))
+                except Unavailable as exc:
+                    details = dict(exc.diagnostic("report_comment"), issue_number=payload["issue_number"])
+                    self.state.meta("last_report_failure", json.dumps(details))
+                    raise  # outboxと未送信のrevisionは保持し、次回送信時に再利用する。
                 self.state.meta("report:" + key, json.dumps({"comment_id": comment_id, "revision": revision, "status": payload["status"], "sent_at": time.time()}))
