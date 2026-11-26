@@ -2,7 +2,7 @@
 import json
 import re
 
-from .audit import EXIT_CODES, REQUIREMENTS
+from .audit import EXIT_CODES, REQUIREMENTS, REVENUE_STATUSES
 from .schema import STATES, utcnow
 
 SUMMARY = {"architecture", "python_version", "acceptance", "protected_unchanged", "ready_verified", "input_match",
@@ -15,6 +15,9 @@ def audit_summary(source):
     status = source.get("audit_status")
     if isinstance(status, str) and (status in EXIT_CODES or status == "invalid_manifest"):
         summary["audit_status"] = status
+    revenue_status = source.get("revenue_evaluation_status")
+    if isinstance(revenue_status, str) and revenue_status in REVENUE_STATUSES:
+        summary["revenue_evaluation_status"] = revenue_status
     for key in ("races", "horses", "past_runs", "exit_code"):
         value = source.get(key)
         minimum = -255 if key == "exit_code" else 0
@@ -45,6 +48,8 @@ def standard_summary(source):
             continue
         if type(value) is bool or (type(value) is int and 0 <= value <= 1000000) or (isinstance(value, str) and (value in WORDS or (key == "python_version" and re.fullmatch(r"\d+\.\d+\.\d+", value)))):
             summary[key] = value
+    if source.get("evaluation_mode") in ("formal", "reference"):
+        summary["evaluation_mode"] = source["evaluation_mode"]
     return summary
 
 

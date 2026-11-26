@@ -3,8 +3,11 @@
   "repository": "hallo-102/jibunnyou",
   "production_root": "/volume1/docker/keiba_yosou_2026_nas",
   "requester_ids": [130852980],
-  "job_types": ["healthcheck", "issue16_acceptance", "full_feature_audit"],
-  "approved_commits": ["3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92"],
+  "job_types": ["healthcheck", "issue16_acceptance", "full_feature_audit", "ab_comparison"],
+  "approved_commits": ["3ae9ce0dc5eaf41c2aa5d26c6e62fcef8dc26b92",
+    "83052a799cde0313eed0a17c0f2fc2dd056bc44a",
+    "31a43fa9aa1d018f78de679d3bc17886f22339dd"
+  ],
   "approved_requests": [],
   "grants": [],
   "allow_build": false,
@@ -17,6 +20,11 @@
       "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "reference_root": null,
       "reference_manifest_sha256": null
+    },
+    "ab_fixture_20260809": {
+      "root": "/volume1/keiba_nas_agent_inputs/ab_20260809",
+      "raceday": "20260809",
+      "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   }
 }

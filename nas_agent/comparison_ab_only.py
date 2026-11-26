@@ -1,4 +1,4 @@
-"""Run the single-day A/B evaluation with the fixed PR #34 implementation."""
+"""Run the single-day A/B evaluation with the fixed PR #40 implementation."""
 from collections import Counter
 from pathlib import Path
 import sys
@@ -6,7 +6,7 @@ import sys
 
 def run(config_path, output):
     # This entry point is in the installed agent. All comparison/model imports
-    # come from the independently verified PR #34 checkout (the working directory).
+    # come from the independently verified PR #40 checkout (the working directory).
     source = Path.cwd()
     sys.path.insert(0, str(source))
     from tools import compare_ab_models as comparison
@@ -28,9 +28,15 @@ def run(config_path, output):
     result_rows = comparison.read_json(results_path)
     builders, diagnostics = comparison.diagnostic_builders(source)
     baselines = comparison.baselines_from(config, config_path.parent)
-    races, counts, missing, excluded = comparison.load_races(config_path.parent, snapshots, periods, builders)
-    results = comparison.read_results(result_rows, races)
-    coverage = comparison.coverage_counts(races, results, periods, missing, excluded)
+    evaluation_mode = config.get("evaluation_mode", "formal")
+    legacy = config["schema_version"] == 1
+    races, counts, missing, excluded = comparison.load_races(
+        config_path.parent, snapshots, periods, builders, legacy=legacy, reference=evaluation_mode == "reference",
+    )
+    result_evidence = {}
+    starts = {row["race_id"]: comparison.timestamp(row["start_at"]) for row in snapshots}
+    results = comparison.read_results(result_rows, races, result_evidence, starts=starts)
+    coverage = comparison.coverage_counts(races, results, periods, missing, excluded, result_evidence)
     methods = {method: comparison.METHODS[method] for method in config["methods"]}
     scored, diagnostic_rows = comparison.evaluate(
         races, results, baselines, {}, methods, (unit, box_size), diagnostics, assessment,
@@ -46,11 +52,15 @@ def run(config_path, output):
         ("diagnostics", diagnostic_rows),
         ("exclusions", excluded),
     ):
+        rows = [{**row, "evaluation_mode": evaluation_mode} for row in rows]
         comparison.save_json(output / f"{name}.json", rows)
         comparison.save_csv(output / f"{name}.csv", rows)
     manifest = {
         "schema_version": 1,
         "mode": config["mode"],
+        "evaluation_mode": evaluation_mode,
+        "input_schema_version": config["schema_version"],
+        "validation_selection": {"status": "disabled_reference" if evaluation_mode == "reference" else "disabled_single_day"},
         "code_sha": comparison.git(source, "rev-parse", "HEAD").decode().strip(),
         "runner_sha256": comparison.sha256_file(Path(__file__)),
         "methods": {label: {method: model for method in methods}
@@ -63,6 +73,8 @@ def run(config_path, output):
             "results_sha256": comparison.sha256_file(results_path),
             "fixture_manifest_sha256": comparison.sha256_file(config_path.parent / "manifest.json"),
             "snapshot_counts": dict(counts),
+            "snapshot_evidence_grades": {row["race_id"]: comparison.snapshot_grade(row, legacy=legacy) for row in snapshots},
+            "result_evidence": result_evidence,
         },
         "coverage": coverage,
         "purchase": {"filter_policy": assessment.policy_version(assessment.load_policy()),

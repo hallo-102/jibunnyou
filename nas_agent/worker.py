@@ -10,10 +10,14 @@ import time
 from .config import load_policy
 from .checkpoint import SmokeInterrupted, run_smoke
 from .files import atomic_json, beneath, single_worker, spool_json, spool_page
-from .github import Unavailable
+from .github import REQUEST_TIMEOUT, Unavailable
 from .report import record
 from .schema import TERMINAL, Rejected, authorized, request, timestamp, utcnow
 from .state import State
+
+OUTAGE_LIMIT = 300
+AUTHENTICATED_INTERVAL = 60
+ANONYMOUS_INTERVAL = 120
 
 
 class Abort(RuntimeError):
@@ -108,12 +112,14 @@ class Worker:
                 live = self.github.issue(number)
                 if live["state"] == "closed" or request(live)[1] != request_hash:
                     continue
+                last_good = time.monotonic()
                 row = self.state.set(job["job_id"], "RUNNING")
                 self.publish(row)
-                last_check = [0.0]
-                deadline = time.monotonic() + policy["limits"]["timeout_seconds"]
+                deadline = last_good + policy["limits"]["timeout_seconds"]
+                interval = AUTHENTICATED_INTERVAL if getattr(self.github, "token", None) else ANONYMOUS_INTERVAL
+                next_check = last_good + interval
 
-                def control():
+                def check_local():
                     if self.stop_requested():
                         raise Abort("INTERRUPTED", "WORKER_STOP_REQUESTED")
                     if timestamp(job["expires_at"]) <= utcnow():
@@ -122,27 +128,76 @@ class Worker:
                         raise Abort("INTERRUPTED", "APPROVED_WINDOW_ENDED")
                     if time.monotonic() >= deadline:
                         raise Abort("FAILED", "TIMEOUT")
-                    if time.monotonic() - last_check[0] >= 15:
+
+                def record_failure(exc, phase):
+                    details = dict(exc.diagnostic(phase), issue_number=number, job_id=job["job_id"])
+                    self.state.meta("github_failure:" + job["job_id"], json.dumps(details))
+                    self.state.meta("retry_at", exc.retry_at)
+                    print(json.dumps(details), file=sys.stderr)
+
+                def recheck(*, final=False):
+                    nonlocal last_good, next_check
+                    check_local()
+                    now = time.monotonic()
+                    if not final and now < next_check:
+                        return
+                    # The regular schedule can wait for a known rate reset, up to the
+                    # same monotonic deadline used for failures returned by the API.
+                    phase = "final_issue_recheck" if final else "running_issue_recheck"
+                    grace_deadline = last_good + OUTAGE_LIMIT
+                    rate_reset = getattr(self.github, "rate_reset_at", 0)
+                    wall_now = time.time()
+                    if not final and rate_reset > wall_now:
+                        exc = Unavailable("GITHUB_RATE_LIMIT", rate_reset, rate_limited=True)
+                        record_failure(exc, phase)
+                        next_check = min(grace_deadline, now + rate_reset - wall_now)
+                    elif now < grace_deadline:
                         try:
-                            current = self.github.issue(number)
+                            remaining = min(grace_deadline, deadline) - now
+                            timeout = min(REQUEST_TIMEOUT, remaining)
+                            current = self.github.issue(number, timeout=timeout)
                         except Unavailable as exc:
-                            details = dict(exc.diagnostic("running_issue_recheck"), issue_number=number, job_id=job["job_id"])
-                            self.state.meta("github_failure:" + job["job_id"], json.dumps(details))
-                            self.state.meta("retry_at", exc.retry_at)
-                            print(json.dumps(details), file=sys.stderr)
-                            raise  # 停止指示を確認できない場合の既存の停止条件を維持する。
-                        if current["state"] == "closed":
-                            raise Abort("CANCELLED", "ISSUE_CLOSED")
-                        # 編集で実行パラメータを変えない。新しい本文は次の依頼として再承認が必要。
-                        last_check[0] = time.monotonic()
-                        self.publish(self.state.set(job["job_id"], "RUNNING"))
+                            record_failure(exc, phase)
+                            check_local()
+                            if exc.code == "GITHUB_AUTH_OR_PERMISSION":
+                                raise Abort("FAILED", exc.code) from None
+                            temporary = exc.code in {"GITHUB_UNAVAILABLE", "GITHUB_BACKOFF", "GITHUB_RATE_LIMIT"} or (
+                                exc.code == "GITHUB_HTTP_ERROR" and
+                                (exc.http_status == 408 or 500 <= (exc.http_status or 0) <= 599)
+                            )
+                            if final or not temporary:
+                                raise Abort("FAILED", "GITHUB_UNAVAILABLE") from None
+                            now = time.monotonic()
+                            next_check = min(grace_deadline, now + max(1, exc.retry_at - time.time()))
+                        else:
+                            if current.get("state") == "closed":
+                                raise Abort("CANCELLED", "ISSUE_CLOSED")
+                            check_local()
+                            try:
+                                same_request = current.get("state") == "open" and request(current)[1] == request_hash
+                            except Rejected:
+                                same_request = False
+                            if not same_request:
+                                raise Abort("CANCELLED", "ISSUE_REQUEST_CHANGED")
+                            now = time.monotonic()
+                            if now < grace_deadline:
+                                last_good = now
+                                next_check = now + interval
+                                if not final:
+                                    self.publish(self.state.set(job["job_id"], "RUNNING"))
+                                return
+                    if now >= grace_deadline:
+                        raise Abort("FAILED", "GITHUB_RECHECK_TIMEOUT")
+
+                def control():
+                    recheck()
 
                 try:
                     if job["job_type"] == "checkpoint_smoke":
                         result = run_smoke(self.config, self.state, row, job, control)
                     else:
                         result = self.backend.run(job, policy, control)
-                    control()
+                    recheck(final=True)
                 except Abort as exc:
                     row = self.state.set(job["job_id"], exc.state, error=exc.code)
                 except SmokeInterrupted:

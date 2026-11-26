@@ -32,7 +32,7 @@ class MockGitHub(GitHub):
         self.lose_post_response = False
         self.offline = False
 
-    def api(self, path, *, method="GET", payload=None, conditional=False):
+    def api(self, path, *, method="GET", payload=None, conditional=False, timeout=None):
         if self.offline:
             raise Unavailable()
         if path == "/user":
@@ -396,7 +396,7 @@ def test_outbox_io_failure_retains_result_and_republishes(setup, monkeypatch):
     assert worker.state.meta("outbox_pending:31") == "0"
 
 
-def test_control_api_failure_still_stops_running_subprocess(setup, tmp_path, monkeypatch):
+def test_control_api_failure_after_grace_stops_running_subprocess(setup, tmp_path, monkeypatch):
     config, poll_config, api, job, _ = setup
     approve(config, api)
     Poller(poll_config, api).cycle()
@@ -404,21 +404,28 @@ def test_control_api_failure_still_stops_running_subprocess(setup, tmp_path, mon
     original_issue = api.issue
     failing = False
 
-    def issue(number):
+    def issue(number, *, timeout=None):
         if failing:
             raise Unavailable("GITHUB_RATE_LIMIT", http_status=429, rate_limited=True)
         return original_issue(number)
 
+    monotonic = time.monotonic
+    elapsed = 0
+
     def action(job, policy, control):
-        nonlocal failing
+        nonlocal failing, elapsed
         failing = True
+        elapsed = 120
+        control()
+        elapsed = 300
         return Commands().run([sys.executable, "-c", "import sys,time;time.sleep(2);open(sys.argv[1],'w').close()", str(marker)],
                               cwd=tmp_path, env=clean_environment(tmp_path), control=control)
 
     monkeypatch.setattr(api, "issue", issue)
+    monkeypatch.setattr("nas_agent.worker.time.monotonic", lambda: monotonic() + elapsed)
     worker = Worker(config, api, CountingBackend(config, action))
     worker.cycle()
-    assert worker.state.get(job["job_id"])["error_code"] == "GITHUB_UNAVAILABLE"
+    assert worker.state.get(job["job_id"])["error_code"] == "GITHUB_RECHECK_TIMEOUT"
     details = json.loads(worker.state.meta("github_failure:" + job["job_id"]))
     assert details["phase"] == "running_issue_recheck" and details["http_status"] == 429 and details["rate_limited"]
     assert not marker.exists()
@@ -525,8 +532,9 @@ def test_mock_acceptance_handler_and_frozen_running_request(setup, monkeypatch):
     worker = Worker(config, api, backend)
     worker.cycle()
     poller.cycle()
-    assert worker.state.get(job["job_id"])["status"] == "SUCCEEDED"
-    assert '"horses": 376' in api.comments[0]["body"]
+    assert worker.state.get(job["job_id"])["status"] == "CANCELLED"
+    assert '"error_code": "ISSUE_REQUEST_CHANGED"' in api.comments[0]["body"]
+    assert '"horses": 376' not in api.comments[0]["body"]
     assert len(backend.calls) == 1
 
 

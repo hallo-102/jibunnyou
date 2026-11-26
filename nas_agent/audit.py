@@ -10,6 +10,7 @@ from .schema import Rejected
 
 REQUIREMENTS = tuple(f"D-{i:02d}" for i in range(1, 13))
 EXIT_CODES = {"observed_with_limits": 0, "partial": 0, "no_real_data": 2, "startup_error": 2}
+REVENUE_STATUSES = {"not_run", "not_provided", "read_error", "no_in_period_rows", "completed"}
 
 
 def verify_fixture(entry):
@@ -71,6 +72,9 @@ def audit_result(output, code, elapsed):
     except (OSError, ValueError, KeyError, TypeError):
         return result
     summary["audit_status"] = status
+    revenue_status = manifest.get("revenue_evaluation_status")
+    if isinstance(revenue_status, str) and revenue_status in REVENUE_STATUSES:
+        summary["revenue_evaluation_status"] = revenue_status
     if code != expected:
         result["error_code"] = "AUDIT_EXIT_STATUS_MISMATCH"
     elif status == "startup_error":

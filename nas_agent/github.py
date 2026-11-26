@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from http.client import HTTPException
 import json
 from pathlib import Path
 import socket
@@ -13,6 +14,8 @@ import urllib.parse
 import urllib.request
 
 from .schema import REPOSITORY, Rejected
+
+REQUEST_TIMEOUT = 20
 
 
 class Unavailable(RuntimeError):
@@ -51,8 +54,18 @@ class GitHub:
         self.cache = {}
         self.retry_at = 0
         self.failures = 0
+        self.rate_reset_at = 0
 
-    def api(self, path, *, method="GET", payload=None, conditional=False):
+    def observe_rate_limit(self, headers):
+        if headers.get("X-RateLimit-Remaining") == "0":
+            try:
+                self.rate_reset_at = int(headers["X-RateLimit-Reset"]) + 1
+            except (KeyError, TypeError, ValueError):
+                self.rate_reset_at = 0
+        elif headers.get("X-RateLimit-Remaining") is not None:
+            self.rate_reset_at = 0
+
+    def api(self, path, *, method="GET", payload=None, conditional=False, timeout=REQUEST_TIMEOUT):
         if not path.startswith((f"/repos/{REPOSITORY}", "/user")) or ".." in path:
             raise Rejected("UNSAFE_API_PATH")
         if time.time() < self.retry_at:
@@ -67,7 +80,8 @@ class GitHub:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request("https://api.github.com" + path, data=data, headers=headers, method=method)
         try:
-            with self.opener.open(request, timeout=20) as response:
+            with self.opener.open(request, timeout=timeout) as response:
+                self.observe_rate_limit(response.headers)
                 body = response.read(4 * 1024 * 1024 + 1)
                 if len(body) > 4 * 1024 * 1024:
                     raise Unavailable("GITHUB_RESPONSE_TOO_LARGE")
@@ -78,7 +92,9 @@ class GitHub:
                 self.failures = 0
                 return result
         except urllib.error.HTTPError as exc:
+            self.observe_rate_limit(exc.headers)
             if exc.code == 304 and path in self.cache:
+                self.failures = 0
                 return self.cache[path]
             self.failures += 1
             delay = min(3600, 60 * 2 ** min(self.failures - 1, 6))
@@ -104,7 +120,7 @@ class GitHub:
             else:
                 code = "GITHUB_AUTH_OR_PERMISSION" if exc.code in {401, 403, 404} else "GITHUB_HTTP_ERROR"
             raise Unavailable(code, self.retry_at, http_status=exc.code, rate_limited=limited) from None
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, HTTPException) as exc:
             self.retry_at = time.time() + 60
             reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
             if isinstance(reason, TimeoutError):
@@ -119,8 +135,8 @@ class GitHub:
                 transport = "io"
             raise Unavailable(retry_at=self.retry_at, transport=transport) from None
 
-    def issue(self, number):
-        return self.api(f"/repos/{REPOSITORY}/issues/{int(number)}")
+    def issue(self, number, **options):
+        return self.api(f"/repos/{REPOSITORY}/issues/{int(number)}", **options)
 
     def issues(self):
         # 全ページを走査し、停止中の依頼やclosedによるキャンセルを取りこぼさない。

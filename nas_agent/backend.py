@@ -12,9 +12,9 @@ import sys
 import time
 
 from .audit import audit_args, audit_result, verify_fixture
-from .comparison import comparison_result, stage_fixture
-from .files import atomic_json, beneath, isolated
-from .schema import COMPARISON_SHA, REPOSITORY, Rejected
+from .comparison import MAX_JSON_BYTES, comparison_result, stage_fixture
+from .files import atomic_json, beneath, isolated, spool_json
+from .schema import AUDIT_SHA, COMPARISON_SHA, REPOSITORY, Rejected
 
 AGENT_CODE = Path(__file__).resolve().parents[1]
 
@@ -147,6 +147,8 @@ class Backend:
                 self.stop_job_containers(project)
 
     def run_audit(self, job, policy, control):
+        if job["commit_sha"] != AUDIT_SHA:
+            raise Rejected("INVALID_AUDIT_COMMIT")
         entry = policy["inputs"][job["input_id"]]
         fixture = verify_fixture(entry)
         root = Path(self.config["validation_root"])
@@ -183,10 +185,14 @@ class Backend:
         home.mkdir()
         fixture = workspace / "input"
         hashes = stage_fixture(entry, job["raceday"], fixture, control)
+        settings = spool_json(fixture, fixture / "run.json", MAX_JSON_BYTES)
+        evaluation_mode = settings.get("evaluation_mode", "formal")
         source = self.checkout(job["commit_sha"], workspace, control, checkout_root=workspace / "checkout",
                                full_history=True)
         output = workspace / "output"
-        output.mkdir()
+        if evaluation_mode == "reference":
+            output = output / "reference"
+        output.mkdir(parents=True)
         env = clean_environment(home)
         env.update(TMPDIR=str(home), TMP=str(home), TEMP=str(home), KEIBA_SCORING_MODEL_VERSION="legacy")
         control()
@@ -195,4 +201,4 @@ class Backend:
                                  cwd=source, env=env, control=control, log=workspace / "execution.log", check=False)
         control()
         self.verify_checkout(source, job["commit_sha"], env)
-        return comparison_result(output, job["commit_sha"], hashes, code)
+        return comparison_result(output, job["commit_sha"], hashes, code, evaluation_mode)
