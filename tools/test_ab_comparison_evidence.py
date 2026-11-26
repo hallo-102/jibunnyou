@@ -74,7 +74,8 @@ def test_prepare_records_evidence_without_inventing_times(tmp_path):
     rows = [result_row(grade, i) for i, grade in enumerate("ABCD", 1)]
     snapshots = [{"race_id": row["race_id"], "input_evidence_grade": grade,
                   "start_at": f"{DAY}T12:00:00+09:00"} for grade, row in zip("ABCD", rows)]
-    snapshots[0].update(observed_at=f"{DAY}T11:50:00+09:00", workbook="snapshot.xlsx")
+    for snapshot in snapshots[:2]:
+        snapshot.update(observed_at=f"{DAY}T11:50:00+09:00", workbook="snapshot.xlsx")
     (tmp_path / "snapshot.xlsx").write_bytes(b"archived bytes")
     config = tmp_path / "config.json"
     save_json(config, {"snapshots": "snapshots.json", "results": "results.json"})
@@ -102,3 +103,73 @@ def test_unverified_inputs_stay_out_of_strict_comparison(tmp_path):
     races, _, _, excluded = load_races(tmp_path, snapshots, {"validation": (day, day)}, {})
     assert not races
     assert [row["reason"] for row in excluded] == [f"input_evidence_grade_{grade}" for grade in "BCD"]
+
+
+def test_prepare_defaults_missing_input_grade_to_c_even_for_legacy_config(tmp_path):
+    rid = result_row("A")["race_id"]
+    config = tmp_path / "config.json"
+    save_json(config, {"schema_version": 1, "snapshots": "snapshots.json", "results": "results.json"})
+    save_json(tmp_path / "snapshots.json", [{"race_id": rid, "start_at": f"{DAY}T12:00:00+09:00",
+                                            "observed_at": f"{DAY}T11:55:00+09:00"}])
+    save_json(tmp_path / "results.json", [])
+    output = tmp_path / "fixture"
+    manifest = prepare(config, output)
+    assert manifest["schema_version"] == 2
+    assert manifest["snapshot_evidence_grades"] == {rid: "C"}
+    assert read_json(output / "run.json")["schema_version"] == 2
+    assert read_json(output / "snapshots.json")[0]["input_evidence_grade"] == "C"
+
+
+def test_reference_does_not_load_b_for_training_and_enforces_prestart_time(tmp_path):
+    row = {"race_id": result_row("A")["race_id"], "input_evidence_grade": "B",
+           "start_at": f"{DAY}T12:00:00+09:00", "observed_at": f"{DAY}T12:01:00+09:00"}
+    day = date.fromisoformat(DAY)
+    races, _, _, excluded = load_races(tmp_path, [row], {"train": (day, day)}, {}, reference=True)
+    assert not races
+    assert excluded[0]["reason"] == "input_evidence_grade_B"
+    with pytest.raises(ValueError, match="発走前"):
+        load_races(tmp_path, [row], {"validation": (day, day)}, {}, reference=True)
+
+
+def test_reference_report_is_separate_from_formal_report(tmp_path):
+    from model_registry import sha256_file
+    from tools.ab_comparison_inputs import features
+    from tools.compare_ab_models import run
+
+    rows = [result_row("A", i) for i in range(1, 6)]
+    snapshots = []
+    path = tmp_path / "snapshot.xlsx"
+    now = [{"レースID": row["race_id"], "馬番": n, "馬名": f"馬{n}", "頭数": 3,
+            "場所": "東京", "コース": "芝1600", "クラス": "試験GII"}
+           for row in rows for n in range(1, 4)]
+    pd.DataFrame(now).to_excel(path, sheet_name=features.NOW_SHEET, index=False)
+    for grade, row in zip(("A", "B", "C", "D", None), rows):
+        snapshot = {"race_id": row["race_id"], "start_at": f"{DAY}T12:00:00+09:00",
+                    "observed_at": f"{DAY}T11:55:00+09:00", "workbook": path.name,
+                    "workbook_sha256": sha256_file(path), "popularity": {"1": 1, "2": 2, "3": 3}}
+        if grade is not None:
+            snapshot["input_evidence_grade"] = grade
+        snapshots.append(snapshot)
+    save_json(tmp_path / "snapshots.json", snapshots)
+    save_json(tmp_path / "results.json", rows)
+    config = {"schema_version": 2, "snapshots": "snapshots.json", "results": "results.json",
+              "weight_mode": "ab_only", "box_size": 3}
+    config_path = tmp_path / "config.json"
+    output = tmp_path / "report"
+    save_json(config_path, config)
+    formal = run(config_path, output)
+    original = (output / "comparison.csv").read_bytes()
+    save_json(config_path, {**config, "evaluation_mode": "reference"})
+    reference = run(config_path, output)
+
+    assert formal["evaluation_mode"] == "formal"
+    assert formal["inputs"]["snapshot_evidence_grades"][rows[-1]["race_id"]] == "C"
+    assert reference["evaluation_mode"] == "reference"
+    assert reference["validation_selection"]["status"] == "disabled_reference"
+    assert read_json(output / "reference/validation_selection.json") == []
+    assert (output / "comparison.csv").read_bytes() == original
+    assert {row["input_evidence_grade"] for row in read_json(output / "races.json")} == {"A"}
+    assert {row["input_evidence_grade"] for row in read_json(output / "reference/races.json")} == {"A", "B"}
+    reference_summary = read_json(output / "reference/comparison.json")
+    assert {row["evaluation_mode"] for row in reference_summary} == {"reference"}
+    assert {row["races"] for row in reference_summary if row["stage"] == "validation"} == {2}

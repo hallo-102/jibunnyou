@@ -12,8 +12,8 @@ def timestamp(value):
     return stamp.astimezone(JST)
 
 
-def snapshot_grade(row):
-    grade = row.get("input_evidence_grade", "A")
+def snapshot_grade(row, *, legacy=False):
+    grade = row.get("input_evidence_grade", "A" if legacy else "C")
     if grade not in ("A", "B", "C", "D"):
         raise ValueError(f"{row['race_id']}: 発走前入力の証跡区分が不正です")
     return grade

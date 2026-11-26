@@ -245,7 +245,8 @@ def read_results(rows, races, evidence=None, *, starts=None):
     return results
 
 
-def load_races(root, rows, periods, builders, evaluation_date=None, include_training=True):
+def load_races(root, rows, periods, builders, evaluation_date=None, include_training=True,
+               *, legacy=False, reference=False):
     builders = {
         "legacy": (features.build_features_from_excel, False, True),
         "corrected": (features.build_features_from_excel, True, False),
@@ -272,8 +273,8 @@ def load_races(root, rows, periods, builders, evaluation_date=None, include_trai
             excluded.append({"race_id": rid, "stage": stage, "reason": "outside_run_scope"})
             continue
         coverage[stage] += 1
-        grade = snapshot_grade(row)
-        if grade != "A":
+        grade = snapshot_grade(row, legacy=legacy)
+        if grade != "A" and not (reference and stage != "train" and grade == "B"):
             reason = f"input_evidence_grade_{grade}"
             missing[stage][reason] += 1
             excluded.append({"race_id": rid, "stage": stage, "reason": reason})
@@ -300,6 +301,7 @@ def load_races(root, rows, periods, builders, evaluation_date=None, include_trai
             excluded.append({"race_id": rid, "stage": stage, "reason": "obstacle_race"})
             continue
         races[rid] = {"start": start, "observed": observed, "stage": stage, "frames": frames,
+                      "input_evidence_grade": grade,
                       "pop_observed": timestamp(row.get("popularity_observed_at", row["observed_at"]))}
     return races, coverage, missing, excluded
 

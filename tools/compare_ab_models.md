@@ -13,7 +13,7 @@ PYTHONPATH=.:race_purchase_filter python -m pytest -q tests/test_ab_model_compar
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "snapshots": "snapshots.json",
   "results": "results.json",
   "periods": {
@@ -61,14 +61,16 @@ PYTHONPATH=.:race_purchase_filter python -m pytest -q tests/test_ab_model_compar
 - DL の保存済み出力を使う場合は `dl` に馬番ごとの `probability` と `rank`、`dl_model_sha256`、`dl_model_training_end_at`、`dl_observed_at` を指定します。両経路で同じ発走前出力と本番ブレンド比を使います。欠落時は中立入力になります。このプログラムは NAS の現在のファイルから DL を再学習しません。
 - SHA はファイル内容を固定します。取得時刻・学習終了時刻の裏付けには NAS 側の保存履歴が必要です。
 
-発走前入力の区分は `input_evidence_grade` に記録します。省略時は従来の A 入力として時刻・SHA の検査を適用します。通常の A〜D 比較で使用するのは区分 A の入力です。
+発走前入力の区分は `input_evidence_grade` に記録します。`schema_version: 2` の比較設定では、省略した区分を C とします。準備コマンドは入力設定のバージョンにかかわらず、未指定を C としてバージョン 2 のフィクスチャを生成します。直接実行する従来の `schema_version: 1` 設定では、互換性のため未指定を A とし、従来の時刻と SHA の検査を適用します。
 
 | 区分 | 発走前入力の証跡 | 取り扱い |
 | --- | --- | --- |
-| A | 発走前の取得を確認済み | 通常の比較に使用 |
-| B | 内部記録あり・独立した証跡不足 | 条件付き参考 |
+| A | 発走前の取得を確認済み | 正式検証・参考検証・計算監査 |
+| B | 内部記録あり・独立した証跡不足 | 参考検証・計算監査 |
 | C | 取得時点不明 | 計算監査のみ |
-| D | 発走後の情報が混入 | 除外 |
+| D | 発走後の情報が混入 | 原因調査のみ |
+
+既定の `"evaluation_mode": "formal"` は A のみを集計します。`"evaluation_mode": "reference"` は A と B を対象にし、B にも内部記録による発走前の取得時刻と SHA の検査を適用します。参考検証の学習入力は A に限定し、候補選定は無効です。参考検証の成果物は `--output` 配下の `reference/` に保存し、データ行とマニフェストに検証モードを記録します。`races` では各レースの入力区分を確認できます。同じ出力先を使う場合は空の出力先に正式検証を出力してから参考検証を実行してください。計算監査と原因調査に使う区分はフィクスチャのメタデータに記録します。
 
 ## フィクスチャ準備
 
@@ -108,7 +110,7 @@ python -m tools.compare_ab_models --config /path/to/new-fixture/run.json --outpu
 | C | `race_date`、JRA公式確定結果の参照先 `evidence_source`、公式結果の転記 `jra_official_result` | 事後評価のみ |
 | D | 出典や内容を確認できない | 利用不可 |
 
-B/C の `race_date` と B の `available_by_date` は `YYYY-MM-DD` です。B の上限日は、その日までに対象の着順・払戻が利用できたことを保存履歴で確認して指定します。C の `jra_official_result` には `race_id`、`race_date`、`finish_top3`、`payouts` を入れます。公式資料と保存履歴は入力作成時に確認し、後から照合できる参照先を記録してください。ツールは C のレース ID・開催日・着順と、利用対象の各券種の払戻を転記データと照合します。
+B/C の `race_date` と B の `available_by_date` は `YYYY-MM-DD` です。B の上限日は、その日までに対象の着順・払戻が利用できたことを保存履歴で確認して指定します。C の `jra_official_result` には `race_id`、`race_date`、`finish_top3`、`payouts` を入れます。実際の JRA 公式資料との一致確認は入力準備工程で行い、後から確認できる参照先を記録してください。ツールでの C の照合は、提供された公式結果の転記データとの比較です。比較項目はレース ID・開催日・着順と、利用対象の各券種の払戻です。B の保存履歴も入力準備工程で確認します。
 
 従来形式の `finalized_at` 付きデータは A として読み込みます。締切日を含む学習・検証期間では、A の確定時刻を JST に直して締切日までかを判定します。B は利用可能日の上限が締切日より前のときに限って学習と候補選定に使います。フィクスチャと比較結果のマニフェストにはレース別の `grade`、`finalized_at`、`race_date`、`available_by_date`、証跡の参照先を記録し、不明な時刻は `null` で表します。
 

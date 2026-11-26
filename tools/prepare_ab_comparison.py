@@ -64,7 +64,7 @@ def prepare(config_path, output, workbook_evidence_path=None):
             start = timestamp(row["start_at"])
             starts[rid] = start
             grade = snapshot_grades[rid] = row["input_evidence_grade"] = snapshot_grade(row)
-            if grade == "A":
+            if grade in ("A", "B"):
                 observed = timestamp(row["observed_at"])
                 if observed >= start:
                     raise ValueError(f"{rid}: 発走前スナップショットが必要です")
@@ -97,11 +97,11 @@ def prepare(config_path, output, workbook_evidence_path=None):
         for baseline in config.get("baselines", {}).values():
             if "model_root" in baseline:
                 baseline["model_root"] = str((root / baseline["model_root"]).resolve())
-        config.update(snapshots="snapshots.json", results="results.json")
+        config.update(schema_version=2, snapshots="snapshots.json", results="results.json")
         for name, data in (("run.json", config), ("snapshots.json", snapshots), ("results.json", results)):
             save_json(fixture / name, data)
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "snapshot_evidence_grades": snapshot_grades,
             "result_evidence": evidence,
             "files_sha256": {path.relative_to(fixture).as_posix(): sha256_file(path)

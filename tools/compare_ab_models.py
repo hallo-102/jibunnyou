@@ -242,7 +242,8 @@ def evaluate(races, results, baselines, trained, methods, ticket_args, metadata,
             for method, frame in ordered.items():
                 row = {"baseline": label, "method": method, "race_id": rid, "stage": stage,
                        "start_at": race["start"].isoformat(), "month": race["start"].strftime("%Y-%m"),
-                       "horses": len(frame), "purchase_decision": decisions[method], "common_purchase": shared,
+                       "horses": len(frame), "input_evidence_grade": race["input_evidence_grade"],
+                       "purchase_decision": decisions[method], "common_purchase": shared,
                        "result_finalized_date": (timestamp(result["evidence"]["finalized_at"]).date().isoformat()
                                                  if result and result["evidence"]["finalized_at"] else None),
                        "result_evidence_grade": result["evidence"]["grade"] if result else None,
@@ -306,8 +307,14 @@ def run(config_path, output):
 
     root = config_path.parent
     config = read_json(config_path)
-    if config.get("schema_version") != 1:
-        raise ValueError("schema_version=1 の設定が必要です")
+    input_schema_version = config.get("schema_version")
+    if input_schema_version not in (1, 2):
+        raise ValueError("schema_version は 1 または 2 を指定してください")
+    evaluation_mode = config.get("evaluation_mode", "formal")
+    if evaluation_mode not in ("formal", "reference"):
+        raise ValueError("evaluation_mode は formal または reference を指定してください")
+    legacy = input_schema_version == 1
+    reference = evaluation_mode == "reference"
     periods = periods_from(config.get("periods", DEFAULT_PERIODS))
     unit = integer_setting(config, "unit_yen", 100, 100)
     box_size = integer_setting(config, "box_size", 5, 3)
@@ -342,6 +349,7 @@ def run(config_path, output):
     snapshots, result_rows = read_json(snapshots_path), read_json(results_path)
     races, counts, missing, excluded = load_races(
         root, snapshots, periods, builders, evaluation_date=single_date, include_training=weight_mode == "optimize",
+        legacy=legacy, reference=reference,
     )
     if single_date and not any(race["stage"] in stages for race in races.values()):
         raise ValueError("指定日に比較可能なレースがありません")
@@ -354,6 +362,9 @@ def run(config_path, output):
     if set(setting) - set(ITERATION_KEYS) or any(type(v) is not int or v < 1 for v in setting.values()):
         raise ValueError("optimizer_iterations には既存の N_ITER_* を正整数で指定してください")
 
+    # 参考検証の成果物は専用ディレクトリに書き出す。
+    if reference:
+        output = output / "reference"
     # Manifest is written last and marks a completed run.
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
@@ -373,21 +384,28 @@ def run(config_path, output):
     summary, breakdown = grouped_summary(rows, unit, high, stages)
     actual_path = root / config["operational_results"] if "operational_results" in config else None
     actual = operational_summary(rows, read_json(actual_path) if actual_path else [], stages)
-    # 採用候補は検証期間内に確定した払戻だけで選ぶ。
     cutoff = periods["validation"][1]
-    selection_ids = {rid for rid, result in results.items() if available_by_cutoff(result["evidence"], cutoff)}
-    selection_summary = [
-        {"baseline": label, "method": method, "stage": "validation",
-         **summarize([r for r in method_rows if r["stage"] == "validation" and r["race_id"] in selection_ids], unit, high)}
-        for (label, method), method_rows in rows.items()
-    ]
-    if single_date:
-        selection_summary = []
+    selection_status = "evaluated"
+    selection_summary = []
+    if reference:
+        selection_status = "disabled_reference"
+    elif single_date:
+        selection_status = "disabled_single_day"
+    else:
+        # 採用候補は検証締切までに利用可能と確認できた払戻だけで選ぶ。
+        selection_ids = {rid for rid, result in results.items() if available_by_cutoff(result["evidence"], cutoff)}
+        selection_summary = [
+            {"baseline": label, "method": method, "stage": "validation",
+             **summarize([r for r in method_rows if r["stage"] == "validation"
+                          and r["race_id"] in selection_ids], unit, high)}
+            for (label, method), method_rows in rows.items()
+        ]
     candidate = candidate_selection(selection_summary, selection_min, baselines)
     parity = Counter(item["status"] for item in diagnostic_rows if item["comparison"] == "main_parity")
     flat_rows = [row for method_rows in rows.values() for row in method_rows]
     for name, values in (("comparison", summary), ("validation_selection", selection_summary), ("breakdown", breakdown), ("races", flat_rows),
                          ("diagnostics", diagnostic_rows), ("exclusions", excluded), ("operational_comparison", actual)):
+        values = [{**row, "evaluation_mode": evaluation_mode} for row in values]
         save_json(output / f"{name}.json", values)
         save_csv(output / f"{name}.csv", values)
     methods_manifest = {}
@@ -400,6 +418,7 @@ def run(config_path, output):
         }
     manifest = {
         "schema_version": 1, "code_sha": code_sha, "methods": methods_manifest,
+        "evaluation_mode": evaluation_mode, "input_schema_version": input_schema_version,
         "weight_mode": weight_mode, "evaluation_date": single_date.isoformat() if single_date else None,
         "notes": {
             "input_timestamp_evidence": "SHA-256の一致は内容を固定するもので、発走前取得の証明にはなりません。取得時刻は元の保存記録で確認が必要です。",
@@ -413,7 +432,7 @@ def run(config_path, output):
                    "results_sha256": sha256_file(results_path), "snapshot_records": len(snapshots),
                    "result_records": len(result_rows), "result_records_without_usable_snapshot": len(results.keys() - races.keys()),
                    "snapshot_counts": dict(counts),
-                   "snapshot_evidence_grades": {row["race_id"]: snapshot_grade(row) for row in snapshots},
+                   "snapshot_evidence_grades": {row["race_id"]: snapshot_grade(row, legacy=legacy) for row in snapshots},
                    "result_evidence": evidence,
                    "operational_results_sha256": sha256_file(actual_path) if actual_path else None},
         "coverage": coverage, "optimizer_config": search,
@@ -426,7 +445,7 @@ def run(config_path, output):
                      "own_cohort": "buy_candidates_per_method",
                      "operational": "recorded_actual_purchases_only" if actual_path else "no_ledger_supplied",
                      "ticket": "3連複", "box_size": box_size, "unit_yen": unit, "top_payout_races": high},
-        "validation_selection": {"status": "disabled_single_day" if single_date else "evaluated", "sort": ["filtered_profit_yen DESC", "filtered_roi_pct DESC", "method ASC"],
+        "validation_selection": {"status": selection_status, "sort": ["filtered_profit_yen DESC", "filtered_roi_pct DESC", "method ASC"],
                                  "result_finalized_date_max": cutoff.isoformat(), "result_availability_cutoff": cutoff.isoformat(), "min_settled_races": selection_min, "baselines": candidate},
         "diagnostics": {"variants": diagnostics, "main_parity_candidate": "legacy", "main_parity_tolerance": 1e-9,
                         "main_parity_counts": dict(parity)},
@@ -445,7 +464,8 @@ def main():
     if not manifest["diagnostics"]["main_parity_counts"].get("equal") or any(
         key != "equal" for key in manifest["diagnostics"]["main_parity_counts"]
     ):
-        parser.exit(2, "修正前 main との一致を確認できません。diagnostics.csv を確認してください。\n")
+        report = args.output / "reference" if manifest["evaluation_mode"] == "reference" else args.output
+        parser.exit(2, f"修正前 main との一致を確認できません。{report / 'diagnostics.csv'} を確認してください。\n")
 
 
 if __name__ == "__main__":
