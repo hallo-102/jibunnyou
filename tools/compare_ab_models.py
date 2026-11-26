@@ -19,6 +19,7 @@ from tokutyouryou_keisann.optimizer import optimize_placewise_weights
 from tokutyouryou_keisann.scoring import compute_scores_with_optimizer_weights
 
 from tools.ab_comparison_diagnostics import diagnostic_builders, git
+from tools.ab_comparison_evidence import available_by_cutoff, snapshot_grade
 from tools.ab_comparison_inputs import feature_missingness, load_races, pipeline, read_results, score, timestamp, training_set
 from tools.ab_comparison_metrics import common_purchase, grouped_summary, purchase_decision, race_metrics, summarize, operational_summary
 
@@ -242,7 +243,10 @@ def evaluate(races, results, baselines, trained, methods, ticket_args, metadata,
                 row = {"baseline": label, "method": method, "race_id": rid, "stage": stage,
                        "start_at": race["start"].isoformat(), "month": race["start"].strftime("%Y-%m"),
                        "horses": len(frame), "purchase_decision": decisions[method], "common_purchase": shared,
-                       "result_finalized_date": result["finalized"].date().isoformat() if result else None,
+                       "result_finalized_date": (timestamp(result["evidence"]["finalized_at"]).date().isoformat()
+                                                 if result and result["evidence"]["finalized_at"] else None),
+                       "result_evidence_grade": result["evidence"]["grade"] if result else None,
+                       "result_available_by_date": result["evidence"]["available_by_date"] if result else None,
                        **method_metrics[method],
                        "model_popularity_band": method_metrics[method]["popularity_band"],
                        "popularity_band": method_metrics["A"]["popularity_band"]}
@@ -261,7 +265,7 @@ def candidate_selection(summary, minimum, baselines):
     return selected
 
 
-def coverage_counts(races, results, periods, missing, exclusions):
+def coverage_counts(races, results, periods, missing, exclusions, evidence):
     coverage = {}
     for stage in periods:
         rows = [(rid, race) for rid, race in races.items() if race["stage"] == stage]
@@ -270,9 +274,11 @@ def coverage_counts(races, results, periods, missing, exclusions):
             result = results.get(rid)
             if not result or not result["top"]:
                 reason = "missing_result" if not result else "invalid_or_missing_finish_top3"
+                if evidence.get(rid, {}).get("grade") == "D":
+                    reason = "result_evidence_grade_D"
                 counts[reason] += 1
                 exclusions.append({"race_id": rid, "stage": stage, "reason": reason, "scope": "finish_metrics"})
-            elif stage == "train" and result["finalized"].date() > periods["train"][1]:
+            elif stage == "train" and not available_by_cutoff(result["evidence"], periods["train"][1]):
                 counts["training_result_not_final_in_train_period"] += 1
                 exclusions.append({"race_id": rid, "stage": stage, "reason": "training_result_not_final_in_train_period",
                                    "scope": "optimization"})
@@ -339,8 +345,10 @@ def run(config_path, output):
     )
     if single_date and not any(race["stage"] in stages for race in races.values()):
         raise ValueError("指定日に比較可能なレースがありません")
-    results = read_results(result_rows, races)
-    coverage = coverage_counts(races, results, periods, missing, excluded)
+    evidence = {}
+    starts = {row["race_id"]: timestamp(row["start_at"]) for row in snapshots}
+    results = read_results(result_rows, races, evidence, starts=starts)
+    coverage = coverage_counts(races, results, periods, missing, excluded, evidence)
 
     setting = config.get("optimizer_iterations", {})
     if set(setting) - set(ITERATION_KEYS) or any(type(v) is not int or v < 1 for v in setting.values()):
@@ -366,11 +374,11 @@ def run(config_path, output):
     actual_path = root / config["operational_results"] if "operational_results" in config else None
     actual = operational_summary(rows, read_json(actual_path) if actual_path else [], stages)
     # 採用候補は検証期間内に確定した払戻だけで選ぶ。
-    cutoff = periods["validation"][1].isoformat()
+    cutoff = periods["validation"][1]
+    selection_ids = {rid for rid, result in results.items() if available_by_cutoff(result["evidence"], cutoff)}
     selection_summary = [
         {"baseline": label, "method": method, "stage": "validation",
-         **summarize([r for r in method_rows if r["stage"] == "validation" and r["result_finalized_date"]
-                      and r["result_finalized_date"] <= cutoff], unit, high)}
+         **summarize([r for r in method_rows if r["stage"] == "validation" and r["race_id"] in selection_ids], unit, high)}
         for (label, method), method_rows in rows.items()
     ]
     if single_date:
@@ -405,6 +413,8 @@ def run(config_path, output):
                    "results_sha256": sha256_file(results_path), "snapshot_records": len(snapshots),
                    "result_records": len(result_rows), "result_records_without_usable_snapshot": len(results.keys() - races.keys()),
                    "snapshot_counts": dict(counts),
+                   "snapshot_evidence_grades": {row["race_id"]: snapshot_grade(row) for row in snapshots},
+                   "result_evidence": evidence,
                    "operational_results_sha256": sha256_file(actual_path) if actual_path else None},
         "coverage": coverage, "optimizer_config": search,
         "optimizer_seed_weight_sha256": normalized_weights_sha256({"__default__": FEATURE_WEIGHTS_SEED}),
@@ -417,7 +427,7 @@ def run(config_path, output):
                      "operational": "recorded_actual_purchases_only" if actual_path else "no_ledger_supplied",
                      "ticket": "3連複", "box_size": box_size, "unit_yen": unit, "top_payout_races": high},
         "validation_selection": {"status": "disabled_single_day" if single_date else "evaluated", "sort": ["filtered_profit_yen DESC", "filtered_roi_pct DESC", "method ASC"],
-                                 "result_finalized_date_max": cutoff, "min_settled_races": selection_min, "baselines": candidate},
+                                 "result_finalized_date_max": cutoff.isoformat(), "result_availability_cutoff": cutoff.isoformat(), "min_settled_races": selection_min, "baselines": candidate},
         "diagnostics": {"variants": diagnostics, "main_parity_candidate": "legacy", "main_parity_tolerance": 1e-9,
                         "main_parity_counts": dict(parity)},
     }
