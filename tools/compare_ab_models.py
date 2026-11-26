@@ -19,8 +19,8 @@ from tokutyouryou_keisann.optimizer import optimize_placewise_weights
 from tokutyouryou_keisann.scoring import compute_scores_with_optimizer_weights
 
 from tools.ab_comparison_diagnostics import diagnostic_builders, git
-from tools.ab_comparison_inputs import feature_missingness, load_races, pipeline, read_results, score, training_set
-from tools.ab_comparison_metrics import common_purchase, grouped_summary, purchase_decision, race_metrics, summarize
+from tools.ab_comparison_inputs import feature_missingness, load_races, pipeline, read_results, score, timestamp, training_set
+from tools.ab_comparison_metrics import common_purchase, grouped_summary, purchase_decision, race_metrics, summarize, operational_summary
 
 DEFAULT_PERIODS = {
     "train": ["2025-06-14", "2026-06-30"],
@@ -98,6 +98,41 @@ def baselines_from(config, root):
             "training_period_status": "declared" if training else "unknown",
         })
     return records
+
+
+def fixed_candidates(path, label, evaluation_start, evaluation_ids):
+    manifest = read_json(path)
+    if manifest.get("schema_version") != 1:
+        raise ValueError("学習済み候補のマニフェスト形式が不正です")
+    imported, metadata = {}, {}
+    for method in ("C", "D"):
+        source = manifest["methods"][label][method]
+        start, end = map(date.fromisoformat, source["training_period"])
+        ids = source["training_race_ids"]
+        if (not start <= end < evaluation_start or not ids or not isinstance(ids, list)
+                or len(set(ids)) != len(ids) or len(ids) != source["training_races"]
+                or set(ids) & evaluation_ids or source["validation"] is not (method == "D")):
+            raise ValueError(f"{method}: 評価より前の学習期間・学習レース・特徴量方式を確認できません")
+        weight_path = (path.parent / source["weight_file"]).resolve()
+        if sha256_file(weight_path) != source["weight_sha256"]:
+            raise ValueError(f"{method}: 学習済み重みファイルの SHA-256 が不一致です")
+        payload = read_json(weight_path)
+        weights = {}
+        for row in payload:
+            key = row["group"]
+            key = tuple(key) if isinstance(key, list) else key
+            if key in weights or set(row["weights"]) != set(FEAT_COLS):
+                raise ValueError(f"{method}: 学習済み重みのグループ・特徴量が不正です")
+            weights[key] = row["weights"]
+        if "__default__" not in weights or normalized_weights_sha256(weights) != source["effective_weight_sha256"]:
+            raise ValueError(f"{method}: 学習済み実効重みの SHA-256 が不一致です")
+        imported[method] = weights
+        metadata[method] = {**source, "weight_file": str(weight_path),
+                            "training_code_sha": source.get("training_code_sha", source["code_sha"]),
+                            "source_manifest_sha256": sha256_file(path)}
+    if any(metadata["C"][key] != metadata["D"][key] for key in ("training_period", "training_race_ids")):
+        raise ValueError("C・D の学習期間または学習レースが一致しません")
+    return imported, metadata
 
 
 def check_optimizer_parity(frame, weights):
@@ -184,10 +219,10 @@ def diagnosis(rid, race, fixed, stage, ticket_args, result, metadata):
     return rows
 
 
-def evaluate(races, results, baselines, trained, ticket_args, metadata, assessment):
+def evaluate(races, results, baselines, trained, methods, ticket_args, metadata, assessment):
     race_rows, diagnostic_rows = defaultdict(list), []
     for label, (fixed, _) in baselines.items():
-        for method in METHODS:
+        for method in methods:
             race_rows[label, method] = []
         for rid, race in sorted(races.items(), key=lambda item: (item[1]["start"], item[0])):
             stage = race["stage"]
@@ -199,7 +234,7 @@ def evaluate(races, results, baselines, trained, ticket_args, metadata, assessme
             if stage == "train":
                 continue
             ordered = {method: score(race["frames"][mode], trained.get(method, fixed)).sort_values("rank")
-                       for method, mode in METHODS.items()}
+                       for method, mode in methods.items()}
             decisions = {method: purchase_decision(frame, race, rid, assessment) for method, frame in ordered.items()}
             shared = common_purchase(decisions.values())
             method_metrics = {method: race_metrics(frame, result, *ticket_args) for method, frame in ordered.items()}
@@ -271,7 +306,20 @@ def run(config_path, output):
     unit = integer_setting(config, "unit_yen", 100, 100)
     box_size = integer_setting(config, "box_size", 5, 3)
     high = integer_setting(config, "top_payout_races", 3, 0)
-    selection_min = integer_setting(config, "min_validation_settled_races", 30, 1)
+    selection_min = integer_setting(config, "min_validation_settled_races", 30, 30)
+    single_date = date.fromisoformat(config["evaluation_date"]) if "evaluation_date" in config else None
+    stages = ("validation", "forward")
+    if single_date:
+        stages = tuple(stage for stage in stages if periods[stage][0] <= single_date
+                       and (periods[stage][1] is None or single_date <= periods[stage][1]))
+        if not stages:
+            raise ValueError("evaluation_date は検証期間または前向き照合期間内の日付が必要です")
+    weight_mode = config.get("weight_mode", "ab_only" if single_date else "optimize")
+    if weight_mode not in {"ab_only", "optimize", "fixed"}:
+        raise ValueError("weight_mode は ab_only、optimize、fixed のいずれかです")
+    if ("candidate_manifest" in config) != (weight_mode == "fixed"):
+        raise ValueError("candidate_manifest は weight_mode=fixed の場合に指定してください")
+    methods = {key: mode for key, mode in METHODS.items() if weight_mode != "ab_only" or key in "AB"}
     if unit % 100 or box_size > 5:
         raise ValueError("unit_yen は100円単位、box_size は3〜5です")
     if pipeline.SCORING_MODEL_VERSION != "legacy":
@@ -286,7 +334,11 @@ def run(config_path, output):
     snapshots_path = root / config["snapshots"]
     results_path = root / config["results"]
     snapshots, result_rows = read_json(snapshots_path), read_json(results_path)
-    races, counts, missing, excluded = load_races(root, snapshots, periods, builders)
+    races, counts, missing, excluded = load_races(
+        root, snapshots, periods, builders, evaluation_date=single_date, include_training=weight_mode == "optimize",
+    )
+    if single_date and not any(race["stage"] in stages for race in races.values()):
+        raise ValueError("指定日に比較可能なレースがありません")
     results = read_results(result_rows, races)
     coverage = coverage_counts(races, results, periods, missing, excluded)
 
@@ -298,9 +350,21 @@ def run(config_path, output):
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError("出力先には空のディレクトリを指定してください")
-    trained, weights_manifest, search = optimize(races, results, periods, code_sha, setting, output)
-    rows, diagnostic_rows = evaluate(races, results, baselines, trained, (unit, box_size), diagnostics, assessment)
-    summary, breakdown = grouped_summary(rows, unit, high)
+    trained, weights_manifest, search = {}, {}, None
+    if weight_mode == "optimize":
+        trained, weights_manifest, search = optimize(races, results, periods, code_sha, setting, output)
+    if weight_mode == "fixed":
+        evaluation_start = single_date or periods["validation"][0]
+        evaluation_ids = {row["race_id"] for row in snapshots
+                          if timestamp(row["start_at"]).date() >= evaluation_start}
+        trained, weights_manifest = fixed_candidates(
+            (root / config["candidate_manifest"]).resolve(),
+            config.get("candidate_manifest_baseline", "github"), evaluation_start, evaluation_ids,
+        )
+    rows, diagnostic_rows = evaluate(races, results, baselines, trained, methods, (unit, box_size), diagnostics, assessment)
+    summary, breakdown = grouped_summary(rows, unit, high, stages)
+    actual_path = root / config["operational_results"] if "operational_results" in config else None
+    actual = operational_summary(rows, read_json(actual_path) if actual_path else [], stages)
     # 採用候補は検証期間内に確定した払戻だけで選ぶ。
     cutoff = periods["validation"][1].isoformat()
     selection_summary = [
@@ -309,11 +373,13 @@ def run(config_path, output):
                       and r["result_finalized_date"] <= cutoff], unit, high)}
         for (label, method), method_rows in rows.items()
     ]
+    if single_date:
+        selection_summary = []
     candidate = candidate_selection(selection_summary, selection_min, baselines)
     parity = Counter(item["status"] for item in diagnostic_rows if item["comparison"] == "main_parity")
     flat_rows = [row for method_rows in rows.values() for row in method_rows]
     for name, values in (("comparison", summary), ("validation_selection", selection_summary), ("breakdown", breakdown), ("races", flat_rows),
-                         ("diagnostics", diagnostic_rows), ("exclusions", excluded)):
+                         ("diagnostics", diagnostic_rows), ("exclusions", excluded), ("operational_comparison", actual)):
         save_json(output / f"{name}.json", values)
         save_csv(output / f"{name}.csv", values)
     methods_manifest = {}
@@ -322,26 +388,35 @@ def run(config_path, output):
             method: {**(weights_manifest.get(method) or fixed),
                      "code_sha": code_sha, "validation": mode == "corrected",
                      "feature_source_sha256": sha256_file(PROJECT_ROOT / "1_keibayosou_features.py")}
-            for method, mode in METHODS.items()
+            for method, mode in methods.items()
         }
     manifest = {
         "schema_version": 1, "code_sha": code_sha, "methods": methods_manifest,
+        "weight_mode": weight_mode, "evaluation_date": single_date.isoformat() if single_date else None,
+        "notes": {
+            "input_timestamp_evidence": "SHA-256の一致は内容を固定するもので、発走前取得の証明にはなりません。取得時刻は元の保存記録で確認が必要です。",
+            "production_reproduction": "整形後の共通入力での一致は、当時の生入力や実行環境を含む現行モデルの完全再現を証明しません。",
+            "selection_minimum": "精算済み30レースは候補選定の最低条件です。本番採用の十分条件ではありません。",
+        },
         "runtime": {"python": platform.python_version(), "pandas": pd.__version__, "numpy": np.__version__},
         "periods": {key: [value.isoformat() if value else None for value in bounds] for key, bounds in periods.items()},
         "forward_status": "previously_evaluated_reconciliation",
         "inputs": {"config_sha256": sha256_file(config_path), "snapshots_sha256": sha256_file(snapshots_path),
                    "results_sha256": sha256_file(results_path), "snapshot_records": len(snapshots),
                    "result_records": len(result_rows), "result_records_without_usable_snapshot": len(results.keys() - races.keys()),
-                   "snapshot_counts": dict(counts)},
+                   "snapshot_counts": dict(counts),
+                   "operational_results_sha256": sha256_file(actual_path) if actual_path else None},
         "coverage": coverage, "optimizer_config": search,
         "optimizer_seed_weight_sha256": normalized_weights_sha256({"__default__": FEATURE_WEIGHTS_SEED}),
         "scoring": {"model": "legacy", "alpha": pipeline.ALPHA, "extra_alpha": pipeline.EXTRA_ALPHA,
                     "dl_probability_blend": pipeline.DL_PROB_BLEND, "dl_rank_blend": pipeline.DL_RANK_BLEND,
                     "dl_score_bonus": pipeline.DL_SCORE_BONUS, "external_inputs": "hash-pinned pre-race archives only"},
         "purchase": {"filter_policy": assessment.policy_version(assessment.load_policy()),
-                     "cohort": "intersection_of_buy_candidates_across_A_to_D_per_baseline",
+                     "cohort": "intersection_of_buy_candidates_across_enabled_methods_per_baseline",
+                     "own_cohort": "buy_candidates_per_method",
+                     "operational": "recorded_actual_purchases_only" if actual_path else "no_ledger_supplied",
                      "ticket": "3連複", "box_size": box_size, "unit_yen": unit, "top_payout_races": high},
-        "validation_selection": {"sort": ["filtered_profit_yen DESC", "filtered_roi_pct DESC", "method ASC"],
+        "validation_selection": {"status": "disabled_single_day" if single_date else "evaluated", "sort": ["filtered_profit_yen DESC", "filtered_roi_pct DESC", "method ASC"],
                                  "result_finalized_date_max": cutoff, "min_settled_races": selection_min, "baselines": candidate},
         "diagnostics": {"variants": diagnostics, "main_parity_candidate": "legacy", "main_parity_tolerance": 1e-9,
                         "main_parity_counts": dict(parity)},

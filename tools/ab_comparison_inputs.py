@@ -249,7 +249,7 @@ def read_results(rows, races):
     return results
 
 
-def load_races(root, rows, periods, builders):
+def load_races(root, rows, periods, builders, evaluation_date=None, include_training=True):
     builders = {
         "legacy": (features.build_features_from_excel, False, True),
         "corrected": (features.build_features_from_excel, True, False),
@@ -269,6 +269,11 @@ def load_races(root, rows, periods, builders):
         if stage is None:
             coverage["outside_periods"] += 1
             excluded.append({"race_id": rid, "reason": "outside_periods"})
+            continue
+        if (stage == "train" and not include_training) or (
+                stage != "train" and evaluation_date and start.date() != evaluation_date):
+            coverage["outside_run_scope"] += 1
+            excluded.append({"race_id": rid, "stage": stage, "reason": "outside_run_scope"})
             continue
         coverage[stage] += 1
         observed = timestamp(row["observed_at"])

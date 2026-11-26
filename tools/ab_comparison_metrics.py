@@ -97,6 +97,8 @@ def summarize(rows, unit, high_payout_n):
     for label, eligible in (
         ("all", [row for row in rows if row["ticket_investment"] is not None]),
         ("filtered", [row for row in rows if row["common_purchase"] and row["ticket_investment"] is not None]),
+        ("own_filtered", [row for row in rows if row["purchase_decision"] == JUDGE_BUY
+                          and row["ticket_investment"] is not None]),
     ):
         highest = sorted(
             (row for row in eligible if row["ticket_payout"]),
@@ -114,17 +116,17 @@ def summarize(rows, unit, high_payout_n):
     return summary
 
 
-def grouped_summary(race_rows, unit, high_payout_n):
+def grouped_summary(race_rows, unit, high_payout_n, stages):
     comparison, breakdown = [], []
-    # 除外する高額払戻レースの和集合で、4方式の投資対象を揃えた感度も計算する。
+    # 除外する高額払戻レースの和集合で、各方式の投資対象を揃えた感度も計算する。
     high_ids = defaultdict(set)
     for (baseline, _), rows in race_rows.items():
-        for stage in ("validation", "forward"):
+        for stage in stages:
             eligible = [r for r in rows if r["stage"] == stage and r["common_purchase"] and r["ticket_payout"]]
             highest = sorted(eligible, key=lambda row: (-row["ticket_payout"], row["race_id"]))[:high_payout_n]
             high_ids[baseline, stage].update(row["race_id"] for row in highest)
     for (baseline, method), rows in race_rows.items():
-        for stage in ("validation", "forward"):
+        for stage in stages:
             cohort = [row for row in rows if row["stage"] == stage]
             fields = {"baseline": baseline, "method": method, "stage": stage}
             removed = high_ids[baseline, stage]
@@ -146,3 +148,29 @@ def grouped_summary(race_rows, unit, high_payout_n):
 
 def common_purchase(decisions):
     return all(decision == JUDGE_BUY for decision in decisions)
+
+
+def operational_summary(race_rows, records, stages):
+    """実購入台帳に記録された購入候補の精算を集計する。"""
+    indexed = {}
+    for record in records:
+        key = (record["baseline"], record["method"], record["race_id"])
+        invested, payout = record["investment_yen"], record["payout_yen"]
+        if (key in indexed or type(invested) is not int or invested <= 0
+                or (payout is not None and (type(payout) is not int or payout < 0))
+                or record["purchase_decision"] != JUDGE_BUY):
+            raise ValueError(f"実購入の台帳行が重複、または購入判定・金額が不正です: {key}")
+        indexed[key] = {"ticket_investment": invested, "ticket_payout": payout}
+    summary = []
+    for (baseline, method), rows in race_rows.items():
+        for stage in stages:
+            cohort = [row for row in rows if row["stage"] == stage]
+            actual = [indexed[baseline, method, row["race_id"]]
+                      for row in cohort if (baseline, method, row["race_id"]) in indexed]
+            summary.append({
+                "baseline": baseline, "method": method, "stage": stage,
+                "comparison_races": len(cohort), "recorded_purchase_races": len(actual),
+                "status": ("recorded" if actual else "no_matching_actual_purchase_records"),
+                **(money(actual) if actual else {}),
+            })
+    return summary
