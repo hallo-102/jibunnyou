@@ -490,18 +490,29 @@ def build_eval_context(
 
 
 def _compute_total_raw_from_context(context: EvalContext, weights_map: WeightsMap) -> np.ndarray:
-    default_weights = weights_map.get("__default__", {})
-    total_raw = context.feature_matrix @ _weight_vector(default_weights)
+    production_arithmetic = context.feat_df.attrs.get("production_score_arithmetic", False)
+
+    def weighted_sum(matrix: np.ndarray, weights: Dict[str, float]) -> np.ndarray:
+        vector = _weight_vector(weights)
+        if not production_arithmetic:
+            return matrix @ vector
+        # Preserve the production sum order for exact score ties during search.
+        total = np.zeros(len(matrix), dtype=float)
+        for column, weight in zip(matrix.T, vector):
+            total += column * weight
+        return total
+
+    total_raw = weighted_sum(context.feature_matrix, weights_map.get("__default__", {}))
 
     for place_name, idx in context.place_indices.items():
         place_weights = weights_map.get(place_name)
         if isinstance(place_weights, dict):
-            total_raw[idx] = context.feature_matrix[idx] @ _weight_vector(place_weights)
+            total_raw[idx] = weighted_sum(context.feature_matrix[idx], place_weights)
 
     for place_surface_key, idx in context.place_surface_indices.items():
         place_surface_weights = weights_map.get(place_surface_key)
         if isinstance(place_surface_weights, dict):
-            total_raw[idx] = context.feature_matrix[idx] @ _weight_vector(place_surface_weights)
+            total_raw[idx] = weighted_sum(context.feature_matrix[idx], place_surface_weights)
 
     return total_raw
 
