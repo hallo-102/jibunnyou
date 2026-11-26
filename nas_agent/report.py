@@ -2,6 +2,7 @@
 import json
 import re
 
+from .audit import EXIT_CODES, REQUIREMENTS
 from .schema import STATES, utcnow
 
 SUMMARY = {"architecture", "python_version", "acceptance", "protected_unchanged", "ready_verified", "input_match",
@@ -9,13 +10,47 @@ SUMMARY = {"architecture", "python_version", "acceptance", "protected_unchanged"
 WORDS = {"aarch64", "arm64", "AMD64", "x86_64", "unknown", "PASS", "PARTIAL", "NOT_AVAILABLE", "MATCH", "MISMATCH"}
 
 
-def public_result(result):
+def audit_summary(source):
     summary = {}
-    for key, value in result.get("summary", {}).items():
+    status = source.get("audit_status")
+    if isinstance(status, str) and (status in EXIT_CODES or status == "invalid_manifest"):
+        summary["audit_status"] = status
+    for key in ("races", "horses", "past_runs", "exit_code"):
+        value = source.get(key)
+        minimum = -255 if key == "exit_code" else 0
+        if type(value) is int and minimum <= value <= 1_000_000_000:
+            summary[key] = value
+    elapsed = source.get("elapsed_seconds")
+    if type(elapsed) in (int, float) and 0 <= elapsed <= 86400:
+        summary["elapsed_seconds"] = elapsed
+    requirements = source.get("requirements")
+    if isinstance(requirements, dict):
+        counts = {}
+        for req in REQUIREMENTS:
+            item = requirements.get(req)
+            if not isinstance(item, dict):
+                continue
+            issues, evaluated = item.get("issues"), item.get("evaluated")
+            if type(issues) is int and type(evaluated) is int and 0 <= issues <= evaluated <= 1_000_000_000:
+                counts[req] = {"issues": issues, "evaluated": evaluated,
+                               "issue_pct": round(100 * issues / evaluated, 3) if evaluated else None}
+        summary["requirements"] = counts
+    return summary
+
+
+def standard_summary(source):
+    summary = {}
+    for key, value in source.items():
         if key not in SUMMARY:
             continue
         if type(value) is bool or (type(value) is int and 0 <= value <= 1000000) or (isinstance(value, str) and (value in WORDS or (key == "python_version" and re.fullmatch(r"\d+\.\d+\.\d+", value)))):
             summary[key] = value
+    return summary
+
+
+def public_result(result, *, audit=False):
+    source = result.get("summary", {})
+    summary = audit_summary(source) if audit else standard_summary(source)
     artifacts = {key: value for key, value in result.get("artifacts_sha256", {}).items()
                  if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", key) and isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)}
     return {"summary": summary, "artifacts_sha256": artifacts, "drive": {"mode": "dry-run", "reference": None}}
@@ -29,7 +64,7 @@ def record(config, row):
             "status": row["status"], "started_at": row["started_at"], "finished_at": row["finished_at"],
             "heartbeat_at": row["heartbeat_at"], "error_code": row["error_code"],
             "state_history": row.get("history", []),
-            **public_result(json.loads(row["result"]))}
+            **public_result(json.loads(row["result"]), audit=job["job_type"] == "full_feature_audit")}
 
 
 def comment(payload):
