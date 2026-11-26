@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import json
 from pathlib import Path
+import socket
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -14,15 +16,23 @@ from .schema import REPOSITORY, Rejected
 
 
 class Unavailable(RuntimeError):
-    def __init__(self, code="GITHUB_UNAVAILABLE", retry_at=None):
+    def __init__(self, code="GITHUB_UNAVAILABLE", retry_at=None, *, http_status=None, rate_limited=False, transport=None):
         super().__init__(code)
         self.code = code
         self.retry_at = retry_at or time.time() + 60
+        self.http_status = http_status
+        self.rate_limited = rate_limited
+        self.transport = transport
+
+    def diagnostic(self, phase):
+        # HTTP本文、URL、認証ヘッダー、例外の原文は保存しない。
+        return {"phase": phase, "code": self.code, "http_status": self.http_status,
+                "rate_limited": self.rate_limited, "transport": self.transport, "retry_at": self.retry_at}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise Unavailable("GITHUB_REDIRECT_REFUSED")
+        raise Unavailable("GITHUB_REDIRECT_REFUSED", http_status=code)
 
 
 class GitHub:
@@ -81,14 +91,33 @@ class GitHub:
                         delay = max(delay, parsedate_to_datetime(retry).timestamp() - time.time())
                     except (TypeError, ValueError):
                         pass
-            if exc.headers.get("X-RateLimit-Remaining") == "0":
-                delay = max(delay, float(exc.headers.get("X-RateLimit-Reset", time.time() + delay)) - time.time() + 1)
+            exhausted = exc.headers.get("X-RateLimit-Remaining") == "0"
+            if exhausted:
+                try:
+                    delay = max(delay, float(exc.headers.get("X-RateLimit-Reset", time.time() + delay)) - time.time() + 1)
+                except (TypeError, ValueError):
+                    pass
             self.retry_at = time.time() + delay
-            code = "GITHUB_AUTH_OR_PERMISSION" if exc.code in {401, 403, 404} else "GITHUB_HTTP_ERROR"
-            raise Unavailable(code, self.retry_at) from None
+            limited = exc.code == 429 or (exc.code == 403 and (exhausted or bool(retry)))
+            if limited:
+                code = "GITHUB_RATE_LIMIT"
+            else:
+                code = "GITHUB_AUTH_OR_PERMISSION" if exc.code in {401, 403, 404} else "GITHUB_HTTP_ERROR"
+            raise Unavailable(code, self.retry_at, http_status=exc.code, rate_limited=limited) from None
         except (OSError, ValueError) as exc:
             self.retry_at = time.time() + 60
-            raise Unavailable(retry_at=self.retry_at) from None
+            reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+            if isinstance(reason, TimeoutError):
+                transport = "timeout"
+            elif isinstance(reason, socket.gaierror):
+                transport = "dns"
+            elif isinstance(reason, ssl.SSLError):
+                transport = "tls"
+            elif isinstance(reason, ValueError):
+                transport = "invalid_response"
+            else:
+                transport = "io"
+            raise Unavailable(retry_at=self.retry_at, transport=transport) from None
 
     def issue(self, number):
         return self.api(f"/repos/{REPOSITORY}/issues/{int(number)}")

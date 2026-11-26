@@ -4,9 +4,11 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 import json
 from pathlib import Path
+import sys
 import time
 
 from .config import load_policy
+from .checkpoint import SmokeInterrupted, run_smoke
 from .files import atomic_json, beneath, single_worker, spool_json, spool_page
 from .github import Unavailable
 from .report import record
@@ -29,7 +31,15 @@ class Worker:
 
     def publish(self, row):
         number = row["issue_number"]
-        atomic_json(beneath(self.spool / "outbox", self.spool / "outbox" / f"{number}.json"), record(self.config, row))
+        pending = "outbox_pending:" + str(number)
+        try:
+            atomic_json(beneath(self.spool / "outbox", self.spool / "outbox" / f"{number}.json"), record(self.config, row))
+        except OSError:
+            # 結果は既にSQLiteに保存済み。端末状態の配信を計算の停止条件にしない。
+            self.state.meta(pending, "1")
+        else:
+            if self.state.meta(pending) == "1":
+                self.state.meta(pending, "0")
 
     def cycle(self):
         with single_worker(Path(self.config["state_dir"]) / "worker.lock"):
@@ -98,7 +108,8 @@ class Worker:
                 live = self.github.issue(number)
                 if live["state"] == "closed" or request(live)[1] != request_hash:
                     continue
-                self.publish(self.state.set(job["job_id"], "RUNNING"))
+                row = self.state.set(job["job_id"], "RUNNING")
+                self.publish(row)
                 last_check = [0.0]
                 deadline = time.monotonic() + policy["limits"]["timeout_seconds"]
 
@@ -112,7 +123,14 @@ class Worker:
                     if time.monotonic() >= deadline:
                         raise Abort("FAILED", "TIMEOUT")
                     if time.monotonic() - last_check[0] >= 15:
-                        current = self.github.issue(number)
+                        try:
+                            current = self.github.issue(number)
+                        except Unavailable as exc:
+                            details = dict(exc.diagnostic("running_issue_recheck"), issue_number=number, job_id=job["job_id"])
+                            self.state.meta("github_failure:" + job["job_id"], json.dumps(details))
+                            self.state.meta("retry_at", exc.retry_at)
+                            print(json.dumps(details), file=sys.stderr)
+                            raise  # 停止指示を確認できない場合の既存の停止条件を維持する。
                         if current["state"] == "closed":
                             raise Abort("CANCELLED", "ISSUE_CLOSED")
                         # 編集で実行パラメータを変えない。新しい本文は次の依頼として再承認が必要。
@@ -120,13 +138,18 @@ class Worker:
                         self.publish(self.state.set(job["job_id"], "RUNNING"))
 
                 try:
-                    result = self.backend.run(job, policy, control)
+                    if job["job_type"] == "checkpoint_smoke":
+                        result = run_smoke(self.config, self.state, row, job, control)
+                    else:
+                        result = self.backend.run(job, policy, control)
                     control()
                 except Abort as exc:
                     row = self.state.set(job["job_id"], exc.state, error=exc.code)
+                except SmokeInterrupted:
+                    row = self.state.set(job["job_id"], "INTERRUPTED", error="SMOKE_CHECKPOINT_INTERRUPTED")
                 except (Exception, KeyboardInterrupt) as exc:
                     code = "GITHUB_UNAVAILABLE" if isinstance(exc, Unavailable) else "HANDLER_FAILED"
-                    if job["job_type"] == "ab_comparison" and isinstance(exc, Rejected):
+                    if job["job_type"] in {"ab_comparison", "checkpoint_smoke"} and isinstance(exc, Rejected):
                         code = str(exc)
                     status = "INTERRUPTED" if isinstance(exc, KeyboardInterrupt) else "FAILED"
                     row = self.state.set(job["job_id"], status, error=code)

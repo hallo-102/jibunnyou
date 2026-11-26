@@ -11,6 +11,7 @@ import sys
 import time
 
 from .backend import AGENT_CODE, Backend, clean_environment
+from .checkpoint import export_smoke
 from .config import load_config, load_policy
 from .files import atomic_json, single_worker, validate_admin_file
 from .github import GitHub, Unavailable
@@ -54,7 +55,7 @@ def admin_approve(config, github, number, expected=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["poll", "worker", "inspect", "approve", "status", "verify-github", "ack-interrupted"])
+    parser.add_argument("command", choices=["poll", "worker", "inspect", "approve", "status", "verify-github", "ack-interrupted", "export-smoke"])
     parser.add_argument("--config", type=Path)
     parser.add_argument("--policy-file", type=Path)
     parser.add_argument("--token-file", type=Path)
@@ -63,6 +64,8 @@ def main():
     parser.add_argument("--issue", type=int)
     parser.add_argument("--expected-hash")
     parser.add_argument("--confirm-build-idle", action="store_true")
+    parser.add_argument("--job-id")
+    parser.add_argument("--export-dir", type=Path)
     args = parser.parse_args()
     if args.command in {"inspect", "approve"}:
         # 管理者用経路。worker設定/私有state/tokenを読まず、管理者自身のread tokenを使う。
@@ -84,9 +87,23 @@ def main():
         role = private_json(args.config)["role"]
     config = load_config(args.config, role)
     verify_install(config)
+    if args.command == "export-smoke":
+        if not args.job_id or not args.export_dir:
+            raise Rejected("EXPORT_REQUIRES_JOB_ID_AND_DIRECTORY")
+        state = State(Path(config["state_dir"]) / "worker.sqlite")
+        print(export_smoke(config, state, args.job_id, args.export_dir))
+        return
     if args.command == "status":
         state = State(Path(config["state_dir"]) / ("worker.sqlite" if role == "worker" else "poller.sqlite"))
-        print(json.dumps({"jobs": state.all(), "last_poll_at": state.meta("last_poll_at"), "last_error": state.meta("last_error"), "last_rejection": state.meta("last_rejection"), "recovery_required": state.meta("recovery_required")}, ensure_ascii=False))
+        rows = state.all()
+        for row in rows:
+            failure = state.meta("github_failure:" + row["job_id"])
+            if failure:
+                row["github_failure"] = json.loads(failure)
+        report_failure = state.meta("last_report_failure")
+        print(json.dumps({"jobs": rows, "last_poll_at": state.meta("last_poll_at"), "last_error": state.meta("last_error"),
+                          "last_rejection": state.meta("last_rejection"), "recovery_required": state.meta("recovery_required"),
+                          "last_report_failure": json.loads(report_failure) if report_failure else None}, ensure_ascii=False))
         return
     if args.command == "ack-interrupted":
         if not args.confirm_build_idle:
@@ -125,7 +142,7 @@ def main():
             component.state.meta("retry_at", exc.retry_at)
             if not args.serve:
                 raise
-            print(json.dumps({"error_code": exc.code, "retry_at": exc.retry_at}), file=sys.stderr)
+            print(json.dumps(exc.diagnostic(role + "_cycle")), file=sys.stderr)
         if not args.serve:
             return
         deadline = max(time.time() + config.get("poll_seconds", 60), github.retry_at)
