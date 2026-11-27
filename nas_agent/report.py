@@ -61,15 +61,16 @@ def public_result(result, *, audit=False):
     return {"summary": summary, "artifacts_sha256": artifacts, "drive": {"mode": "dry-run", "reference": None}}
 
 
-def record(config, row):
+def record(config, row, *, include_pending=False):
     job = json.loads(row["job"])
     assert row["status"] in STATES
+    result = json.loads(row["result"]) if row["status"] != "PENDING_FINALIZATION" or include_pending else {}
     return {"schema_version": 1, "instance_id": config["instance_id"], "issue_number": row["issue_number"],
             "job_id": job["job_id"], "request_hash": row["request_hash"], "commit_sha": job["commit_sha"],
             "status": row["status"], "started_at": row["started_at"], "finished_at": row["finished_at"],
             "heartbeat_at": row["heartbeat_at"], "error_code": row["error_code"],
             "state_history": row.get("history", []),
-            **public_result(json.loads(row["result"]), audit=job["job_type"] == "full_feature_audit")}
+            **public_result(result, audit=job["job_type"] == "full_feature_audit")}
 
 
 def comment(payload):

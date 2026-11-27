@@ -111,7 +111,7 @@ def test_known_rate_reset_defers_running_request(setup):
 @pytest.mark.parametrize("case,status,code", [
     ("closed", "CANCELLED", "ISSUE_CLOSED"),
     ("auth", "FAILED", "GITHUB_AUTH_OR_PERMISSION"),
-    ("final_unavailable", "FAILED", "GITHUB_UNAVAILABLE"),
+    ("final_unavailable", "PENDING_FINALIZATION", "GITHUB_UNAVAILABLE"),
     ("final_changed", "CANCELLED", "ISSUE_REQUEST_CHANGED"),
 ])
 def test_running_and_final_checks_fail_closed(setup, case, status, code):
@@ -137,7 +137,7 @@ def test_running_and_final_checks_fail_closed(setup, case, status, code):
 
     row, calls, state = execute(setup, action, issue_hook)
     assert (row["status"], row["error_code"]) == (status, code)
-    assert json.loads(row["result"]) == {}
+    assert json.loads(row["result"]) == ({"summary": {"races": 1}} if case == "final_unavailable" else {})
     assert calls == [0, 0, clock.elapsed]
     if case == "final_unavailable":
         assert json.loads(state.meta("github_failure:recheck"))["phase"] == "final_issue_recheck"

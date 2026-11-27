@@ -12,10 +12,12 @@ AUDIT_SHA = "83052a799cde0313eed0a17c0f2fc2dd056bc44a"
 COMPARISON_SHA = "31a43fa9aa1d018f78de679d3bc17886f22339dd"
 FIXED_JOB_COMMITS = {"full_feature_audit": AUDIT_SHA, "ab_comparison": COMPARISON_SHA}
 FIELDS = {"schema_version", "job_id", "job_type", "commit_sha", "raceday", "input_id", "expires_at", "scope"}
-TYPES = {"healthcheck", "issue16_acceptance", "full_feature_audit", "ab_comparison", "checkpoint_smoke"}
+TYPES = {"healthcheck", "issue16_acceptance", "full_feature_audit", "ab_comparison", "checkpoint_smoke", "prepare_fixture"}
 RESUME_FIELDS = {"resume_from", "checkpoint_sha256"}
 SMOKE_INTERRUPT_FIELDS = {"interrupt_after_checkpoint"}
 STATES = {"QUEUED", "WAIT_APPROVAL", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"}
+STATES.add("PENDING_FINALIZATION")
+INPUT_JOBS = {"issue16_acceptance", "full_feature_audit", "ab_comparison", "prepare_fixture"}
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"}
 
 
@@ -117,14 +119,15 @@ def authorized(policy, job, request_hash, author_id, *, edited=False):
     fixed = FIXED_JOB_COMMITS.get(job["job_type"])
     if fixed and job["commit_sha"] != fixed:
         return False
-    if job["job_type"] in {"issue16_acceptance", "full_feature_audit", "ab_comparison"}:
+    if job["job_type"] in INPUT_JOBS:
         entry = policy["inputs"].get(job["input_id"])
         if not entry or entry["raceday"] != job["raceday"]:
             return False
     if request_hash in policy["approved_requests"]:
         return True
-    if edited or job["job_type"] == "checkpoint_smoke":
+    if edited or job["job_type"] in {"checkpoint_smoke", "prepare_fixture"}:
         return False  # 同一Issueの編集を広いgrantで再承認しない。
     return any(g["job_type"] == job["job_type"] and g["commit_sha"] == job["commit_sha"]
-               and g["input_id"] == job["input_id"] and g["from_date"] <= job["raceday"] <= g["through_date"]
+               and (g["inputs"].get(job["raceday"]) == job["input_id"] if "inputs" in g
+                    else g["input_id"] == job["input_id"] and g["from_date"] <= job["raceday"] <= g["through_date"])
                and timestamp(g["expires_at"]) > utcnow() for g in policy.get("grants", []))

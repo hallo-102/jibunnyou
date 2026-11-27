@@ -309,7 +309,9 @@ def test_lost_report_response_retries_without_reexecution_or_duplicate_comment(s
     api.lose_post_response = True
     with pytest.raises(Unavailable):
         poller.cycle()
-    assert json.loads(poller.state.meta("last_report_failure"))["phase"] == "report_comment"
+    diagnostic = Path(poll_config["state_dir"]) / "diagnostics/31.json"
+    assert json.loads(diagnostic.read_text()) == json.loads(poller.state.meta("last_report_failure"))
+    assert json.loads(diagnostic.read_text())["phase"] == "report_comment"
     Worker(config, api, backend).cycle()
     poller.cycle()
     assert len(backend.calls) == 1 and len(api.comments) == 1

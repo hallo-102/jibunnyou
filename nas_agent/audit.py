@@ -5,8 +5,9 @@ import hashlib
 import json
 from pathlib import Path
 
-from .files import beneath
-from .schema import Rejected
+from .comparison import sha256
+from .files import beneath, spool_json
+from .schema import Rejected, digest
 
 REQUIREMENTS = tuple(f"D-{i:02d}" for i in range(1, 13))
 EXIT_CODES = {"observed_with_limits": 0, "partial": 0, "no_real_data": 2, "startup_error": 2}
@@ -21,6 +22,34 @@ def verify_fixture(entry):
     if actual != entry["manifest_sha256"]:
         raise Rejected("INPUT_MANIFEST_MISMATCH")
     return root
+
+
+def audit_input_identity(entry, control=lambda: None):
+    root = verify_fixture(entry)
+    # Legacy audit manifests don't enumerate files. Bind the verified result to
+    # the actual directory used by the fixed audit, including its master data.
+    hashes = {}
+    for path in root.rglob("*"):
+        control()
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise Rejected("UNSAFE_AUDIT_INPUT")
+        if path.is_file():
+            hashes[path.relative_to(root).as_posix()] = sha256(path)
+    return digest(hashes)
+
+
+def verify_archive_input(entry):
+    roots = [(entry["root"], entry["manifest_sha256"])]
+    if entry.get("reference_root"):
+        roots.append((entry["reference_root"], entry["reference_manifest_sha256"]))
+    for folder, expected_manifest in roots:
+        root = verify_fixture({"root": folder, "manifest_sha256": expected_manifest})
+        document = spool_json(root, root / "manifest.json", 4 * 1024 * 1024)
+        for name, expected in document["files"].items():
+            if not isinstance(name, str) or Path(name).is_absolute() or ".." in Path(name).parts:
+                raise Rejected("UNSAFE_ARCHIVE_INPUT")
+            if sha256(beneath(root, root / name)) != expected:
+                raise Rejected("INPUT_SHA_MISMATCH")
 
 
 def audit_args(python, source, fixture, output, raceday):
