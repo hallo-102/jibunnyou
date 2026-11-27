@@ -1,10 +1,11 @@
 """パス・運用範囲は管理者ファイルからのみ読み込む。"""
+from datetime import datetime
 import os
 from pathlib import Path
 import re
 
 from .files import admin_json, isolated, private_json
-from .schema import REPOSITORY, TYPES, Rejected
+from .schema import AUDIT_SHA, REPOSITORY, TYPES, Rejected, timestamp
 
 CODE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -66,7 +67,22 @@ def load_policy(path):
     if type(policy.get("allow_build", False)) is not bool:
         raise Rejected("INVALID_BUILD_APPROVAL")
     for grant in policy.get("grants", []):
-        from .schema import timestamp
+        if "inputs" in grant:
+            if (set(grant) != {"job_type", "commit_sha", "inputs", "expires_at"}
+                    or grant["job_type"] != "full_feature_audit" or grant["commit_sha"] != AUDIT_SHA
+                    or AUDIT_SHA not in policy["approved_commits"]
+                    or not isinstance(grant["inputs"], dict) or not 1 <= len(grant["inputs"]) <= 168):
+                raise Rejected("INVALID_PREAPPROVAL_GRANT")
+            for day, input_id in grant["inputs"].items():
+                if (not re.fullmatch(r"\d{8}", day) or not isinstance(input_id, str)
+                        or policy["inputs"].get(input_id, {}).get("raceday") != day):
+                    raise Rejected("INVALID_PREAPPROVAL_GRANT")
+                try:
+                    datetime.strptime(day, "%Y%m%d")
+                except ValueError as exc:
+                    raise Rejected("INVALID_PREAPPROVAL_GRANT") from exc
+            timestamp(grant["expires_at"])
+            continue
         if set(grant) != {"job_type", "commit_sha", "input_id", "from_date", "through_date", "expires_at"} or grant["job_type"] not in TYPES or grant["commit_sha"] not in policy["approved_commits"] or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", grant["input_id"]):
             raise Rejected("INVALID_PREAPPROVAL_GRANT")
         if not all(re.fullmatch(r"\d{8}", grant[key]) for key in ("from_date", "through_date")) or grant["from_date"] > grant["through_date"]:
@@ -86,4 +102,6 @@ def load_policy(path):
     if window is not None:
         if set(window) != {"start", "end"} or not all(re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value) for value in window.values()) or window["start"] >= window["end"]:
             raise Rejected("INVALID_EXECUTION_WINDOW")
+    from .artifacts import validate_exchange
+    validate_exchange(policy)
     return policy

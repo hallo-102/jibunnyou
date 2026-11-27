@@ -71,7 +71,7 @@ def smoke_settings(day):
     }
 
 
-def prepare(index, settled, evidence_path, output, day):
+def prepare(index, settled, evidence_path, output, day, *, evaluation_mode=None, control=lambda: None):
     if output.exists():
         raise FileExistsError(output)
     with TemporaryDirectory(dir=output.parent) as temporary:
@@ -91,6 +91,7 @@ def prepare(index, settled, evidence_path, output, day):
         checked_stamps = set()
         copied = {}
         for row in snapshots:
+            control()
             for key in SNAPSHOT_FILES:
                 if key not in row:
                     continue
@@ -123,19 +124,29 @@ def prepare(index, settled, evidence_path, output, day):
             raise ValueError("確定結果には .xlsx または .json を指定してください")
         validate_rows(snapshots, results, day)
         settings = smoke_settings(day)
+        if evaluation_mode is not None:
+            settings.update(schema_version=2, evaluation_mode=evaluation_mode)
+            for row in snapshots:
+                row.setdefault("input_evidence_grade", "C")
+            if evaluation_mode == "formal" and any(row["input_evidence_grade"] != "A" for row in snapshots):
+                raise ValueError("正式評価には A の発走前入力証跡が必要です")
         for filename, data in (("run.json", settings), ("snapshots.json", snapshots), ("results.json", results)):
             (fixture / filename).write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
                                             encoding="utf-8")
         generated = {name: sha256(fixture / name) for name in sorted(CONTROL_FILES)}
         originals = {**copied, **{path.relative_to(fixture).as_posix(): sha256(path) for path in sorted(evidence.iterdir())}}
         manifest = fixture / "manifest.json"
-        manifest.write_text(json.dumps({"schema_version": 2, "raceday": day.isoformat(),
-                                       "capture_evidence": proof.relative_to(fixture).as_posix(),
-                                       "original_files_sha256": originals, "generated_files_sha256": generated},
-                                       ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        description = {"schema_version": 2, "raceday": day.isoformat(),
+                       "capture_evidence": proof.relative_to(fixture).as_posix(),
+                       "original_files_sha256": originals, "generated_files_sha256": generated}
+        if evaluation_mode is not None:
+            description.update(evaluation_mode=evaluation_mode, input_evidence={
+                row["race_id"]: row["input_evidence_grade"] for row in snapshots
+            })
+        manifest.write_text(json.dumps(description, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         digest = sha256(manifest)
         stage_fixture({"root": fixture, "manifest_sha256": digest}, day.strftime("%Y%m%d"),
-                      Path(temporary) / "validated", lambda: None)
+                      Path(temporary) / "validated", control)
         fixture.rename(output)
     return digest
 

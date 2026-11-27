@@ -50,4 +50,33 @@ worker はマニフェストと各入力の SHA-256 を照合したコピーを�
 ## 実行中の通信と最終確認
 
 WorkerはIssueを認証ありで原則60秒、認証なしで原則120秒ごとに再確認します。一時障害やAPI利用制限時は既存バックオフ・Retry-After・リセット時刻を考慮し、最後の正常確認から300秒を上限とします。取消・期限切れ・認証または権限の異常を検知すると停止します。
-結果確定前にIssueを改めて取得し、承認した依頼ハッシュと一致することを確認します。確認できない場合は失敗をSQLiteに記録し、既存outbox経由で再送します。通信診断には固定エラーコードとHTTPステータスなどを記録します。
+計算が返った時点で結果をSQLiteに保存し、成果物を SHA-256 付きで回収用ディレクトリに確定します。その後、Issue・ローカル承認・期限・入力SHAを再確認し、既存outboxから結果を報告します。一時障害が300秒の猶予を超えると `PENDING_FINALIZATION` と `GITHUB_RECHECK_TIMEOUT` を記録します。通信復旧時やworker再起動時は、保存した成果物から確定を再開します。依頼の変更・取消・期限切れ・権限異常は成功確定を停止します。
+
+
+## 回収とSFTP引き渡し（Issue #49）
+
+- workerの `<state_dir>/recovery/<job_id>/<状態>/` に状態JSON、回収用実行ログ、存在する固定出力、`SHA256SUMS` を保存します。失敗情報は `failure-diagnostics.json`、直近のGitHub通信診断はジョブ直下の `latest-github-diagnostic.json` に保存します。pollerのコメント送信診断はpollerの `<state_dir>/diagnostics/<issue番号>.json` に記録します。
+- 回収用ログは状態履歴と実行ログ末尾最大1 MiBを含み、トークンと認証ヘッダーの値をマスクします。診断には失敗箇所、固定エラーコード、HTTP状態、API利用制限判定、通信種別を記録します。
+- SFTPへの引き渡しは管理者ポリシーに `artifact_exchange` を設定すると有効になります。`root` は既存の交換領域を指すNAS側の絶対パス、`destination` はその配下に管理者が作成した結果ディレクトリです。`jobs` にジョブ種別ごとのファイル名を列挙してください。次の値は設定書式の例です。
+
+```json
+{
+  "root": "/path/to/existing/exchange",
+  "destination": "/path/to/existing/exchange/results",
+  "jobs": {
+    "checkpoint_smoke": ["execution.log", "nas-agent-status.json", "failure-diagnostics.json", "checkpoint.json", "result.json"]
+  }
+}
+```
+
+引き渡し単位は `<job_id>--<小文字の状態>/` で、選択されたファイルと `SHA256SUMS` を一括配置します。猶予を超えて確定保留となった出力には `--pending_finalization` が付き、成功後の出力には `--succeeded` が付きます。結果受領時は各ディレクトリで `sha256sum -c SHA256SUMS` を実行してください。管理者はworkerに結果ディレクトリへの書き込み権限を、SFTP側に発行済み結果の読み取り権限を設定します。setgidで既存の読み取り用グループを継承できます。検証ワークスペースと入力原本はworkerの私有領域や読み取り専用領域に留まります。
+
+## 開催日一覧での監査事前承認
+
+管理者ポリシーの `grants` に、`job_type: "full_feature_audit"`、固定監査SHAの `commit_sha`、期限の `expires_at`、開催日を入力IDへ対応付ける `inputs` を設定します。たとえば `"inputs": {"20260809": "fixture_20260809", "20260816": "fixture_20260816"}` です。各入力IDをポリシーの `inputs` に登録し、開催日とマニフェストSHAを固定します。1件のgrantで最大168開催日を承認できます。各開催日の依頼には一意のジョブIDを指定してください。受付と最終確認では依頼・承認・有効期限を照合し、監査入力の内容は実行前後と確定時にハッシュで照合します。
+
+## 検証用フィクスチャの固定準備ジョブ
+
+`prepare_fixture` は導入済みエージェントの `agent_commit` と個別承認で実行します。入力として管理者が読み取り専用の準備用ルートを登録します。ルートの `manifest.json` は `schema_version: 1`、`evaluation_mode`（`formal` または `reference`）、`files_sha256` を持ちます。ハッシュ一覧には `snapshot_index.json`、`capture_evidence.json`、`settled.xlsx` または `settled.json`、使用する `archive/` 以下のファイルをすべて含めます。入力形式は[既存の準備ツール](../tools/prepare_ab_comparison.md)に準拠します。正式評価では各レースに発走前証跡Aを指定します。参考評価では証跡区分の未指定をCとして記録します。
+
+`validation_python` で準備処理を実行し、`<validation_root>/<job_id>/output/` に既存のA・B比較へ渡せるフィクスチャを保存します。生成マニフェストは、レースごとの `input_evidence`、`evaluation_mode`、`original_files_sha256`、`generated_files_sha256` を記録します。管理者は生成後のマニフェストSHAを、次の比較ジョブの入力ポリシーに登録できます。

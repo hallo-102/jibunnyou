@@ -10,9 +10,11 @@ import signal
 import subprocess
 import sys
 import time
+from tempfile import TemporaryDirectory
 
-from .audit import audit_args, audit_result, verify_fixture
+from .audit import audit_args, audit_input_identity, audit_result, verify_archive_input, verify_fixture
 from .comparison import MAX_JSON_BYTES, comparison_result, stage_fixture
+from .fixture import verify_sources
 from .files import atomic_json, beneath, isolated, spool_json
 from .schema import AUDIT_SHA, COMPARISON_SHA, REPOSITORY, Rejected
 
@@ -109,6 +111,19 @@ class Backend:
                                 capture_output=True, text=True, timeout=20, env=clean_environment(Path(self.config["state_dir"]) / "docker-home"))
         return result.returncode == 0 and not result.stdout.strip()
 
+    def verify_input(self, job, entry, result):
+        kind = job["job_type"]
+        if kind == "ab_comparison":
+            with TemporaryDirectory(dir=self.config["validation_root"]) as temporary:
+                stage_fixture(entry, job["raceday"], Path(temporary) / "input", lambda: None)
+        elif kind == "prepare_fixture":
+            verify_sources(entry)
+        elif kind == "full_feature_audit":
+            if audit_input_identity(entry) != result.get("input_sha256"):
+                raise Rejected("INPUT_SHA_MISMATCH")
+        elif kind == "issue16_acceptance":
+            verify_archive_input(entry)
+
     def run(self, job, policy, control):
         control()
         if job["job_type"] == "healthcheck":
@@ -116,6 +131,23 @@ class Backend:
             if architecture not in {"aarch64", "arm64", "AMD64", "x86_64"}:
                 architecture = "unknown"
             return {"summary": {"architecture": architecture, "python_version": platform.python_version()}, "artifacts_sha256": {}}
+        if job["job_type"] == "prepare_fixture":
+            if job["commit_sha"] != self.config["agent_commit"]:
+                raise Rejected("FIXTURE_AGENT_COMMIT_MISMATCH")
+            entry = policy["inputs"][job["input_id"]]
+            root = Path(self.config["validation_root"])
+            workspace = beneath(root, root / job["job_id"])
+            isolated(workspace, [entry["root"], policy["production_root"], AGENT_CODE, self.config["checkout_root"]])
+            workspace.mkdir(mode=0o700)
+            spec = workspace / "spec.json"
+            atomic_json(spec, {"input": entry, "raceday": job["raceday"]}, mode=0o600)
+            home = workspace / "home"
+            home.mkdir()
+            env = clean_environment(home)
+            env.update(TMPDIR=str(home), TMP=str(home), TEMP=str(home))
+            self.commands.run([self.config["validation_python"], "-m", "nas_agent.fixture", str(spec)],
+                              cwd=AGENT_CODE, env=env, control=control, log=workspace / "execution.log")
+            return spool_json(workspace, workspace / "result.json", MAX_JSON_BYTES)
         if job["job_type"] == "full_feature_audit":
             return self.run_audit(job, policy, control)
         if job["job_type"] == "ab_comparison":
@@ -137,7 +169,6 @@ class Backend:
             # ホスト専用の固定helper。GitHub/PATの環境・ファイルはコンテナへ渡さない。
             self.commands.run([self.config["validation_python"], "-m", "nas_agent.acceptance_host", str(job_dir / "spec.json")],
                               cwd=AGENT_CODE, env=clean_environment(job_dir / "home"), control=control, log=job_dir / "execution.log")
-            control()
             self.verify_checkout(source, job["commit_sha"], clean_environment(job_dir / "home"))
             result = json.loads((job_dir / "result.json").read_text(encoding="utf-8"))
             finished = True
@@ -151,6 +182,7 @@ class Backend:
             raise Rejected("INVALID_AUDIT_COMMIT")
         entry = policy["inputs"][job["input_id"]]
         fixture = verify_fixture(entry)
+        input_sha = audit_input_identity(entry, control)
         root = Path(self.config["validation_root"])
         workspace = beneath(root, root / job["job_id"])
         # policyは起動後にも更新できるため、実行時の入力と出力を照合する。
@@ -168,10 +200,10 @@ class Backend:
         code = self.commands.run(audit_args(self.config["validation_python"], source, fixture, output, job["raceday"]),
                                  cwd=source, env=env, control=control, log=workspace / "execution.log", check=False)
         elapsed = round(time.monotonic() - started, 3)
-        control()
         self.verify_checkout(source, job["commit_sha"], env)
-        verify_fixture(entry)
-        return audit_result(output, code, elapsed)
+        if audit_input_identity(entry) != input_sha:
+            raise Rejected("INPUT_SHA_MISMATCH")
+        return dict(audit_result(output, code, elapsed), input_sha256=input_sha)
 
     def run_comparison(self, job, policy, control):
         if job["commit_sha"] != COMPARISON_SHA:

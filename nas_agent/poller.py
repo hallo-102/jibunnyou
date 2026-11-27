@@ -55,5 +55,10 @@ class Poller:
                 except Unavailable as exc:
                     details = dict(exc.diagnostic("report_comment"), issue_number=payload["issue_number"])
                     self.state.meta("last_report_failure", json.dumps(details))
+                    try:
+                        atomic_json(Path(self.config["state_dir"]) / "diagnostics" / f"{payload['issue_number']}.json",
+                                    details, mode=0o600)
+                    except OSError:
+                        pass  # The structured diagnostic also remains in the poller ledger.
                     raise  # outboxと未送信のrevisionは保持し、次回送信時に再利用する。
                 self.state.meta("report:" + key, json.dumps({"comment_id": comment_id, "revision": revision, "status": payload["status"], "sent_at": time.time()}))

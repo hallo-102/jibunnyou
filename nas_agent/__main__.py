@@ -145,7 +145,12 @@ def main():
             print(json.dumps(exc.diagnostic(role + "_cycle")), file=sys.stderr)
         if not args.serve:
             return
-        deadline = max(time.time() + config.get("poll_seconds", 60), github.retry_at)
+        now = time.time()
+        deadline = now + config.get("poll_seconds", 60)
+        pending, wake_times = component.state.pending_wake_times(now) if role == "worker" else (False, [])
+        deadline = min(deadline, *wake_times) if wake_times else deadline
+        if not pending:
+            deadline = max(deadline, github.retry_at)
         while time.time() < deadline and not stopped[0]:
             time.sleep(min(1, max(0, deadline - time.time())))
 
