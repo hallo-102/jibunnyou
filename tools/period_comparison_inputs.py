@@ -19,7 +19,8 @@ from tools.compare_ab_models import DEFAULT_PERIODS, periods_from, read_json
 from tools.prepare_ab_comparison import SNAPSHOT_FILES, result_rows
 
 PERIODS = periods_from({**DEFAULT_PERIODS, "forward": ["2026-10-24", "2026-11-23"]})
-GRADES = "ABCD"
+RESULT_GRADES = ("A", "B", "C", "unverified", "D")
+CONFIRMED_RESULT_GRADES = RESULT_GRADES[:3]
 
 
 def digest(data):
@@ -188,7 +189,13 @@ class AuditInputs:
             if rid not in roster:
                 grade = "D"
                 input_issues.append("missing_race_roster")
-            elif grade in "AB" and (not chronology or not row.get("input_evidence_source")):
+            elif start is not None and observed is not None and not chronology:
+                grade = "D"
+                input_issues.append("input_at_or_after_start")
+            elif grade in ("A", "B") and (
+                not chronology or not isinstance(row.get("input_evidence_source"), str)
+                or not row["input_evidence_source"].strip()
+            ):
                 grade = "C"
                 input_issues.append("unverified_pre_race_input")
             reasons.update(input_issues)
@@ -206,7 +213,7 @@ class AuditInputs:
                 "input": row, "input_grade": grade, "result": result,
                 "input_issues": input_issues, "result_issues": details,
                 "start_at": start.isoformat() if start else None,
-                "observed_at": observed.isoformat() if chronology else None,
+                "observed_at": observed.isoformat() if observed is not None else None,
                 "pop_observed_at": row.get("popularity_observed_at", row.get("observed_at")) if chronology else None,
             }
         return book, records, reasons
@@ -233,14 +240,14 @@ def audited_result(day, start, raw, proof, numbers):
             missing.append("missing_payout_" + kind)
 
     grade = proof.get("evidence_grade", "A" if proof.get("finalized_at") else "C")
-    if grade not in tuple(GRADES):
+    if grade not in RESULT_GRADES:
         raise ValueError(f"{raw['race_id']}: 結果の証跡区分が不正です")
     row = {**proof, "race_id": raw["race_id"], "race_date": day.isoformat(),
            "finish_top3": top, "payouts": payouts}
     if not top or grade == "D":
         evidence = result_evidence({**row, "evidence_grade": "D"}, start)
-    elif grade == "C" and not proof.get("jra_official_result"):
-        evidence = {**result_evidence({**row, "evidence_grade": "D"}, start), "grade": "C",
+    elif grade == "unverified" or (grade == "C" and not proof.get("jra_official_result")):
+        evidence = {**result_evidence({**row, "evidence_grade": "D"}, start), "grade": "unverified",
                     "race_date": day.isoformat(), "source": proof.get("evidence_source")}
         missing.append("unverified_result_evidence")
     else:

@@ -22,7 +22,9 @@ from tools.ab_comparison_inputs import BET_TYPES, pipeline, score
 from tools.ab_comparison_metrics import JUDGE_BUY, common_purchase, purchase_decision, race_metrics, summarize
 from tools.compare_ab_models import FEAT_COLS, PROJECT_ROOT, baselines_from, read_json, save_csv, save_json
 from tools.period_comparison_features import METHODS, period_builders
-from tools.period_comparison_inputs import AuditInputs, PERIODS, day_features, digest, inventory
+from tools.period_comparison_inputs import (
+    AuditInputs, CONFIRMED_RESULT_GRADES, PERIODS, RESULT_GRADES, day_features, digest, inventory,
+)
 
 UNIT_YEN = 100
 BOX_SIZE = 5
@@ -31,7 +33,8 @@ CACHE_PAIRS = {
     "corrected_cache_effect": ("corrected_with_cache", "M04"),
 }
 FRAME_LABELS = {"legacy": "M00", "corrected": "M04"}
-LABELS = (*METHODS, "legacy_no_cache", "corrected_with_cache")
+CACHE_LABELS = ("legacy_no_cache", "corrected_with_cache")
+LABELS = (*METHODS, *CACHE_LABELS)
 COVERAGE_KEYS = (
     "inventory_races", "feature_races", "finish_and_ticket_payout_matched",
     "all_reported_payouts_matched", "formal_revenue_races", "reference_revenue_races",
@@ -85,12 +88,9 @@ def read_frame(path):
 
 
 def result_cohort(record):
-    left, right = record["input_grade"], record["result"]["evidence"]["grade"]
-    if left == right == "A":
-        return "formal"
-    if left in "AB" and right in "AB":
-        return "reference"
-    return None
+    if record["result"]["evidence"]["grade"] not in CONFIRMED_RESULT_GRADES:
+        return None
+    return {"A": "formal", "B": "reference"}.get(record["input_grade"])
 
 
 def coverage(records, horses, reasons):
@@ -114,7 +114,7 @@ def coverage(records, horses, reasons):
                 counts[f"{cohort}_revenue_races"] += 1
     return {
         **counts, "input_evidence_grade": max(input_grades, default="D"),
-        "result_evidence_grade": max(result_grades, default="D"),
+        "result_evidence_grade": max(result_grades, key=RESULT_GRADES.index, default="D"),
         "input_race_grades": dict(input_grades), "result_race_grades": dict(result_grades),
         "reasons": dict(reasons),
     }
@@ -177,12 +177,12 @@ def score_day(path, features_path, day, stage, weights, assessment):
         result = record["result"] if result_cohort(record) else None
         race = {"race_id": rid, "date": day.isoformat(), "start_at": record["start_at"], "stage": stage,
                 "input_evidence_grade": record["input_grade"], "result_evidence_grade": record["result"]["evidence"]["grade"]}
-        for label in METHODS:
+        for label in LABELS:
             metrics = race_metrics(ranked[label], result, UNIT_YEN, BOX_SIZE)
             if metrics["ticket_payout"] is None:
                 metrics["ticket_investment"] = None
             races.append({
-                **race, "method": label, "horses": len(methods[label]),
+                **race, "method": label, "diagnostic_only": label in CACHE_LABELS, "horses": len(methods[label]),
                 "cohort": result_cohort(record), "common_purchase": shared, "purchase_decision": decisions[label],
                 **metrics, **changes(methods[label], methods["M00"], ranked[label], ranked["M00"],
                                      decisions[label], decisions["M00"]),
@@ -232,15 +232,17 @@ def cohort_performance(rows):
 
 def comparisons(races):
     summary = []
-    for method in METHODS:
+    for method in LABELS:
         method_rows = [row for row in races if row["method"] == method]
         for stage in ("all", *PERIODS):
             cohort = [row for row in method_rows if stage == "all" or stage == row["stage"]]
             for tier in ("formal", "reference"):
                 rows = [row for row in cohort if row["cohort"] == tier]
-                summary.append({"method": method, "stage": stage, "cohort": tier,
+                summary.append({"method": method, "diagnostic_only": method in CACHE_LABELS,
+                                "stage": stage, "cohort": tier,
                                 **cohort_performance(rows), **change_totals(rows)})
-            summary.append({"method": method, "stage": stage, "cohort": "feature_diagnostics",
+            summary.append({"method": method, "diagnostic_only": method in CACHE_LABELS,
+                            "stage": stage, "cohort": "feature_diagnostics",
                             **change_totals(cohort)})
     return summary
 

@@ -15,10 +15,11 @@ from tools.ab_comparison_evidence import timestamp
 from tools.ab_comparison_inputs import features, load_snapshot, score
 from tools.compare_ab_models import FEAT_COLS, PROJECT_ROOT, baselines_from, read_json, save_json
 from tools.period_comparison_features import METHODS, period_builders
-from tools.period_comparison_inputs import AuditInputs, day_features
+from tools.period_comparison_inputs import AuditInputs, audited_result, day_features
 
 
 NAMES = [f"試験馬{i}" for i in range(1, 9)]
+PAYOUTS = {"単勝": {"1": 250}, "複勝": {"1": 150, "2": 160, "3": 170}, "3連複": {"1-2-3": 3000}}
 
 
 def race_workbook(path, day, rid):
@@ -66,9 +67,10 @@ def result_workbook(path, rid, *, pay=True):
 def audit(tmp_path):
     days = []
     combinations = [
-        ("2025-06-14", "B", "A", True), ("2026-07-09", "A", "A", True),
-        ("2026-08-09", "A", "B", True), ("2026-10-23", "A", "A", False),
-        ("2026-10-24", "C", "A", True), ("2026-11-23", "D", "C", False),
+        ("2025-06-14", "B", "C", True), ("2026-07-09", "A", "A", True),
+        ("2026-08-09", "A", "B", True), ("2026-08-15", "A", "C", True),
+        ("2026-08-16", "A", "unverified", True), ("2026-10-23", "A", "A", False),
+        ("2026-10-24", "C", "A", True), ("2026-11-23", "D", "unverified", True),
     ]
     for i, (day, left, right, payout) in enumerate(combinations, 1):
         rid = f"2026050501{i:02}"
@@ -82,7 +84,21 @@ def audit(tmp_path):
                 "input_evidence_source": f"NAS保存証跡 {day}", "start_at": f"{day}T12:00:00+09:00",
                 "observed_at": f"{day}T11:55:00+09:00", "popularity": {str(i): i for i in range(1, 9)},
             })
+        if left == "D":
+            snapshot.update({
+                "input_evidence_grade": "A", "input_evidence_source": "独立保存記録",
+                "start_at": f"{day}T12:00:00+09:00", "observed_at": f"{day}T12:01:00+09:00",
+            })
         proof = {"evidence_grade": right, "evidence_source": f"NAS確定結果 {day}"}
+        if right == "C":
+            proof.update({
+                "evidence_source": f"JRA公式確定結果 {day}",
+                "jra_official_result": {
+                    "race_id": rid, "race_date": day, "finish_top3": [1, 2, 3], "payouts": PAYOUTS,
+                },
+            })
+        if right == "unverified":
+            proof = {}
         if right == "A":
             proof["finalized_at"] = f"{day}T12:30:00+09:00"
         if right == "B":
@@ -95,6 +111,44 @@ def audit(tmp_path):
     path = tmp_path / "inventory.json"
     save_json(path, {"schema_version": 1, "days": days})
     return path, days
+
+
+@pytest.mark.parametrize(("input_grade", "result_grade", "cohort"), [
+    ("B", "C", "reference"), ("A", "B", "formal"), ("A", "C", "formal"),
+    ("A", "unverified", None), ("B", "unverified", None), ("C", "A", None), ("D", "A", None),
+])
+def test_result_cohort(input_grade, result_grade, cohort):
+    record = {"input_grade": input_grade, "result": {"evidence": {"grade": result_grade}}}
+    assert period.result_cohort(record) == cohort
+
+
+def test_official_result_requires_matching_payout():
+    day = date(2026, 8, 9)
+    raw = {"race_id": "202605050101", "finish_top3": [1, 2, 3], "payouts": PAYOUTS}
+    proof = {"evidence_grade": "C", "evidence_source": "JRA公式確定結果"}
+    result, issues = audited_result(day, None, raw, proof, None)
+    assert result["evidence"]["grade"] == "unverified"
+    assert "unverified_result_evidence" in issues
+    proof["jra_official_result"] = {**raw, "race_date": day.isoformat(),
+                                    "payouts": {**PAYOUTS, "3連複": {"1-2-3": 3100}}}
+    with pytest.raises(ValueError, match="JRA公式確定結果との照合に失敗"):
+        audited_result(day, None, raw, proof, None)
+
+
+@pytest.mark.parametrize(("observed_at", "grade"), [(None, "C"), ("12:00:00", "D"), ("12:01:00", "D")])
+def test_input_timestamp_classification(audit, observed_at, grade):
+    inventory, days = audit
+    item = days[-1]
+    rid, proof = next(iter(item["races"].items()))
+    if observed_at is None:
+        proof["input"].pop("observed_at")
+    else:
+        proof["input"]["observed_at"] = f"{item['date']}T{observed_at}+09:00"
+    _, records, reasons = AuditInputs(inventory.parent).day(date.fromisoformat(item["date"]), item)
+    assert records[rid]["input_grade"] == grade
+    if grade == "D":
+        assert records[rid]["observed_at"] == proof["input"]["observed_at"]
+        assert reasons["input_at_or_after_start"] == 1
 
 
 def test_period_isolated_feature_changes(audit):
@@ -172,8 +226,8 @@ def test_period_resume_and_ab_parity(audit, monkeypatch):
         period.run(inventory, output)
     assert count == {"features": len(days), "scores": 1}
     assert read_json(output / "coverage.json")["totals"] == {
-        "inventory_races": 6, "feature_races": 5, "finish_and_ticket_payout_matched": 4,
-        "all_reported_payouts_matched": 4, "formal_revenue_races": 1, "reference_revenue_races": 2,
+        "inventory_races": 8, "feature_races": 7, "finish_and_ticket_payout_matched": 6,
+        "all_reported_payouts_matched": 6, "formal_revenue_races": 3, "reference_revenue_races": 1,
     }
 
     def count_scores(*args):
@@ -188,17 +242,27 @@ def test_period_resume_and_ab_parity(audit, monkeypatch):
     assert manifest["purchase"]["type"] == "simulated_tickets"
     assert manifest["forward_status"] == "previously_evaluated_reconciliation"
     rows = read_json(output / "races.json")
-    assert len(rows) == len({(r["race_id"], r["method"]) for r in rows}) == 5 * len(METHODS)
+    assert len(rows) == len({(r["race_id"], r["method"]) for r in rows}) == 7 * len(period.LABELS)
     comparison = read_json(output / "comparison.json")
     formal = next(r for r in comparison if (r["method"], r["stage"], r["cohort"]) == ("M00", "validation", "formal"))
-    assert formal["all_purchase_races"] == 1
-    assert formal["all_investment_yen"] == 1000
-    assert formal["win_hit_sample"] == 2
+    assert formal["all_purchase_races"] == 3
+    assert formal["all_investment_yen"] == 3000
+    assert formal["win_hit_sample"] == 4
     reference_train = next(r for r in comparison if (r["method"], r["stage"], r["cohort"]) == ("M00", "train", "reference"))
     assert reference_train["all_settled_races"] == 1
-    assert all(r["ticket_payout"] is None for r in rows if r["input_evidence_grade"] == "C")
+    assert all(r["ticket_payout"] is None for r in rows
+               if r["input_evidence_grade"] == "C" or r["result_evidence_grade"] == "unverified")
+    assert not any(r["date"] == days[-1]["date"] for r in rows)
+    assert {r["method"] for r in rows if not r["diagnostic_only"]} == METHODS.keys()
+    for label in ("corrected_with_cache", "legacy_no_cache"):
+        diagnostic = next(r for r in comparison if (r["method"], r["stage"], r["cohort"])
+                          == (label, "validation", "formal"))
+        assert diagnostic["diagnostic_only"]
+        assert diagnostic["all_settled_races"] == formal["all_settled_races"]
+    diagnostics = read_json(output / "cache_diagnostics.json")
+    assert {(row["candidate"], row["reference"]) for row in diagnostics} == set(period.CACHE_PAIRS.values())
 
-    day = days[1]
+    day = next(day for day in days if day["date"] == "2026-08-09")
     rid, proof = next(iter(day["races"].items()))
     snap = {"race_id": rid, "workbook": day["workbook"], "workbook_sha256": day["workbook_sha256"], **proof["input"]}
     load = load_snapshot(inventory.parent, snap, timestamp(snap["start_at"]), Counter(), {
@@ -214,8 +278,8 @@ def test_period_resume_and_ab_parity(audit, monkeypatch):
         actual_scores = period.read_frame(output / "scores" / day["date"] / f"{method}.json.gz")
         pd.testing.assert_frame_equal(actual_scores, expected_scores.reset_index(drop=True), check_exact=True)
 
-    result = {"race_id": rid, **proof["result"], "finish_top3": [1, 2, 3],
-              "payouts": {"単勝": {"1": 250}, "複勝": {"1": 150, "2": 160, "3": 170}, "3連複": {"1-2-3": 3000}}}
+    result = {"race_id": rid, "race_date": day["date"], **proof["result"], "finish_top3": [1, 2, 3],
+              "payouts": PAYOUTS}
     for filename, payload in (("snap.json", [snap]), ("result.json", [result]), ("ab.json", {
         "schema_version": 2, "snapshots": "snap.json", "results": "result.json", "evaluation_date": day["date"],
     })):
@@ -225,7 +289,10 @@ def test_period_resume_and_ab_parity(audit, monkeypatch):
          "--output", str(inventory.parent / "ab")], cwd=PROJECT_ROOT, capture_output=True, text=True,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    ab = next(row for row in read_json(inventory.parent / "ab" / "races.json") if row["method"] == "A")
-    m00 = next(r for r in rows if r["race_id"] == rid and r["method"] == "M00")
-    for field in ("top5", "purchase_decision", "win_hit", "place_hit", "winner_in_top5", "ticket_investment", "ticket_payout"):
-        assert m00[field] == ab[field]
+    ab_rows = read_json(inventory.parent / "ab" / "races.json")
+    for ab_label, method in (("A", "M00"), ("B", "M04")):
+        ab = next(row for row in ab_rows if row["method"] == ab_label)
+        actual = next(r for r in rows if r["race_id"] == rid and r["method"] == method)
+        for field in ("top5", "purchase_decision", "win_hit", "place_hit", "winner_in_top5",
+                      "ticket_investment", "ticket_payout"):
+            assert actual[field] == ab[field]
