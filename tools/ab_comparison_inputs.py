@@ -1,6 +1,7 @@
 """A〜D比較用の発走前スナップショットと確定結果の読込。"""
 
 from collections import Counter
+from datetime import datetime
 import importlib
 from hashlib import sha256
 from io import BytesIO
@@ -45,20 +46,21 @@ def checked_path(root, record, key):
     return path
 
 
-def load_snapshot(root, record, start, counted, builders):
+def load_snapshot(root, record, start, counted, builders, *, book=None):
     """同じ安全な入力を共通特徴量生成関数で2回処理する。"""
     rid = record["race_id"]
-    path = (root / record["workbook"]).resolve()
-    content = path.read_bytes()
-    if sha256(content).hexdigest() != record["workbook_sha256"]:
-        raise ValueError(f"SHA-256不一致: {path}")
-    book = pd.read_excel(BytesIO(content), sheet_name=None, engine="openpyxl")
+    if book is None:
+        path = (root / record["workbook"]).resolve()
+        content = path.read_bytes()
+        if sha256(content).hexdigest() != record["workbook_sha256"]:
+            raise ValueError(f"SHA-256不一致: {path}")
+        book = pd.read_excel(BytesIO(content), sheet_name=None, engine="openpyxl")
     now = book.get(features.NOW_SHEET)
     if now is None or not {"レースID", "馬番", "馬名", "頭数"}.issubset(now.columns):
         raise RosterUnavailable("今走シートまたは必須列がありません")
     ids = features._normalize_rid_series(now["レースID"])
     now = now.loc[ids.eq(rid), list(now.columns.intersection(NOW_COLUMNS))].copy()
-    day = start.date()
+    day = start.date() if isinstance(start, datetime) else start
     now["日付"] = day.strftime("%Y/%m/%d")
     now["馬番"] = now["馬番"].map(integer)
     count = len(now)
@@ -136,8 +138,9 @@ def load_snapshot(root, record, start, counted, builders):
         return None
 
     popularity = record.get("popularity", {})
-    pop_observed = timestamp(record.get("popularity_observed_at", record["observed_at"]))
-    if pop_observed > timestamp(record["observed_at"]):
+    observed = record.get("observed_at")
+    pop_observed = record.get("popularity_observed_at", observed)
+    if (popularity or pop_observed) and timestamp(pop_observed) > timestamp(observed):
         raise ValueError(f"{rid}: 人気の取得が予想スナップショットより後です")
     if set(popularity) - {str(n) for n in now["馬番"]}:
         raise ValueError(f"{rid}: 人気の馬番が出走表にありません")
@@ -213,36 +216,44 @@ def read_results(rows, races, evidence=None, *, starts=None):
         proof = evidence[rid] = result_evidence(row, starts.get(rid))
         if proof["grade"] == "D":
             continue
-        top = row.get("finish_top3")
-        valid_top = (isinstance(top, list) and len(top) == 3
-                     and all(type(n) is int and n > 0 for n in top) and len(set(top)) == 3)
-        if rid in races:
-            if valid_top and set(top) - set(races[rid]["frames"]["legacy"]["馬番"]):
-                raise ValueError(f"{rid}: 確定着順に出走表にない馬番があります")
-        payouts = {}
-        for kind, prices in row.get("payouts", {}).items():
-            if (kind not in BET_TYPES or not isinstance(prices, dict)
-                    or any(not re.fullmatch(r"[1-9]\d*(?:-[1-9]\d*)*", key)
-                           or len(set(key.split("-"))) != BET_TYPES[kind]
-                           or len(key.split("-")) != BET_TYPES[kind]
-                           or tuple(sorted(map(int, key.split("-")))) != tuple(map(int, key.split("-")))
-                           or type(value) is not int or value <= 0 for key, value in prices.items())):
-                raise ValueError(f"{rid}: 払戻形式が不正です ({kind})")
-            if not valid_top:
-                continue
-            expected = {"単勝": {str(top[0])}, "3連複": {"-".join(map(str, sorted(top)))}}
-            if kind == "複勝":
-                possible = [{str(n) for n in top[:2]}, {str(n) for n in top}]
-                if rid in races:
-                    field = len(races[rid]["frames"]["legacy"])
-                    possible = [set() if field < 5 else possible[0 if field < 8 else 1]]
-                if set(prices) not in possible:
-                    raise ValueError(f"{rid}: 複勝払戻の対象馬が不完全です")
-            elif set(prices) != expected[kind]:
-                raise ValueError(f"{rid}: {kind}払戻の組番が不完全です")
-            payouts[kind] = prices
-        results[rid] = {"top": top if valid_top else None, "payouts": payouts, "evidence": proof}
+        roster = races[rid]["frames"]["legacy"]["馬番"] if rid in races else None
+        top, payouts = result_values(row, roster)
+        results[rid] = {"top": top, "payouts": payouts, "evidence": proof}
     return results
+
+
+def result_values(row, roster=None):
+    """確定着順と券種別の払戻が、出走表・組番と整合することを確認する。"""
+    rid = row["race_id"]
+    top = row.get("finish_top3")
+    valid_top = (isinstance(top, list) and len(top) == 3
+                 and all(type(n) is int and n > 0 for n in top) and len(set(top)) == 3)
+    if roster is not None:
+        if valid_top and set(top) - set(roster):
+            raise ValueError(f"{rid}: 確定着順に出走表にない馬番があります")
+    payouts = {}
+    for kind, prices in row.get("payouts", {}).items():
+        if (kind not in BET_TYPES or not isinstance(prices, dict)
+                or any(not re.fullmatch(r"[1-9]\d*(?:-[1-9]\d*)*", key)
+                       or len(set(key.split("-"))) != BET_TYPES[kind]
+                       or len(key.split("-")) != BET_TYPES[kind]
+                       or tuple(sorted(map(int, key.split("-")))) != tuple(map(int, key.split("-")))
+                       or type(value) is not int or value <= 0 for key, value in prices.items())):
+            raise ValueError(f"{rid}: 払戻形式が不正です ({kind})")
+        if not valid_top:
+            continue
+        expected = {"単勝": {str(top[0])}, "3連複": {"-".join(map(str, sorted(top)))}}
+        if kind == "複勝":
+            possible = [{str(n) for n in top[:2]}, {str(n) for n in top}]
+            if roster is not None:
+                field = len(roster)
+                possible = [set() if field < 5 else possible[0 if field < 8 else 1]]
+            if set(prices) not in possible:
+                raise ValueError(f"{rid}: 複勝払戻の対象馬が不完全です")
+        elif set(prices) != expected[kind]:
+            raise ValueError(f"{rid}: {kind}払戻の組番が不完全です")
+        payouts[kind] = prices
+    return top if valid_top else None, payouts
 
 
 def load_races(root, rows, periods, builders, evaluation_date=None, include_training=True,

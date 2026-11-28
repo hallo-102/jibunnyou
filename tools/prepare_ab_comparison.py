@@ -18,7 +18,10 @@ SNAPSHOT_FILES = ("workbook", "race_levels", "base_time", "odds_csv")
 def workbook_results(path, evidence):
     from tokutyouryou_keisann.common import load_results_all_sheets
 
-    entries, payouts = load_results_all_sheets(str(path))
+    return result_rows(*load_results_all_sheets(str(path)), evidence)
+
+
+def result_rows(entries, payouts, evidence):
     for proof in evidence:
         rid = proof["race_id"]
         row = dict(proof)
